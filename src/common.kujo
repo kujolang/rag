@@ -31,6 +31,23 @@ export bool_or := func(value, default_value) {
 	return default_value
 }
 
+export dict_without_key := func(obj, key) {
+	if type(obj) != "dict" {
+		return obj
+	}
+
+	removed := remove(obj, key)
+	if type(removed) != "array" || len(removed) == 0 {
+		return obj
+	}
+
+	next_obj := removed[0]
+	if type(next_obj) != "dict" {
+		return obj
+	}
+	return next_obj
+}
+
 export clamp := func(value, min_value, max_value) {
 	v := value
 	if v < min_value {

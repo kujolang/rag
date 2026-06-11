@@ -122,7 +122,7 @@ func embedding_cache_store(state, key, vector, cfg) {
 	max_entries := embedding_cache_max_entries(cfg)
 	while len(order) > max_entries {
 		evict_key := to_string(order[0])
-		delete entries[evict_key]
+		entries = dict_without_key(entries, evict_key)
 		order = slice(order, 1, len(order))
 	}
 

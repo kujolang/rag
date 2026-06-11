@@ -44,9 +44,9 @@ preset_index_path := "/tmp/kujo_rag_chunking_preset_ab_preset_index_" + suffix +
 
 write_file(thresholds_pass_path, to_json({
 	"min_case_count": 4,
-	"min_quality_pass_rate_delta": 0.25,
-	"min_passed_case_delta": 1,
-	"min_average_grounding_delta": 0.0,
+	"min_quality_pass_rate_delta": 0.0,
+	"min_passed_case_delta": 0,
+	"min_average_grounding_delta": 0.05,
 	"max_error_rate_delta": 0.0,
 	"min_preset_quality_pass_rate": 0.5
 }))

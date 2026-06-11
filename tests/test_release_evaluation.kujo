@@ -10,10 +10,10 @@ result := run_release_evaluation({
 	"recursive": true
 })
 
-assert_true(to_bool(has_key(result, "ok") == 1))
-assert_true(to_bool(has_key(result, "metrics") == 1))
-assert_true(to_bool(has_key(result, "gates") == 1))
-assert_true(to_bool(has_key(result, "dataset_version") == 1))
+assert_true(to_bool(dict_get_or(result, "ok", false) == true))
+assert_true(to_bool(dict_get_or(result, "metrics", {}) != {}))
+assert_true(to_bool(dict_get_or(result, "gates", {}) != {}))
+assert_true(to_bool(dict_get_or(result, "dataset_version", "") != ""))
 assert_true(to_bool(dict_get_or(result, "dataset_version", "") != ""))
 assert_true(to_bool(dict_get_or(dict_get_or(result, "metrics", {}), "total_cases", 0) >= 12 && dict_get_or(dict_get_or(result, "metrics", {}), "avg_grounding", 0.0) >= 0.5 && len(dict_get_or(dict_get_or(result, "metrics", {}), "domain_summary", [])) >= 6))
 assert_true(to_bool(dict_get_or(dict_get_or(result, "gates", {}), "minimum_case_count", false) == true && dict_get_or(dict_get_or(result, "gates", {}), "avg_grounding", false) == true))
