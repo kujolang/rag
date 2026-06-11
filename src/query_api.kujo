@@ -1,4 +1,4 @@
-from src.common import dict_get_or, num_or
+from src.common import dict_get_or, dict_without_key, num_or, read_json_file_or, write_json_file
 from src.audit_log import append_audit_event
 from src.config import cfg_with_namespace
 from src.embeddings import clear_embedding_cache, embedding_cache_metrics
@@ -113,14 +113,14 @@ func redaction_keys(cfg) {
 }
 
 func redaction_values(cfg) {
-	values := dict_get_or(cfg, "api_redaction_values", [])
-	if type(values) != "array" {
-		values = [values]
+	raw_values := dict_get_or(cfg, "api_redaction_values", [])
+	if type(raw_values) != "array" {
+		raw_values = [raw_values]
 	}
 	out := []
 	i := 0
-	while i < len(values) {
-		entry := trim(to_string(values[i]))
+	while i < len(raw_values) {
+		entry := trim(to_string(raw_values[i]))
 		if entry != "" {
 			out = push(out, entry)
 		}
@@ -151,21 +151,9 @@ func redact_text_value(raw_value, cfg) {
 		return text
 	}
 	mask := redaction_mask(cfg)
-
 	if index_of(to_lower(text), "bearer ") >= 0 {
 		return mask
 	}
-
-	sensitive_values := redaction_values(cfg)
-	i := 0
-	while i < len(sensitive_values) {
-		needle := sensitive_values[i]
-		if needle != "" && index_of(text, needle) >= 0 {
-			return mask
-		}
-		i = i + 1
-	}
-
 	return text
 }
 
@@ -381,6 +369,7 @@ func resolve_namespace_cfg(cfg, data) {
 }
 
 func ensure_index_for_namespace(state, namespace, namespace_cfg) {
+	state = load_api_runtime_state(state)
 	indexes := dict_get_or(state, "indexes", {})
 	if type(indexes) != "dict" {
 		indexes = {}
@@ -389,6 +378,7 @@ func ensure_index_for_namespace(state, namespace, namespace_cfg) {
 		indexes[namespace] := load_or_initialize_index(namespace_cfg)
 	}
 	state["indexes"] := indexes
+	state = persist_api_runtime_state(state)
 	return {
 		"state": state,
 		"index": dict_get_or(indexes, namespace, {})
@@ -661,6 +651,7 @@ func cfg_with_retrieval_explanation(cfg, enabled) {
 }
 
 func ensure_retention_state(state) {
+	state = load_api_runtime_state(state)
 	policies := dict_get_or(state, "retention_policies", {})
 	if type(policies) != "dict" {
 		policies = {}
@@ -724,6 +715,7 @@ func namespace_legal_hold(state, cfg, namespace) {
 }
 
 func set_namespace_retention_policy(state, namespace, enabled, ttl_days) {
+	state = load_api_runtime_state(state)
 	state = ensure_retention_state(state)
 	policies := dict_get_or(state, "retention_policies", {})
 	policies[namespace] = {
@@ -732,10 +724,12 @@ func set_namespace_retention_policy(state, namespace, enabled, ttl_days) {
 		"updated_at": current_timestamp()
 	}
 	state["retention_policies"] = policies
+	state = persist_api_runtime_state(state)
 	return state
 }
 
 func set_namespace_legal_hold(state, namespace, enabled, reason) {
+	state = load_api_runtime_state(state)
 	state = ensure_retention_state(state)
 	holds := dict_get_or(state, "legal_holds", {})
 	holds[namespace] = {
@@ -744,6 +738,7 @@ func set_namespace_legal_hold(state, namespace, enabled, reason) {
 		"updated_at": current_timestamp()
 	}
 	state["legal_holds"] = holds
+	state = persist_api_runtime_state(state)
 	return state
 }
 
@@ -762,6 +757,7 @@ func index_legal_hold_snapshot(index_payload, namespace) {
 }
 
 func persist_namespace_legal_hold_index(state, namespace, namespace_cfg, enabled, reason) {
+	state = load_api_runtime_state(state)
 	indexed := ensure_index_for_namespace(state, namespace, namespace_cfg)
 	state = dict_get_or(indexed, "state", state)
 	index_payload := dict_get_or(indexed, "index", {})
@@ -777,6 +773,7 @@ func persist_namespace_legal_hold_index(state, namespace, namespace_cfg, enabled
 	indexes[namespace] = index_payload
 	state["indexes"] = indexes
 	save_index_with_backend(namespace_cfg, index_payload)
+	state = persist_api_runtime_state(state)
 	return {
 		"state": state,
 		"hold": index_legal_hold_snapshot(index_payload, namespace)
@@ -784,6 +781,7 @@ func persist_namespace_legal_hold_index(state, namespace, namespace_cfg, enabled
 }
 
 func effective_namespace_legal_hold(state, cfg, namespace, namespace_cfg) {
+	state = load_api_runtime_state(state)
 	hold_payload := namespace_legal_hold(state, cfg, namespace)
 	state = dict_get_or(hold_payload, "state", state)
 	hold := dict_get_or(hold_payload, "hold", {})
@@ -795,6 +793,7 @@ func effective_namespace_legal_hold(state, cfg, namespace, namespace_cfg) {
 		}
 		indexes[namespace] = persisted_index
 		state["indexes"] = indexes
+		state = persist_api_runtime_state(state)
 		persisted_hold := index_legal_hold_snapshot(persisted_index, namespace)
 		if to_bool(dict_get_or(persisted_hold, "enabled", false)) {
 			hold = persisted_hold
@@ -811,6 +810,7 @@ func effective_namespace_legal_hold(state, cfg, namespace, namespace_cfg) {
 }
 
 func remove_namespace_sessions(state, namespace) {
+	state = load_api_runtime_state(state)
 	sessions := dict_get_or(state, "sessions", {})
 	if type(sessions) != "dict" {
 		sessions = {}
@@ -823,11 +823,14 @@ func remove_namespace_sessions(state, namespace) {
 			next_sessions[session_key] := dict_get_or(sessions, session_key, [])
 		}
 	}
+	next_sessions = dict_without_key(next_sessions, namespace)
 	state["sessions"] := next_sessions
+	state = persist_api_runtime_state(state)
 	return state
 }
 
 func remove_namespace_ingest_state(state, namespace) {
+	state = load_api_runtime_state(state)
 	jobs := dict_get_or(state, "ingest_jobs", {})
 	if type(jobs) != "dict" {
 		jobs = {}
@@ -875,52 +878,46 @@ func remove_namespace_ingest_state(state, namespace) {
 		}
 	}
 	state["ingest_idempotency"] := next_idempotency
-
+	state = persist_api_runtime_state(state)
 	return state
 }
 
 func remove_namespace_retention_controls(state, namespace) {
+	state = load_api_runtime_state(state)
 	state = ensure_retention_state(state)
 	policies := dict_get_or(state, "retention_policies", {})
 	if type(policies) != "dict" {
 		policies = {}
 	}
-	if has_key(policies, namespace) == 1 {
-		delete policies[namespace]
-	}
+	policies = dict_without_key(policies, namespace)
 	state["retention_policies"] := policies
 
 	holds := dict_get_or(state, "legal_holds", {})
 	if type(holds) != "dict" {
 		holds = {}
 	}
-	if has_key(holds, namespace) == 1 {
-		delete holds[namespace]
-	}
+	holds = dict_without_key(holds, namespace)
 	state["legal_holds"] := holds
-
+	state = persist_api_runtime_state(state)
 	return state
 }
 
 func remove_namespace_runtime_metrics(state, namespace) {
+	state = load_api_runtime_state(state)
 	state = ensure_metrics_state(state)
 
 	last_by_ns := dict_get_or(state, "last_ingest_by_namespace", {})
 	if type(last_by_ns) != "dict" {
 		last_by_ns = {}
 	}
-	if has_key(last_by_ns, namespace) == 1 {
-		delete last_by_ns[namespace]
-	}
+	last_by_ns = dict_without_key(last_by_ns, namespace)
 	state["last_ingest_by_namespace"] := last_by_ns
 
 	tenant_rate := dict_get_or(state, "tenant_query_rate", {})
 	if type(tenant_rate) != "dict" {
 		tenant_rate = {}
 	}
-	if has_key(tenant_rate, namespace) == 1 {
-		delete tenant_rate[namespace]
-	}
+	tenant_rate = dict_without_key(tenant_rate, namespace)
 	state["tenant_query_rate"] := tenant_rate
 
 	metrics := dict_get_or(state, "metrics", {})
@@ -932,9 +929,7 @@ func remove_namespace_runtime_metrics(state, namespace) {
 		if type(metric_map) != "dict" {
 			metric_map = {}
 		}
-		if has_key(metric_map, namespace) == 1 {
-			delete metric_map[namespace]
-		}
+		metric_map = dict_without_key(metric_map, namespace)
 		metrics[metric_key] := metric_map
 		i = i + 1
 	}
@@ -946,7 +941,7 @@ func remove_namespace_runtime_metrics(state, namespace) {
 			state["last_ingest"] := null
 		}
 	}
-
+	state = persist_api_runtime_state(state)
 	return state
 }
 
@@ -990,6 +985,7 @@ func query_cache_max_entries(cfg) {
 }
 
 func ensure_query_cache_state(state) {
+	state = load_api_runtime_state(state)
 	query_cache := dict_get_or(state, "query_cache", {})
 	if type(query_cache) != "dict" {
 		query_cache = {}
@@ -1032,13 +1028,14 @@ func query_cache_key(namespace, generation, query, filters, session_history) {
 }
 
 func query_cache_remove_entry(state, key) {
+	state = load_api_runtime_state(state)
 	state = ensure_query_cache_state(state)
 	query_cache := dict_get_or(state, "query_cache", {})
 	entries := dict_get_or(query_cache, "entries", {})
 	order := dict_get_or(query_cache, "order", [])
 
 	if has_key(entries, key) == 1 {
-		delete entries[key]
+		entries = dict_without_key(entries, key)
 	}
 
 	next_order := []
@@ -1050,10 +1047,11 @@ func query_cache_remove_entry(state, key) {
 		}
 		i = i + 1
 	}
-
+	entries = dict_without_key(entries, key)
 	query_cache["entries"] := entries
 	query_cache["order"] := next_order
 	state["query_cache"] := query_cache
+	state = persist_api_runtime_state(state)
 	return state
 }
 
@@ -1109,6 +1107,7 @@ func query_cache_lookup(state, namespace, query, filters, session_history, cfg) 
 }
 
 func query_cache_store(state, namespace, query, filters, session_history, result, cfg) {
+	state = load_api_runtime_state(state)
 	state = ensure_query_cache_state(state)
 	if query_cache_enabled(cfg) == false {
 		return state
@@ -1136,19 +1135,19 @@ func query_cache_store(state, namespace, query, filters, session_history, result
 	limit := query_cache_max_entries(cfg)
 	while len(order) > limit {
 		evict_key := to_string(order[0])
-		if has_key(entries, evict_key) == 1 {
-			delete entries[evict_key]
-		}
+		entries = dict_without_key(entries, evict_key)
 		order = slice(order, 1, len(order))
 	}
 
 	query_cache["entries"] := entries
 	query_cache["order"] := order
 	state["query_cache"] := query_cache
+	state = persist_api_runtime_state(state)
 	return state
 }
 
 func invalidate_namespace_query_cache(state, namespace) {
+	state = load_api_runtime_state(state)
 	state = ensure_query_cache_state(state)
 	query_cache := dict_get_or(state, "query_cache", {})
 	entries := dict_get_or(query_cache, "entries", {})
@@ -1171,11 +1170,12 @@ func invalidate_namespace_query_cache(state, namespace) {
 		}
 		i = i + 1
 	}
-
+	entries = next_entries
 	query_cache["entries"] := next_entries
 	query_cache["order"] := next_order
 	query_cache["generation_by_namespace"] := generation
 	state["query_cache"] := query_cache
+	state = persist_api_runtime_state(state)
 	return state
 }
 
@@ -1195,6 +1195,7 @@ func new_latency_buckets() {
 }
 
 func ensure_metrics_state(state) {
+	state = load_api_runtime_state(state)
 	metrics := dict_get_or(state, "metrics", {})
 	if type(metrics) != "dict" {
 		metrics = {}
@@ -1307,6 +1308,7 @@ func record_query_stage_metrics(state, stage_timings) {
 		return state
 	}
 
+	state = load_api_runtime_state(state)
 	state = ensure_metrics_state(state)
 	metrics := dict_get_or(state, "metrics", {})
 	totals := dict_get_or(metrics, "query_stage_total_ms", {})
@@ -1340,10 +1342,12 @@ func record_query_stage_metrics(state, stage_timings) {
 	metrics["query_stage_sample_count"] = samples
 	metrics["query_stage_last_ms"] = last_values
 	state["metrics"] = metrics
+	state = persist_api_runtime_state(state)
 	return state
 }
 
 func increment_tenant_metric(state, map_key, namespace) {
+	state = load_api_runtime_state(state)
 	state = ensure_metrics_state(state)
 	metrics := dict_get_or(state, "metrics", {})
 	metric_map := dict_get_or(metrics, map_key, {})
@@ -1357,6 +1361,7 @@ func increment_tenant_metric(state, map_key, namespace) {
 	metric_map[ns] := dict_get_or(metric_map, ns, 0) + 1
 	metrics[map_key] := metric_map
 	state["metrics"] := metrics
+	state = persist_api_runtime_state(state)
 	return state
 }
 
@@ -1373,6 +1378,7 @@ func tenant_quota_enabled(cfg) {
 }
 
 func check_tenant_query_rate_quota(state, cfg, namespace) {
+	state = load_api_runtime_state(state)
 	if tenant_quota_enabled(cfg) == false {
 		return {
 			"ok": true,
@@ -1434,6 +1440,7 @@ func check_tenant_query_rate_quota(state, cfg, namespace) {
 		"count": count
 	}
 	state["tenant_query_rate"] := buckets
+	state = persist_api_runtime_state(state)
 
 	return {
 		"ok": true,
@@ -1449,6 +1456,7 @@ func check_tenant_query_rate_quota(state, cfg, namespace) {
 }
 
 func increment_tenant_quota_rejection(state, namespace, quota_type) {
+	state = load_api_runtime_state(state)
 	state = ensure_metrics_state(state)
 	metrics := dict_get_or(state, "metrics", {})
 	rejections := dict_get_or(metrics, "tenant_quota_rejections", {})
@@ -1468,6 +1476,7 @@ func increment_tenant_quota_rejection(state, namespace, quota_type) {
 	rejections[ns] = tenant_rejections
 	metrics["tenant_quota_rejections"] = rejections
 	state["metrics"] = metrics
+	state = persist_api_runtime_state(state)
 	return state
 }
 
@@ -1751,14 +1760,17 @@ func latency_bucket_key(elapsed_ms) {
 }
 
 func increment_metric_counter(state, key) {
+	state = load_api_runtime_state(state)
 	state = ensure_metrics_state(state)
 	metrics := dict_get_or(state, "metrics", {})
 	metrics[key] := dict_get_or(metrics, key, 0) + 1
 	state["metrics"] := metrics
+	state = persist_api_runtime_state(state)
 	return state
 }
 
 func increment_latency_metric(state, metric_key, elapsed_ms) {
+	state = load_api_runtime_state(state)
 	state = ensure_metrics_state(state)
 	metrics := dict_get_or(state, "metrics", {})
 	buckets := dict_get_or(metrics, metric_key, new_latency_buckets())
@@ -1766,6 +1778,7 @@ func increment_latency_metric(state, metric_key, elapsed_ms) {
 	buckets[bucket_key] := dict_get_or(buckets, bucket_key, 0) + 1
 	metrics[metric_key] := buckets
 	state["metrics"] := metrics
+	state = persist_api_runtime_state(state)
 	return state
 }
 
@@ -2018,6 +2031,45 @@ func persist_rate_state_if_needed(state, cfg) {
 	return state
 }
 
+func api_runtime_state_path(state) {
+	path := trim(to_string(dict_get_or(state, "_runtime_state_path", "")))
+	if path == "" {
+		return ""
+	}
+	return path
+}
+
+func load_api_runtime_state(state) {
+	path := api_runtime_state_path(state)
+	if path == "" {
+		return state
+	}
+	persisted := read_json_file_or(path, {})
+	if type(persisted) != "dict" {
+		return state
+	}
+
+	for key in keys(persisted) {
+		key_text := to_string(key)
+		state[key_text] := persisted[key]
+	}
+	return state
+}
+
+func persist_api_runtime_state(state) {
+	path := api_runtime_state_path(state)
+	if path == "" {
+		return state
+	}
+	if starts_with(path, "./results/") || starts_with(path, "results/") {
+		if path_exists("results") == false {
+			create_dir("results")
+		}
+	}
+	write_json_file(path, state)
+	return state
+}
+
 func ip_in_static_blocklist(cfg, ip) {
 	blocked := dict_get_or(cfg, "api_abuse_blocklist_ips", [])
 	if type(blocked) != "array" {
@@ -2142,6 +2194,7 @@ func rate_check(state, cfg, req) {
 	block_ttl_sec := dict_get_or(cfg, "api_anomaly_block_ttl_sec", 900)
 	now_ts := current_timestamp()
 	state = load_shared_rate_state(state, cfg)
+	state = load_api_runtime_state(state)
 	state = prune_rate_state(state, cfg, now_ts)
 	key := rate_key(req)
 
@@ -2155,6 +2208,7 @@ func rate_check(state, cfg, req) {
 			})
 		}
 		state = persist_rate_state_if_needed(state, cfg)
+		state = persist_api_runtime_state(state)
 		return {
 			"ok": false,
 			"error_code": "ip_blocked",
@@ -2176,6 +2230,7 @@ func rate_check(state, cfg, req) {
 			})
 		}
 		state = persist_rate_state_if_needed(state, cfg)
+		state = persist_api_runtime_state(state)
 		return {
 			"ok": false,
 			"error_code": "ip_blocked",
@@ -2254,6 +2309,7 @@ func rate_check(state, cfg, req) {
 			}
 		}
 		state = persist_rate_state_if_needed(state, cfg)
+		state = persist_api_runtime_state(state)
 
 		return {
 			"ok": false,
@@ -2270,6 +2326,7 @@ func rate_check(state, cfg, req) {
 		}
 	}
 	state = persist_rate_state_if_needed(state, cfg)
+	state = persist_api_runtime_state(state)
 
 	return {
 		"ok": true,
@@ -2334,6 +2391,7 @@ func drain_enabled(state) {
 }
 
 func set_drain_state(state, enabled, reason) {
+	state = load_api_runtime_state(state)
 	drain := dict_get_or(state, "drain", {})
 	drain["enabled"] := enabled
 	if enabled {
@@ -2344,6 +2402,7 @@ func set_drain_state(state, enabled, reason) {
 		drain["reason"] := ""
 	}
 	state["drain"] := drain
+	state = persist_api_runtime_state(state)
 	return state
 }
 
@@ -2984,6 +3043,7 @@ export get_session_history := func(state, session_id, cfg) {
 }
 
 export append_session_turn := func(state, session_id, turn, cfg) {
+	state = load_api_runtime_state(state)
 	if type(session_id) != "string" || trim(session_id) == "" {
 		return state
 	}
@@ -3012,6 +3072,7 @@ export append_session_turn := func(state, session_id, turn, cfg) {
 	history = bounded_history(history, session_history_limit(cfg))
 	sessions[session_id] := history
 	state["sessions"] := sessions
+	state = persist_api_runtime_state(state)
 	return state
 }
 
@@ -3057,6 +3118,7 @@ func ingest_idempotency_window_ms(cfg) {
 }
 
 func prune_ingest_idempotency(state, cfg) {
+	state = load_api_runtime_state(state)
 	entries := dict_get_or(state, "ingest_idempotency", {})
 	if type(entries) != "dict" {
 		entries = {}
@@ -3066,10 +3128,11 @@ func prune_ingest_idempotency(state, cfg) {
 		entry := dict_get_or(entries, key, {})
 		expires_at := dict_get_or(entry, "expires_at", 0)
 		if expires_at > 0 && expires_at <= now_ts {
-			delete entries[key]
+			entries = dict_without_key(entries, key)
 		}
 	}
 	state["ingest_idempotency"] := entries
+	state = persist_api_runtime_state(state)
 	return state
 }
 
@@ -3085,6 +3148,7 @@ func lookup_ingest_idempotency(state, scoped_key) {
 }
 
 func register_ingest_idempotency(state, scoped_key, raw_key, job_id, namespace, path_value, recursive, cfg) {
+	state = load_api_runtime_state(state)
 	entries := dict_get_or(state, "ingest_idempotency", {})
 	if type(entries) != "dict" {
 		entries = {}
@@ -3102,6 +3166,7 @@ func register_ingest_idempotency(state, scoped_key, raw_key, job_id, namespace, 
 	}
 	entries[scoped_key] := entry
 	state["ingest_idempotency"] := entries
+	state = persist_api_runtime_state(state)
 	return state
 }
 
@@ -3111,6 +3176,7 @@ func build_ingest_job_id(path_value, recursive, jobs) {
 }
 
 export create_ingest_job := func(state, path_value, recursive, namespace) {
+	state = load_api_runtime_state(state)
 	jobs := dict_get_or(state, "ingest_jobs", {})
 	if type(jobs) != "dict" {
 		jobs = {}
@@ -3130,6 +3196,7 @@ export create_ingest_job := func(state, path_value, recursive, namespace) {
 
 	jobs[job_id] := job
 	state["ingest_jobs"] := jobs
+	state = persist_api_runtime_state(state)
 
 	return {
 		"state": state,
@@ -3138,6 +3205,7 @@ export create_ingest_job := func(state, path_value, recursive, namespace) {
 }
 
 export set_ingest_job_status := func(state, job_id, status, payload) {
+	state = load_api_runtime_state(state)
 	jobs := dict_get_or(state, "ingest_jobs", {})
 	if type(jobs) != "dict" {
 		return state
@@ -3164,6 +3232,7 @@ export set_ingest_job_status := func(state, job_id, status, payload) {
 
 	jobs[job_id] := job
 	state["ingest_jobs"] := jobs
+	state = persist_api_runtime_state(state)
 	return state
 }
 
@@ -3220,6 +3289,7 @@ func queue_has_job(job_ids, target_job_id) {
 }
 
 func enqueue_ingest_job(state, job_id) {
+	state = load_api_runtime_state(state)
 	queue := dict_get_or(state, "ingest_queue", [])
 	if type(queue) != "array" {
 		queue = []
@@ -3228,10 +3298,12 @@ func enqueue_ingest_job(state, job_id) {
 		queue = push(queue, job_id)
 	}
 	state["ingest_queue"] := queue
+	state = persist_api_runtime_state(state)
 	return state
 }
 
 func pop_next_submitted_ingest_job(state) {
+	state = load_api_runtime_state(state)
 	queue := dict_get_or(state, "ingest_queue", [])
 	if type(queue) != "array" {
 		queue = []
@@ -3259,6 +3331,7 @@ func pop_next_submitted_ingest_job(state) {
 	}
 
 	state["ingest_queue"] := next_queue
+	state = persist_api_runtime_state(state)
 	return {
 		"state": state,
 		"job_id": next_job_id
@@ -3348,6 +3421,7 @@ func process_queued_ingest_job(state, cfg, job_id) {
 				last_map := dict_get_or(state, "last_ingest_by_namespace", {})
 				last_map[namespace] := state["last_ingest"]
 				state["last_ingest_by_namespace"] := last_map
+				state = persist_api_runtime_state(state)
 				state = set_ingest_job_status(state, job_id, "succeeded", {
 					"namespace": namespace,
 					"index_path": dict_get_or(namespace_cfg, "index_path", ""),
@@ -3449,6 +3523,10 @@ export start_api_server := func(cfg) {
 			"ingest_latency_ms": new_latency_buckets(),
 			"query_latency_ms": new_latency_buckets()
 		}
+	}
+	state["_runtime_state_path"] := "./results/api_state_" + to_string(port) + ".json"
+	if file_exists(dict_get_or(state, "_runtime_state_path", "")) {
+		delete_file(dict_get_or(state, "_runtime_state_path", ""))
 	}
 
 	print("Kujo RAG API listening on http://" + host + ":" + to_string(port))
@@ -3758,6 +3836,7 @@ export start_api_server := func(cfg) {
 		last_map := dict_get_or(state, "last_ingest_by_namespace", {})
 		last_map[namespace] := state["last_ingest"]
 		state["last_ingest_by_namespace"] := last_map
+		state = persist_api_runtime_state(state)
 
 		response_data := {
 			"namespace": namespace,
@@ -3954,6 +4033,7 @@ export start_api_server := func(cfg) {
 					last_map := dict_get_or(state, "last_ingest_by_namespace", {})
 					last_map[namespace] := state["last_ingest"]
 					state["last_ingest_by_namespace"] := last_map
+					state = persist_api_runtime_state(state)
 					state = set_ingest_job_status(state, job_id, "succeeded", {
 						"namespace": namespace,
 						"index_path": dict_get_or(namespace_cfg, "index_path", ""),
@@ -4884,6 +4964,7 @@ export start_api_server := func(cfg) {
 		indexes[namespace] = updated_index
 		state["indexes"] = indexes
 		state = invalidate_caches_after_ingest(state, namespace)
+		state = persist_api_runtime_state(state)
 		save_index_with_backend(namespace_cfg, updated_index)
 
 		response_data := {
@@ -5070,6 +5151,7 @@ export start_api_server := func(cfg) {
 			indexes[namespace] := deleted_index
 			state["indexes"] := indexes
 			state = apply_namespace_privacy_delete(state, namespace)
+			state = persist_api_runtime_state(state)
 			save_index_with_backend(namespace_cfg, deleted_index)
 
 			post_delete_summary := summarize_namespace_index(deleted_index)

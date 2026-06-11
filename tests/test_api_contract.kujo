@@ -255,7 +255,7 @@ query_large_payload := "{\"query\":\"" + repeat_text("q", 4500) + "\"}"
 query_large_res := post_json(main_port, "/query", query_large_payload)
 print("checkpoint: large query")
 query_large_raw := to_string(query_large_res["stdout"])
-assert_true(contains(query_large_raw, "query_too_large") > 0)
+assert_true(to_bool(index_of(query_large_raw, "query_too_large") >= 0))
 
 _ := stop_server(main_pid)
 
