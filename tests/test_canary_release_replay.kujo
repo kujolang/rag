@@ -1,0 +1,104 @@
+from src.common import dict_get_or
+from src.tests_helpers import assert_true
+
+kujo_bin := env_or("KUJO_BIN", "/path/to/kujo/target/debug/kujo")
+
+func parse_json_safe(text) {
+	payload := {}
+	err := null
+	try {
+		payload := parse_json(text)
+	} except e {
+		err := e
+	}
+	if type(err) != "null" {
+		return {
+			"ok": false,
+			"data": {},
+			"error": to_string(err)
+		}
+	}
+	return {
+		"ok": true,
+		"data": payload,
+		"error": ""
+	}
+}
+
+suffix := to_string(current_timestamp())
+baseline_path := "/tmp/kujo_rag_canary_baseline_" + suffix + ".json"
+accept_pass_path := "/tmp/kujo_rag_canary_accept_pass_" + suffix + ".json"
+accept_fail_path := "/tmp/kujo_rag_canary_accept_fail_" + suffix + ".json"
+output_path := "/tmp/kujo_rag_canary_report_" + suffix + ".json"
+index_path := "/tmp/kujo_rag_canary_index_" + suffix + ".json"
+
+write_file(baseline_path, to_json({
+	"metrics": {
+		"quality_pass_rate": 1.0,
+		"avg_confidence": 0.45,
+		"avg_grounding": 1.0,
+		"error_rate": 0.0,
+		"avg_latency_ms": 1200,
+		"p95_latency_ms": 1700
+	}
+}))
+
+write_file(accept_pass_path, to_json({
+	"min_sample_count": 6,
+	"max_quality_pass_rate_drop": 0.20,
+	"max_avg_confidence_drop": 0.30,
+	"max_avg_grounding_drop": 0.20,
+	"max_error_rate_increase": 0.10,
+	"max_avg_latency_ratio": 2.0,
+	"max_p95_latency_ratio": 2.0
+}))
+
+write_file(accept_fail_path, to_json({
+	"min_sample_count": 6,
+	"max_quality_pass_rate_drop": 0.0,
+	"max_avg_confidence_drop": 0.0,
+	"max_avg_grounding_drop": 0.0,
+	"max_error_rate_increase": 0.0,
+	"max_avg_latency_ratio": 0.01,
+	"max_p95_latency_ratio": 0.01
+}))
+
+cmd_pass := "KUJO_RAG_CANARY_BASELINE_REPORT_PATH=" + baseline_path + " KUJO_RAG_CANARY_ACCEPTANCE_PATH=" + accept_pass_path + " KUJO_RAG_CANARY_OUTPUT_PATH=" + output_path + " KUJO_RAG_CANARY_INDEX_PATH=" + index_path + " " + kujo_bin + " run scripts/run_canary_release_replay.kujo --interpreter"
+pass_res := execute_status(cmd_pass, {"timeout_ms": 240000})
+assert_true(to_bool(type(pass_res) == "struct"))
+assert_true(to_bool(pass_res.success == true))
+
+pass_parsed := parse_json_safe(to_string(pass_res.stdout))
+assert_true(to_bool(dict_get_or(pass_parsed, "ok", false) == true))
+pass_payload := dict_get_or(pass_parsed, "data", {})
+assert_true(to_bool(dict_get_or(pass_payload, "ok", false) == true))
+assert_true(to_bool(dict_get_or(dict_get_or(pass_payload, "gates", {}), "minimum_sample_count", false) == true))
+
+cmd_fail := "KUJO_RAG_CANARY_BASELINE_REPORT_PATH=" + baseline_path + " KUJO_RAG_CANARY_ACCEPTANCE_PATH=" + accept_fail_path + " KUJO_RAG_CANARY_OUTPUT_PATH=" + output_path + " KUJO_RAG_CANARY_INDEX_PATH=" + index_path + " " + kujo_bin + " run scripts/run_canary_release_replay.kujo --interpreter"
+fail_res := execute_status(cmd_fail, {"timeout_ms": 240000})
+assert_true(to_bool(type(fail_res) == "struct"))
+assert_true(to_bool(fail_res.success == false))
+
+fail_parsed := parse_json_safe(to_string(fail_res.stdout))
+assert_true(to_bool(dict_get_or(fail_parsed, "ok", false) == true))
+fail_payload := dict_get_or(fail_parsed, "data", {})
+assert_true(to_bool(dict_get_or(fail_payload, "ok", true) == false))
+assert_true(to_bool(dict_get_or(dict_get_or(fail_payload, "gates", {}), "avg_latency_ratio", true) == false))
+
+if file_exists(baseline_path) {
+	delete_file(baseline_path)
+}
+if file_exists(accept_pass_path) {
+	delete_file(accept_pass_path)
+}
+if file_exists(accept_fail_path) {
+	delete_file(accept_fail_path)
+}
+if file_exists(output_path) {
+	delete_file(output_path)
+}
+if file_exists(index_path) {
+	delete_file(index_path)
+}
+
+print("test_canary_release_replay: ok")

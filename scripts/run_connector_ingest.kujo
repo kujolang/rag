@@ -1,0 +1,96 @@
+from src.connectors import run_connector_pipeline
+from src.rag_engine import build_rag_index, load_or_initialize_index
+from src.config import load_config, ensure_runtime_dirs
+from src.common import dict_get_or, read_json_file_or, write_json_file, bool_or, num_or
+
+func ensure_dir(path_value) {
+	if path_value == "" || path_value == "." {
+		return true
+	}
+	if path_exists(path_value) {
+		return true
+	}
+	parent := dirname(path_value)
+	if parent != "" && parent != "." && parent != path_value {
+		_ = ensure_dir(parent)
+	}
+	create_dir(path_value)
+	return true
+}
+
+func ensure_parent_dir(path_value) {
+	dir := dirname(path_value)
+	if dir == "" || dir == "." {
+		return true
+	}
+	return ensure_dir(dir)
+}
+
+func load_connector_list(config_path) {
+	payload := read_json_file_or(config_path, {
+		"connectors": []
+	})
+	return dict_get_or(payload, "connectors", [])
+}
+
+config_path := env_or("KUJO_RAG_CONNECTOR_CONFIG_PATH", "./config/connectors_ingest_sources.json")
+staging_root := env_or("KUJO_RAG_CONNECTOR_STAGING_ROOT", "./results/connector_sources")
+index_path := env_or("KUJO_RAG_CONNECTOR_INDEX_PATH", "./results/connector_index.json")
+report_path := env_or("KUJO_RAG_CONNECTOR_REPORT_PATH", "./results/connector_ingest_report.json")
+
+_ = ensure_dir(staging_root)
+_ = ensure_parent_dir(index_path)
+_ = ensure_parent_dir(report_path)
+
+connector_list := load_connector_list(config_path)
+connector_pipeline := run_connector_pipeline(connector_list, staging_root)
+
+build_summary := {}
+index_meta := {}
+build_ok := false
+if num_or(dict_get_or(connector_pipeline, "ok_count", 0), 0) > 0 {
+	runtime_cfg := load_config({
+		"index_path": index_path,
+		"chunk_strategy": "line",
+		"chunk_size": 320,
+		"chunk_overlap": 60,
+		"top_k": 4,
+		"embedding_provider": env_or("KUJO_RAG_CONNECTOR_EMBEDDING_PROVIDER", env_or("KUJO_RAG_EMBEDDING_PROVIDER", "hash"))
+	})
+	_ = ensure_runtime_dirs(runtime_cfg)
+	build := build_rag_index(staging_root, runtime_cfg, true)
+	index := load_or_initialize_index(runtime_cfg)
+	build_summary = dict_get_or(build, "summary", {})
+	index_meta = dict_get_or(index, "meta", {})
+	build_ok = true
+}
+
+connector_ok := bool_or(dict_get_or(connector_pipeline, "ok", false), false)
+ok := connector_ok && build_ok
+
+result := {
+	"ok": ok,
+	"generated_at_unix_ms": current_timestamp(),
+	"config_path": config_path,
+	"staging_root": staging_root,
+	"index_path": index_path,
+	"report_path": report_path,
+	"connector_pipeline": connector_pipeline,
+	"build": {
+		"ok": build_ok,
+		"summary": build_summary,
+		"index_meta": index_meta
+	},
+	"gates": {
+		"at_least_one_connector": num_or(dict_get_or(connector_pipeline, "ok_count", 0), 0) > 0,
+		"connector_pipeline_ok": connector_ok,
+		"index_build_ok": build_ok
+	}
+}
+
+write_json_file(report_path, result)
+print(to_json(result))
+
+if ok == false {
+	exit(1)
+}

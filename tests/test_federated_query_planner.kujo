@@ -1,0 +1,126 @@
+from src.rag_engine import query_rag_federated
+from src.common import dict_get_or
+
+func expect(condition, message) {
+	if condition == false {
+		print("FAIL: " + message)
+		exit(1)
+	}
+}
+
+func make_index(prefix, text, term_freq, term_count) {
+	chunk_id := prefix + "_chunk_1"
+	return {
+		"chunks": [{
+			"chunk_id": chunk_id,
+			"doc_id": prefix + "_doc_1",
+			"path": "./" + prefix + ".md",
+			"line_start": 1,
+			"line_end": 1,
+			"text": text,
+			"meta": {
+				"kind": "text",
+				"tags": [prefix]
+			}
+		}],
+		"vectors": [{
+			"chunk_id": chunk_id,
+			"embedding": [0.0, 0.0, 0.0, 0.0]
+		}],
+		"lexical": [{
+			"chunk_id": chunk_id,
+			"term_freq": term_freq,
+			"term_count": term_count
+		}],
+		"meta": {}
+	}
+}
+
+func planner_cfg() {
+	return {
+		"top_k": 5,
+		"hybrid_alpha": 0.0,
+		"hybrid_beta": 1.0,
+		"query_expansion": false,
+		"query_safe_response_enabled": false
+	}
+}
+
+func test_weighted_merge_ordering() {
+	index_alpha := make_index("alpha", "critical outage summary", {
+		"critical": 4,
+		"outage": 4
+	}, 8)
+	index_beta := make_index("beta", "critical outage summary", {
+		"critical": 2,
+		"outage": 2
+	}, 100)
+
+	result := query_rag_federated([
+		{"namespace": "alpha", "index_path": "alpha.json", "weight": 0.2, "primary": true, "index": index_alpha},
+		{"namespace": "beta", "index_path": "beta.json", "weight": 1.0, "primary": false, "index": index_beta}
+	], "critical outage", planner_cfg(), {}, [], {
+		"merge_strategy": "weighted_score",
+		"fallback_policy": "best_effort"
+	})
+
+	citations := dict_get_or(result, "citations", [])
+	expect(len(citations) >= 2, "weighted merge should return citations from both targets")
+	expect(dict_get_or(citations[0], "federation_namespace", "") == "beta", "higher weighted score should rank first")
+	federation := dict_get_or(result, "federation", {})
+	expect(dict_get_or(federation, "selected_mode", "") == "best_effort", "best_effort mode should be reported")
+}
+
+func test_primary_then_all_fallback() {
+	index_primary := make_index("primary", "unrelated content", {"unrelated": 3}, 3)
+	index_secondary := make_index("secondary", "critical outage playbook", {
+		"critical": 3,
+		"outage": 3
+	}, 6)
+
+	result := query_rag_federated([
+		{"namespace": "primary", "index_path": "primary.json", "weight": 1.0, "primary": true, "index": index_primary},
+		{"namespace": "secondary", "index_path": "secondary.json", "weight": 1.0, "primary": false, "index": index_secondary}
+	], "critical outage", planner_cfg(), {}, [], {
+		"merge_strategy": "weighted_score",
+		"fallback_policy": "primary_then_all"
+	})
+
+	citations := dict_get_or(result, "citations", [])
+	expect(len(citations) >= 1, "fallback should use non-primary targets when primary has no matches")
+	expect(dict_get_or(citations[0], "federation_namespace", "") == "secondary", "secondary target should provide fallback citation")
+	federation := dict_get_or(result, "federation", {})
+	expect(dict_get_or(federation, "selected_mode", "") == "fallback_all_targets", "fallback mode should be reported")
+}
+
+func test_deterministic_tiebreak() {
+	index_alpha := make_index("alpha", "critical outage notes", {
+		"critical": 3,
+		"outage": 3
+	}, 6)
+	index_zeta := make_index("zeta", "critical outage notes", {
+		"critical": 3,
+		"outage": 3
+	}, 6)
+
+	result := query_rag_federated([
+		{"namespace": "zeta", "index_path": "zeta.json", "weight": 1.0, "primary": true, "index": index_zeta},
+		{"namespace": "alpha", "index_path": "alpha.json", "weight": 1.0, "primary": false, "index": index_alpha}
+	], "critical outage", planner_cfg(), {}, [], {
+		"merge_strategy": "weighted_score",
+		"fallback_policy": "best_effort"
+	})
+
+	citations := dict_get_or(result, "citations", [])
+	expect(len(citations) >= 2, "tie-break test requires at least two citations")
+	expect(dict_get_or(citations[0], "federation_namespace", "") == "alpha", "ties should sort deterministically by namespace")
+}
+
+func run_all() {
+	test_weighted_merge_ordering()
+	test_primary_then_all_fallback()
+	test_deterministic_tiebreak()
+	print("test_federated_query_planner: ok")
+}
+
+run_all()

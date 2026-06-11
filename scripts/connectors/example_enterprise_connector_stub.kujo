@@ -1,0 +1,105 @@
+from src.common import dict_get_or, str_or, write_json_file, read_json_file_or
+
+func shell_quote(value) {
+	raw := to_string(value)
+	escaped := replace(raw, "'", "'\"'\"'")
+	return "'" + escaped + "'"
+}
+
+func emit_result(result) {
+	output_path := trim(env_or("KUJO_RAG_CONNECTOR_PLUGIN_OUTPUT_PATH", ""))
+	if output_path != "" {
+		write_json_file(output_path, result)
+	}
+	print(to_json(result))
+	if dict_get_or(result, "ok", false) == false {
+		exit(1)
+	}
+}
+
+payload_path := trim(env_or("KUJO_RAG_CONNECTOR_PLUGIN_PAYLOAD_PATH", ""))
+if payload_path == "" || file_exists(payload_path) == false {
+	emit_result({
+		"ok": false,
+		"error": "plugin_payload_missing",
+		"message": "KUJO_RAG_CONNECTOR_PLUGIN_PAYLOAD_PATH must point to a readable JSON file",
+		"details": {
+			"payload_path": payload_path
+		}
+	})
+}
+
+payload := read_json_file_or(payload_path, {})
+connector_id := str_or(dict_get_or(payload, "connector_id", "enterprise_stub"), "enterprise_stub")
+target_dir := str_or(dict_get_or(payload, "target_dir", ""), "")
+plugin_payload := dict_get_or(payload, "payload", {})
+source_path := trim(str_or(dict_get_or(plugin_payload, "source_path", ""), ""))
+source_label := trim(str_or(dict_get_or(plugin_payload, "source_label", "enterprise_stub"), "enterprise_stub"))
+
+if source_path == "" {
+	emit_result({
+		"ok": false,
+		"error": "plugin_source_path_required",
+		"message": "Stub connector payload requires payload.source_path",
+		"details": {
+			"connector_id": connector_id,
+			"source_label": source_label
+		}
+	})
+}
+if path_exists(source_path) == false {
+	emit_result({
+		"ok": false,
+		"error": "plugin_source_not_found",
+		"message": "Configured stub connector source_path does not exist",
+		"details": {
+			"connector_id": connector_id,
+			"source_path": source_path,
+			"source_label": source_label
+		}
+	})
+}
+if target_dir == "" {
+	emit_result({
+		"ok": false,
+		"error": "plugin_target_dir_required",
+		"message": "Connector runtime did not provide target_dir",
+		"details": {
+			"connector_id": connector_id
+		}
+	})
+}
+
+copy_cmd := ""
+if path_is_dir(source_path) {
+	copy_cmd = "cp -R " + shell_quote(source_path + "/.") + " " + shell_quote(target_dir)
+} else {
+	copy_cmd = "cp " + shell_quote(source_path) + " " + shell_quote(target_dir + "/" + basename(source_path))
+}
+copy_res := execute_status(copy_cmd, {"timeout_ms": 120000})
+if type(copy_res) != "struct" || copy_res.success == false {
+	emit_result({
+		"ok": false,
+		"error": "plugin_stage_copy_failed",
+		"message": "Stub connector failed while staging source data",
+		"details": {
+			"connector_id": connector_id,
+			"source_path": source_path,
+			"target_dir": target_dir,
+			"stderr": to_string(dict_get_or(copy_res, "stderr", ""))
+		}
+	})
+}
+
+emit_result({
+	"ok": true,
+	"error": "",
+	"message": "Stub connector staged enterprise source successfully",
+	"details": {
+		"connector_id": connector_id,
+		"source_path": source_path,
+		"source_label": source_label,
+		"target_dir": target_dir,
+		"mode": "plugin_stub"
+	}
+})

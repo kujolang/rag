@@ -1,0 +1,54 @@
+name: containerized-dev-environment-review
+
+on:
+  schedule:
+    - cron: "0 11 * * 5"
+  workflow_dispatch:
+
+jobs:
+  containerized-dev-environment-review:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      KUJO_RUNTIME_REF: "7819d1475e909ec88f510c9927445791ea928836"
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Build Kujo runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          git init /tmp/kujo-runtime
+          git -C /tmp/kujo-runtime remote add origin https://github.com/kujolang/kujo.git
+          git -C /tmp/kujo-runtime fetch --depth 1 origin "$KUJO_RUNTIME_REF"
+          git -C /tmp/kujo-runtime checkout --detach "$KUJO_RUNTIME_REF"
+          cargo build --release --locked --manifest-path /tmp/kujo-runtime/Cargo.toml
+          echo "/tmp/kujo-runtime/target/release" >> "$GITHUB_PATH"
+
+      - name: Verify Kujo runtime
+        run: kujo --version
+
+      - name: Run containerized dev environment review gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          kujo run scripts/run_containerized_dev_environment_review.kujo --interpreter > containerized-dev-environment-status.json
+          cat containerized-dev-environment-status.json
+
+      - name: Upload containerized environment artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: containerized-dev-environment-review
+          path: |
+            containerized-dev-environment-status.json
+            results/environment/containerized_dev_environment_status.json
+            Dockerfile
+            docker-compose.yml
+            .devcontainer/devcontainer.json
+            docs/containerized-dev-environment.md

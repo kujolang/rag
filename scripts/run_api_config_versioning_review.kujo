@@ -1,0 +1,310 @@
+from src.common import dict_get_or, read_json_file_or, str_or, write_json_file
+
+func ensure_dir(path_value) {
+	if path_value == "" || path_value == "." {
+		return true
+	}
+	if path_exists(path_value) {
+		return true
+	}
+	parent := dirname(path_value)
+	if parent != "" && parent != "." && parent != path_value {
+		_ = ensure_dir(parent)
+	}
+	create_dir(path_value)
+	return true
+}
+
+func ensure_parent_dir(path_value) {
+	dir := dirname(path_value)
+	if dir == "" || dir == "." {
+		return true
+	}
+	return ensure_dir(dir)
+}
+
+func normalize_text(value) {
+	return trim(str_or(value, ""))
+}
+
+func count_occurrences(text, token) {
+	if type(text) != "string" || type(token) != "string" {
+		return 0
+	}
+	if token == "" {
+		return 0
+	}
+	parts := split(text, token)
+	if len(parts) == 0 {
+		return 0
+	}
+	return len(parts) - 1
+}
+
+func text_has_token(text, token) {
+	return count_occurrences(text, token) > 0
+}
+
+func parse_non_negative_int(value) {
+	if type(value) == "int" {
+		if value >= 0 {
+			return value
+		}
+		return -1
+	}
+	if type(value) == "float" || type(value) == "string" {
+		err := null
+		parsed := -1
+		try {
+			parsed = parse_int(trim(to_string(value)))
+		} except e {
+			err = e
+		}
+		if type(err) == "null" && parsed >= 0 {
+			return parsed
+		}
+	}
+	return -1
+}
+
+func normalize_semver_text(value) {
+	text := normalize_text(value)
+	if len(text) > 0 && substring(text, 0, 1) == "v" {
+		text = substring(text, 1, len(text))
+	}
+	return text
+}
+
+func semver_major(value) {
+	text := normalize_semver_text(value)
+	parts := split(text, ".")
+	if len(parts) != 3 {
+		return -1
+	}
+	return parse_non_negative_int(parts[0])
+}
+
+func is_semver(value) {
+	text := normalize_semver_text(value)
+	parts := split(text, ".")
+	if len(parts) != 3 {
+		return false
+	}
+	major := parse_non_negative_int(parts[0])
+	minor := parse_non_negative_int(parts[1])
+	patch := parse_non_negative_int(parts[2])
+	return major >= 0 && minor >= 0 && patch >= 0
+}
+
+func contract_major(label) {
+	text := normalize_text(label)
+	if len(text) > 0 && substring(text, 0, 1) == "v" {
+		text = substring(text, 1, len(text))
+	}
+	return parse_non_negative_int(text)
+}
+
+func find_matrix_entry(matrix_entries, release_value) {
+	index := 0
+	while index < len(matrix_entries) {
+		entry := matrix_entries[index]
+		if type(entry) == "dict" {
+			if normalize_text(dict_get_or(entry, "release", "")) == release_value {
+				return true
+			}
+		}
+		index = index + 1
+	}
+	return false
+}
+
+func entry_is_compatible(entry, expected_api_contract, expected_config_schema, current_major) {
+	if type(entry) != "dict" {
+		return false
+	}
+
+	release_value := normalize_text(dict_get_or(entry, "release", ""))
+	api_contract := normalize_text(dict_get_or(entry, "api_contract_version", ""))
+	config_schema := parse_non_negative_int(dict_get_or(entry, "config_schema_version", -1))
+	expected_compatible := dict_get_or(entry, "expected_compatible", true)
+
+	if expected_compatible != true {
+		return false
+	}
+	if is_semver(release_value) == false {
+		return false
+	}
+
+	release_major := semver_major(release_value)
+	if release_major < 0 || current_major < 0 {
+		return false
+	}
+
+	return api_contract == expected_api_contract && contract_major(api_contract) == contract_major(expected_api_contract) && config_schema == expected_config_schema && release_major <= current_major
+}
+
+policy_doc_path := env_or("KUJO_RAG_API_CONFIG_POLICY_DOC_PATH", "./docs/api-config-versioning-policy.md")
+policy_json_path := env_or("KUJO_RAG_API_CONFIG_POLICY_JSON_PATH", "./config/api_config_versioning_policy.json")
+matrix_path := env_or("KUJO_RAG_API_CONFIG_MATRIX_PATH", "./compatibility/api-config/previous_minor_matrix.json")
+migrations_readme_path := env_or("KUJO_RAG_API_CONFIG_MIGRATIONS_README_PATH", "./docs/migrations/README.md")
+migration_template_path := env_or("KUJO_RAG_API_CONFIG_MIGRATION_TEMPLATE_PATH", "./docs/migrations/v2.0.0-template.md")
+openapi_spec_path := env_or("KUJO_RAG_API_CONFIG_OPENAPI_SPEC_PATH", "./openapi/kujo-rag-openapi.json")
+release_process_doc_path := env_or("KUJO_RAG_API_CONFIG_RELEASE_PROCESS_DOC_PATH", "./docs/release-process.md")
+release_artifacts_script_path := env_or("KUJO_RAG_API_CONFIG_RELEASE_ARTIFACTS_SCRIPT_PATH", "./scripts/build_release_artifacts.kujo")
+workflow_path := env_or("KUJO_RAG_API_CONFIG_WORKFLOW_PATH", "./.github/workflows/api-config-versioning-review.yml")
+output_path := env_or("KUJO_RAG_API_CONFIG_OUTPUT_PATH", "./results/api/api_config_versioning_status.json")
+
+_ = ensure_parent_dir(output_path)
+
+policy_doc := ""
+policy_doc_exists := file_exists(policy_doc_path)
+if policy_doc_exists {
+	policy_doc = read_file(policy_doc_path)
+}
+
+policy_doc_defined := policy_doc_exists && text_has_token(policy_doc, "API and Config Versioning Policy") && text_has_token(policy_doc, "Backward Compatibility Rules") && text_has_token(policy_doc, "Deprecation Windows") && text_has_token(policy_doc, "Migration Notes for Breaking Changes") && text_has_token(policy_doc, "Previous Minor Compatibility Matrix")
+
+policy_json := read_json_file_or(policy_json_path, {})
+policy_json_defined := type(policy_json) == "dict" && len(keys(policy_json)) > 0
+
+current_release_semver := normalize_text(dict_get_or(policy_json, "current_release_semver", ""))
+api_contract_version := normalize_text(dict_get_or(policy_json, "api_contract_version", ""))
+config_schema_version := parse_non_negative_int(dict_get_or(policy_json, "config_schema_version", -1))
+policy_fields_defined := is_semver(current_release_semver) && api_contract_version != "" && config_schema_version > 0
+
+windows := dict_get_or(policy_json, "deprecation_windows", {})
+api_days := parse_non_negative_int(dict_get_or(windows, "api_days", -1))
+config_days := parse_non_negative_int(dict_get_or(windows, "config_days", -1))
+deprecation_windows_defined := api_days >= 90 && config_days >= 90
+
+supported_previous_minor := dict_get_or(policy_json, "supported_previous_minor", [])
+supported_previous_minor_declared := type(supported_previous_minor) == "array" && len(supported_previous_minor) > 0
+
+matrix := read_json_file_or(matrix_path, {})
+matrix_entries := dict_get_or(matrix, "entries", [])
+compatibility_matrix_defined := type(matrix) == "dict" && type(matrix_entries) == "array" && len(matrix_entries) > 0
+
+policy_matrix_consistent := false
+if supported_previous_minor_declared && compatibility_matrix_defined {
+	matches := 0
+	supported_index := 0
+	while supported_index < len(supported_previous_minor) {
+		entry := supported_previous_minor[supported_index]
+		release_value := ""
+		if type(entry) == "dict" {
+			release_value = normalize_text(dict_get_or(entry, "release", ""))
+		}
+		if release_value != "" && find_matrix_entry(matrix_entries, release_value) {
+			matches = matches + 1
+		}
+		supported_index = supported_index + 1
+	}
+	policy_matrix_consistent = matches == len(supported_previous_minor)
+}
+
+compatibility_previous_minor_tested := false
+if compatibility_matrix_defined && policy_fields_defined {
+	current_major := semver_major(current_release_semver)
+	passed := 0
+	entry_index := 0
+	while entry_index < len(matrix_entries) {
+		entry := matrix_entries[entry_index]
+		if entry_is_compatible(entry, api_contract_version, config_schema_version, current_major) {
+			passed = passed + 1
+		}
+		entry_index = entry_index + 1
+	}
+	compatibility_previous_minor_tested = passed == len(matrix_entries)
+}
+
+openapi_spec := read_json_file_or(openapi_spec_path, {})
+openapi_info := dict_get_or(openapi_spec, "info", {})
+openapi_semver := normalize_text(dict_get_or(openapi_info, "version", ""))
+openapi_contract := normalize_text(dict_get_or(openapi_info, "x-kujo-rag-api-version", ""))
+openapi_linked := is_semver(openapi_semver) && openapi_contract == api_contract_version
+
+migrations_readme := ""
+migrations_readme_exists := file_exists(migrations_readme_path)
+if migrations_readme_exists {
+	migrations_readme = read_file(migrations_readme_path)
+}
+
+migration_template := ""
+migration_template_exists := file_exists(migration_template_path)
+if migration_template_exists {
+	migration_template = read_file(migration_template_path)
+}
+
+migration_docs_defined := migrations_readme_exists && migration_template_exists && text_has_token(migrations_readme, "Migration Notes for Breaking Changes") && text_has_token(migration_template, "Breaking Change Migration Notes Template")
+
+release_process_doc := ""
+release_process_doc_exists := file_exists(release_process_doc_path)
+if release_process_doc_exists {
+	release_process_doc = read_file(release_process_doc_path)
+}
+
+release_process_linked := release_process_doc_exists && text_has_token(release_process_doc, "run_api_config_versioning_review.kujo") && text_has_token(release_process_doc, "docs/api-config-versioning-policy.md")
+
+release_artifacts_script := ""
+release_artifacts_script_exists := file_exists(release_artifacts_script_path)
+if release_artifacts_script_exists {
+	release_artifacts_script = read_file(release_artifacts_script_path)
+}
+
+release_artifacts_markers_defined := release_artifacts_script_exists && text_has_token(release_artifacts_script, "config_schema_version") && text_has_token(release_artifacts_script, "api_contract_version")
+
+workflow_doc := ""
+workflow_exists := file_exists(workflow_path)
+if workflow_exists {
+	workflow_doc = read_file(workflow_path)
+}
+
+workflow_defined := workflow_exists && text_has_token(workflow_doc, "api-config-versioning-review") && text_has_token(workflow_doc, "run_api_config_versioning_review.kujo") && text_has_token(workflow_doc, "schedule:")
+
+ok := policy_doc_defined && policy_json_defined && policy_fields_defined && deprecation_windows_defined && supported_previous_minor_declared && compatibility_matrix_defined && policy_matrix_consistent && compatibility_previous_minor_tested && openapi_linked && migration_docs_defined && release_process_linked && release_artifacts_markers_defined && workflow_defined
+
+result := {
+	"ok": ok,
+	"generated_at_unix_ms": current_timestamp(),
+	"policy_doc_path": policy_doc_path,
+	"policy_json_path": policy_json_path,
+	"matrix_path": matrix_path,
+	"migrations_readme_path": migrations_readme_path,
+	"migration_template_path": migration_template_path,
+	"openapi_spec_path": openapi_spec_path,
+	"release_process_doc_path": release_process_doc_path,
+	"release_artifacts_script_path": release_artifacts_script_path,
+	"workflow_path": workflow_path,
+	"api_contract_version": api_contract_version,
+	"config_schema_version": config_schema_version,
+	"current_release_semver": current_release_semver,
+	"deprecation_windows": {
+		"api_days": api_days,
+		"config_days": config_days
+	},
+	"gates": {
+		"policy_doc_defined": policy_doc_defined,
+		"policy_json_defined": policy_json_defined,
+		"policy_fields_defined": policy_fields_defined,
+		"deprecation_windows_defined": deprecation_windows_defined,
+		"supported_previous_minor_declared": supported_previous_minor_declared,
+		"compatibility_matrix_defined": compatibility_matrix_defined,
+		"policy_matrix_consistent": policy_matrix_consistent,
+		"compatibility_previous_minor_tested": compatibility_previous_minor_tested,
+		"openapi_linked": openapi_linked,
+		"migration_docs_defined": migration_docs_defined,
+		"release_process_linked": release_process_linked,
+		"release_artifacts_markers_defined": release_artifacts_markers_defined,
+		"workflow_defined": workflow_defined
+	}
+}
+
+if file_exists(output_path) {
+	delete_file(output_path)
+}
+write_json_file(output_path, result)
+print(to_json(result))
+
+if !ok {
+	exit(1)
+}

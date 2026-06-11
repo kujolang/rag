@@ -1,0 +1,102 @@
+from src.rag_engine import query_rag, query_rag_federated
+from src.common import dict_get_or
+
+func expect(condition, message) {
+	if condition == false {
+		print("FAIL: " + message)
+		exit(1)
+	}
+}
+
+func make_index(prefix, text, term_freq, term_count) {
+	chunk_id := prefix + "_chunk_1"
+	return {
+		"chunks": [{
+			"chunk_id": chunk_id,
+			"doc_id": prefix + "_doc_1",
+			"path": "./" + prefix + ".md",
+			"line_start": 1,
+			"line_end": 1,
+			"text": text,
+			"meta": {
+				"kind": "text",
+				"tags": [prefix]
+			}
+		}],
+		"vectors": [{
+			"chunk_id": chunk_id,
+			"embedding": [0.0, 0.0, 0.0, 0.0]
+		}],
+		"lexical": [{
+			"chunk_id": chunk_id,
+			"term_freq": term_freq,
+			"term_count": term_count
+		}],
+		"meta": {}
+	}
+}
+
+func base_cfg() {
+	return {
+		"top_k": 4,
+		"hybrid_alpha": 0.0,
+		"hybrid_beta": 1.0,
+		"query_expansion": false,
+		"query_safe_response_enabled": false,
+		"query_retrieval_explanation_enabled": false
+	}
+}
+
+func test_default_explanation_disabled() {
+	result := query_rag(make_index("default", "critical outage remediation", {"critical": 2, "outage": 2, "remediation": 2}, 6), "critical outage", base_cfg(), {}, [])
+	expect(has_key(result, "retrieval_explanation") == 0, "retrieval explanation should be omitted by default")
+}
+
+func test_explanation_enabled_contract() {
+	cfg := base_cfg()
+	cfg["query_retrieval_explanation_enabled"] = true
+	result := query_rag(make_index("enabled", "critical outage remediation", {"critical": 3, "outage": 3, "remediation": 3}, 9), "critical outage", cfg, {}, [])
+	expect(has_key(result, "retrieval_explanation") == 1, "retrieval explanation should be present when enabled")
+	explanation := dict_get_or(result, "retrieval_explanation", {})
+	expect(dict_get_or(explanation, "enabled", false) == true, "retrieval explanation payload should declare enabled=true")
+	expect(trim(to_string(dict_get_or(explanation, "summary", ""))) != "", "retrieval explanation summary should be non-empty")
+	ranking := dict_get_or(explanation, "ranking", [])
+	expect(len(ranking) >= 1, "retrieval explanation ranking should include top citations")
+	top_rank := dict_get_or(ranking[0], "rank", 0)
+	expect(top_rank == 1, "top explanation rank should start at 1")
+	expect(trim(to_string(dict_get_or(ranking[0], "reason", ""))) != "", "top ranking entry should include rationale")
+}
+
+func test_federated_explanation_contract() {
+	cfg := base_cfg()
+	cfg["query_retrieval_explanation_enabled"] = true
+	targets := [{
+		"namespace": "alpha",
+		"index_path": "./alpha.json",
+		"weight": 1.0,
+		"primary": true,
+		"index": make_index("alpha", "critical outage alpha", {"critical": 2, "outage": 2}, 4)
+	}, {
+		"namespace": "beta",
+		"index_path": "./beta.json",
+		"weight": 0.7,
+		"primary": false,
+		"index": make_index("beta", "critical outage beta", {"critical": 2, "outage": 2}, 4)
+	}]
+	result := query_rag_federated(targets, "critical outage", cfg, {}, [], {
+		"merge_strategy": "weighted_score",
+		"fallback_policy": "best_effort"
+	})
+	explanation := dict_get_or(result, "retrieval_explanation", {})
+	summary := to_string(dict_get_or(explanation, "summary", ""))
+	expect(index_of(to_lower(summary), "weighted") >= 0, "federated explanation summary should mention weighted ranking")
+}
+
+func run_all() {
+	test_default_explanation_disabled()
+	test_explanation_enabled_contract()
+	test_federated_explanation_contract()
+	print("test_retrieval_explanation_metadata: ok")
+}
+
+run_all()

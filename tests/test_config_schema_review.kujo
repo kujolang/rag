@@ -1,0 +1,86 @@
+from src.common import dict_get_or, read_json_file_or
+from src.tests_helpers import assert_true
+
+kujo_bin := env_or("KUJO_BIN", "/path/to/kujo/target/debug/kujo")
+suffix := to_string(current_timestamp())
+
+schema_json_path := "/tmp/kujo_rag_config_schema_" + suffix + ".json"
+schema_doc_path := "/tmp/kujo_rag_config_schema_doc_" + suffix + ".md"
+examples_path := "/tmp/kujo_rag_config_examples_" + suffix + ".json"
+release_process_doc_path := "/tmp/kujo_rag_config_release_process_" + suffix + ".md"
+workflow_path := "/tmp/kujo_rag_config_workflow_" + suffix + ".yml"
+output_valid_path := "/tmp/kujo_rag_config_schema_status_valid_" + suffix + ".json"
+output_invalid_path := "/tmp/kujo_rag_config_schema_status_invalid_" + suffix + ".json"
+
+examples := {
+	"version": "1.0",
+	"examples": [
+		{
+			"name": "invalid_api_port",
+			"overrides": {
+				"api_port": 70000
+			},
+			"expected_error_codes": [
+				"api_port_out_of_range"
+			]
+		}
+	]
+}
+write_file(examples_path, to_json(examples))
+
+write_file(release_process_doc_path, "# Release Process\n\nrun_config_schema_review.kujo\nSee docs/config-schema-reference.md\n")
+write_file(workflow_path, "name: config-schema-review\non:\n  schedule:\n    - cron: '0 10 * * 4'\njobs:\n  review:\n    steps:\n      - run: kujo run scripts/run_config_schema_review.kujo --interpreter\n")
+
+valid_cmd := "KUJO_RAG_CONFIG_SCHEMA_JSON_PATH=" + schema_json_path + " KUJO_RAG_CONFIG_SCHEMA_DOC_PATH=" + schema_doc_path + " KUJO_RAG_CONFIG_VALIDATION_EXAMPLES_PATH=" + examples_path + " KUJO_RAG_CONFIG_SCHEMA_RELEASE_PROCESS_DOC_PATH=" + release_process_doc_path + " KUJO_RAG_CONFIG_SCHEMA_WORKFLOW_PATH=" + workflow_path + " KUJO_RAG_CONFIG_SCHEMA_OUTPUT_PATH=" + output_valid_path + " KUJO_RAG_CONFIG_SCHEMA_REGENERATE=true " + kujo_bin + " run scripts/run_config_schema_review.kujo --interpreter"
+valid_res := execute_status(valid_cmd, {"timeout_ms": 240000})
+assert_true(to_bool(type(valid_res) == "struct"))
+assert_true(to_bool(valid_res.success == true))
+
+valid_payload := read_json_file_or(output_valid_path, {})
+assert_true(to_bool(dict_get_or(valid_payload, "ok", false) == true))
+valid_gates := dict_get_or(valid_payload, "gates", {})
+assert_true(to_bool(dict_get_or(valid_gates, "schema_coverage_ok", false) == true))
+assert_true(to_bool(dict_get_or(valid_gates, "examples_validation_ok", false) == true))
+assert_true(to_bool(dict_get_or(valid_gates, "schema_doc_coverage_ok", false) == true))
+
+if file_exists(schema_json_path) {
+	delete_file(schema_json_path)
+}
+write_file(schema_json_path, to_json({
+	"version": "1.0",
+	"entries": []
+}))
+
+invalid_cmd := "KUJO_RAG_CONFIG_SCHEMA_JSON_PATH=" + schema_json_path + " KUJO_RAG_CONFIG_SCHEMA_DOC_PATH=" + schema_doc_path + " KUJO_RAG_CONFIG_VALIDATION_EXAMPLES_PATH=" + examples_path + " KUJO_RAG_CONFIG_SCHEMA_RELEASE_PROCESS_DOC_PATH=" + release_process_doc_path + " KUJO_RAG_CONFIG_SCHEMA_WORKFLOW_PATH=" + workflow_path + " KUJO_RAG_CONFIG_SCHEMA_OUTPUT_PATH=" + output_invalid_path + " " + kujo_bin + " run scripts/run_config_schema_review.kujo --interpreter"
+invalid_res := execute_status(invalid_cmd, {"timeout_ms": 240000})
+assert_true(to_bool(type(invalid_res) == "struct"))
+assert_true(to_bool(invalid_res.success == false))
+
+invalid_payload := read_json_file_or(output_invalid_path, {})
+assert_true(to_bool(dict_get_or(invalid_payload, "ok", true) == false))
+invalid_gates := dict_get_or(invalid_payload, "gates", {})
+assert_true(to_bool(dict_get_or(invalid_gates, "schema_defined", true) == false))
+
+if file_exists(schema_json_path) {
+	delete_file(schema_json_path)
+}
+if file_exists(schema_doc_path) {
+	delete_file(schema_doc_path)
+}
+if file_exists(examples_path) {
+	delete_file(examples_path)
+}
+if file_exists(release_process_doc_path) {
+	delete_file(release_process_doc_path)
+}
+if file_exists(workflow_path) {
+	delete_file(workflow_path)
+}
+if file_exists(output_valid_path) {
+	delete_file(output_valid_path)
+}
+if file_exists(output_invalid_path) {
+	delete_file(output_invalid_path)
+}
+
+print("test_config_schema_review: ok")

@@ -1,0 +1,106 @@
+from src.common import dict_get_or
+from src.tests_helpers import assert_true
+
+kujo_bin := env_or("KUJO_BIN", "/path/to/kujo/target/debug/kujo")
+
+func parse_json_safe(text) {
+	payload := {}
+	err := null
+	try {
+		payload := parse_json(text)
+	} except e {
+		err := e
+	}
+	if type(err) != "null" {
+		return {
+			"ok": false,
+			"data": {},
+			"error": to_string(err)
+		}
+	}
+	return {
+		"ok": true,
+		"data": payload,
+		"error": ""
+	}
+}
+
+suffix := to_string(current_timestamp())
+thresholds_pass_path := "/tmp/kujo_rag_multilingual_thresholds_pass_" + suffix + ".json"
+thresholds_fail_path := "/tmp/kujo_rag_multilingual_thresholds_fail_" + suffix + ".json"
+output_path := "/tmp/kujo_rag_multilingual_report_" + suffix + ".json"
+index_path := "/tmp/kujo_rag_multilingual_index_" + suffix + ".json"
+
+write_file(thresholds_pass_path, to_json({
+	"release_eval_thresholds": {
+		"min_quality_pass_rate": 0.875,
+		"max_error_rate": 0.0,
+		"max_avg_latency_ms": 10000,
+		"max_p95_latency_ms": 20000,
+		"min_average_confidence": 0.25,
+		"min_average_grounding": 0.5,
+		"min_case_count": 8
+	},
+	"language_thresholds": {
+		"min_language_count": 4,
+		"required_languages": ["english", "spanish", "french", "german"],
+		"min_language_quality_pass_rate": 0.75,
+		"min_non_english_quality_pass_rate": 0.75,
+		"min_non_english_case_count": 3
+	}
+}))
+
+write_file(thresholds_fail_path, to_json({
+	"release_eval_thresholds": {
+		"min_quality_pass_rate": 0.875,
+		"max_error_rate": 0.0,
+		"max_avg_latency_ms": 10000,
+		"max_p95_latency_ms": 20000,
+		"min_average_confidence": 0.25,
+		"min_average_grounding": 0.5,
+		"min_case_count": 8
+	},
+	"language_thresholds": {
+		"min_language_count": 5,
+		"required_languages": ["english", "spanish", "french", "german", "italian"],
+		"min_language_quality_pass_rate": 0.75,
+		"min_non_english_quality_pass_rate": 0.75,
+		"min_non_english_case_count": 3
+	}
+}))
+
+cmd_pass := "KUJO_RAG_MULTILINGUAL_EVAL_THRESHOLDS_PATH=" + thresholds_pass_path + " KUJO_RAG_MULTILINGUAL_EVAL_OUTPUT_PATH=" + output_path + " KUJO_RAG_MULTILINGUAL_EVAL_INDEX_PATH=" + index_path + " " + kujo_bin + " run scripts/run_multilingual_release_evaluation.kujo --interpreter"
+pass_res := execute_status(cmd_pass, {"timeout_ms": 240000})
+assert_true(to_bool(type(pass_res) == "struct"))
+assert_true(to_bool(pass_res.success == true))
+pass_parsed := parse_json_safe(to_string(pass_res.stdout))
+assert_true(to_bool(dict_get_or(pass_parsed, "ok", false) == true))
+pass_payload := dict_get_or(pass_parsed, "data", {})
+assert_true(to_bool(dict_get_or(pass_payload, "ok", false) == true))
+assert_true(to_bool(dict_get_or(dict_get_or(pass_payload, "gates", {}), "required_languages", false) == true))
+assert_true(to_bool(dict_get_or(dict_get_or(pass_payload, "gates", {}), "non_english_quality_pass_rate", false) == true))
+
+cmd_fail := "KUJO_RAG_MULTILINGUAL_EVAL_THRESHOLDS_PATH=" + thresholds_fail_path + " KUJO_RAG_MULTILINGUAL_EVAL_OUTPUT_PATH=" + output_path + " KUJO_RAG_MULTILINGUAL_EVAL_INDEX_PATH=" + index_path + " " + kujo_bin + " run scripts/run_multilingual_release_evaluation.kujo --interpreter"
+fail_res := execute_status(cmd_fail, {"timeout_ms": 240000})
+assert_true(to_bool(type(fail_res) == "struct"))
+assert_true(to_bool(fail_res.success == false))
+fail_parsed := parse_json_safe(to_string(fail_res.stdout))
+assert_true(to_bool(dict_get_or(fail_parsed, "ok", false) == true))
+fail_payload := dict_get_or(fail_parsed, "data", {})
+assert_true(to_bool(dict_get_or(fail_payload, "ok", true) == false))
+assert_true(to_bool(dict_get_or(dict_get_or(fail_payload, "gates", {}), "required_languages", true) == false))
+
+if file_exists(thresholds_pass_path) {
+	delete_file(thresholds_pass_path)
+}
+if file_exists(thresholds_fail_path) {
+	delete_file(thresholds_fail_path)
+}
+if file_exists(output_path) {
+	delete_file(output_path)
+}
+if file_exists(index_path) {
+	delete_file(index_path)
+}
+
+print("test_multilingual_release_evaluation: ok")

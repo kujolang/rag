@@ -1,0 +1,281 @@
+from src.release_eval import run_release_evaluation
+from src.common import dict_get_or, read_json_file_or, write_json_file, num_or, str_or
+
+func ensure_dir(path_value) {
+	if path_value == "" || path_value == "." {
+		return true
+	}
+	if path_exists(path_value) {
+		return true
+	}
+	parent := dirname(path_value)
+	if parent != "" && parent != "." && parent != path_value {
+		_ = ensure_dir(parent)
+	}
+	create_dir(path_value)
+	return true
+}
+
+func ensure_parent_dir(path_value) {
+	dir := dirname(path_value)
+	if dir == "" || dir == "." {
+		return true
+	}
+	return ensure_dir(dir)
+}
+
+func parse_json_dict_or(raw_value, default_value) {
+	if type(raw_value) != "string" {
+		return default_value
+	}
+	raw := trim(raw_value)
+	if raw == "" {
+		return default_value
+	}
+	err := null
+	parsed := default_value
+	try {
+		parsed := parse_json(raw)
+	} except e {
+		err := e
+	}
+	if type(err) != "null" {
+		return default_value
+	}
+	if type(parsed) != "dict" {
+		return default_value
+	}
+	return parsed
+}
+
+func normalize_thresholds(raw_thresholds) {
+	thresholds := {
+		"min_case_count": 4,
+		"min_quality_pass_rate_delta": 0.25,
+		"min_passed_case_delta": 1,
+		"min_average_grounding_delta": 0.0,
+		"max_error_rate_delta": 0.0,
+		"min_preset_quality_pass_rate": 0.5
+	}
+	if type(raw_thresholds) != "dict" {
+		return thresholds
+	}
+
+	thresholds["min_case_count"] = num_or(dict_get_or(raw_thresholds, "min_case_count", thresholds["min_case_count"]), thresholds["min_case_count"])
+	thresholds["min_quality_pass_rate_delta"] = num_or(dict_get_or(raw_thresholds, "min_quality_pass_rate_delta", thresholds["min_quality_pass_rate_delta"]), thresholds["min_quality_pass_rate_delta"])
+	thresholds["min_passed_case_delta"] = num_or(dict_get_or(raw_thresholds, "min_passed_case_delta", thresholds["min_passed_case_delta"]), thresholds["min_passed_case_delta"])
+	thresholds["min_average_grounding_delta"] = num_or(dict_get_or(raw_thresholds, "min_average_grounding_delta", thresholds["min_average_grounding_delta"]), thresholds["min_average_grounding_delta"])
+	thresholds["max_error_rate_delta"] = num_or(dict_get_or(raw_thresholds, "max_error_rate_delta", thresholds["max_error_rate_delta"]), thresholds["max_error_rate_delta"])
+	thresholds["min_preset_quality_pass_rate"] = num_or(dict_get_or(raw_thresholds, "min_preset_quality_pass_rate", thresholds["min_preset_quality_pass_rate"]), thresholds["min_preset_quality_pass_rate"])
+
+	if thresholds["min_case_count"] < 1 {
+		thresholds["min_case_count"] = 1
+	}
+	if thresholds["min_passed_case_delta"] < 0 {
+		thresholds["min_passed_case_delta"] = 0
+	}
+
+	return thresholds
+}
+
+func metric_value(eval_result, metric_name, default_value) {
+	metrics := dict_get_or(eval_result, "metrics", {})
+	return num_or(dict_get_or(metrics, metric_name, default_value), default_value)
+}
+
+func evaluation_summary(eval_result) {
+	metrics := dict_get_or(eval_result, "metrics", {})
+	return {
+		"ok": dict_get_or(eval_result, "ok", false),
+		"total_cases": num_or(dict_get_or(metrics, "total_cases", 0), 0),
+		"passed_cases": num_or(dict_get_or(metrics, "passed_cases", 0), 0),
+		"quality_pass_rate": num_or(dict_get_or(metrics, "quality_pass_rate", 0.0), 0.0),
+		"error_rate": num_or(dict_get_or(metrics, "error_rate", 0.0), 0.0),
+		"avg_grounding": num_or(dict_get_or(metrics, "avg_grounding", 0.0), 0.0),
+		"avg_confidence": num_or(dict_get_or(metrics, "avg_confidence", 0.0), 0.0)
+	}
+}
+
+output_path := env_or("KUJO_RAG_CHUNK_PRESET_AB_OUTPUT_PATH", "./results/chunking_preset_ab_report.json")
+baseline_report_path := env_or("KUJO_RAG_CHUNK_PRESET_AB_BASELINE_REPORT_PATH", "./results/chunking_preset_ab_baseline_release_eval.json")
+preset_report_path := env_or("KUJO_RAG_CHUNK_PRESET_AB_PRESET_REPORT_PATH", "./results/chunking_preset_ab_preset_release_eval.json")
+thresholds_path := env_or("KUJO_RAG_CHUNK_PRESET_AB_THRESHOLDS_PATH", "./config/chunking_preset_eval_thresholds.json")
+golden_queries_path := env_or("KUJO_RAG_CHUNK_PRESET_AB_GOLDEN_PATH", "./config/chunking_preset_eval_golden_queries.json")
+corpus_path := env_or("KUJO_RAG_CHUNK_PRESET_AB_CORPUS_PATH", "./examples/chunking_preset_eval_corpus")
+baseline_index_path := env_or("KUJO_RAG_CHUNK_PRESET_AB_BASELINE_INDEX_PATH", "./results/chunking_preset_ab_baseline_index.json")
+preset_index_path := env_or("KUJO_RAG_CHUNK_PRESET_AB_PRESET_INDEX_PATH", "./results/chunking_preset_ab_preset_index.json")
+
+_ = ensure_parent_dir(output_path)
+_ = ensure_parent_dir(baseline_report_path)
+_ = ensure_parent_dir(preset_report_path)
+_ = ensure_parent_dir(baseline_index_path)
+_ = ensure_parent_dir(preset_index_path)
+
+thresholds := normalize_thresholds(read_json_file_or(thresholds_path, {}))
+
+release_eval_thresholds := {
+	"min_quality_pass_rate": 0.0,
+	"max_error_rate": 1.0,
+	"max_avg_latency_ms": 60000,
+	"max_p95_latency_ms": 60000,
+	"min_average_confidence": 0.0,
+	"min_average_grounding": 0.0,
+	"min_case_count": 1
+}
+release_eval_thresholds_path := "/tmp/kujo_rag_chunking_preset_release_eval_thresholds_" + to_string(current_timestamp()) + ".json"
+write_json_file(release_eval_thresholds_path, release_eval_thresholds)
+
+baseline_runtime_overrides := {
+	"chunk_strategy": "line",
+	"chunk_size": 900,
+	"chunk_overlap": 150,
+	"chunk_presets_enabled": false
+}
+
+preset_runtime_overrides := {
+	"chunk_strategy": "line",
+	"chunk_size": 900,
+	"chunk_overlap": 150,
+	"chunk_presets_enabled": true,
+	"chunk_presets": {
+		"json": {
+			"chunk_strategy": "line",
+			"chunk_size": 220,
+			"chunk_overlap": 40
+		},
+		"csv": {
+			"chunk_strategy": "line",
+			"chunk_size": 220,
+			"chunk_overlap": 40
+		},
+		"html": {
+			"chunk_strategy": "line",
+			"chunk_size": 760,
+			"chunk_overlap": 120
+		},
+		"xml": {
+			"chunk_strategy": "line",
+			"chunk_size": 760,
+			"chunk_overlap": 120
+		},
+		"yaml": {
+			"chunk_strategy": "line",
+			"chunk_size": 640,
+			"chunk_overlap": 120
+		},
+		"log": {
+			"chunk_strategy": "fixed",
+			"chunk_size": 540,
+			"chunk_overlap": 80
+		}
+	}
+}
+
+baseline_override_env := parse_json_dict_or(env_or("KUJO_RAG_CHUNK_PRESET_AB_BASELINE_RUNTIME_OVERRIDES_JSON", ""), {})
+for key in keys(baseline_override_env) {
+	baseline_runtime_overrides[key] = baseline_override_env[key]
+}
+
+preset_override_env := parse_json_dict_or(env_or("KUJO_RAG_CHUNK_PRESET_AB_PRESET_RUNTIME_OVERRIDES_JSON", ""), {})
+for key in keys(preset_override_env) {
+	preset_runtime_overrides[key] = preset_override_env[key]
+}
+
+baseline_eval := run_release_evaluation({
+	"golden_queries_path": golden_queries_path,
+	"thresholds_path": release_eval_thresholds_path,
+	"corpus_path": corpus_path,
+	"index_path": baseline_index_path,
+	"recursive": true,
+	"runtime_overrides": baseline_runtime_overrides
+})
+
+preset_eval := run_release_evaluation({
+	"golden_queries_path": golden_queries_path,
+	"thresholds_path": release_eval_thresholds_path,
+	"corpus_path": corpus_path,
+	"index_path": preset_index_path,
+	"recursive": true,
+	"runtime_overrides": preset_runtime_overrides
+})
+
+write_json_file(baseline_report_path, baseline_eval)
+write_json_file(preset_report_path, preset_eval)
+
+baseline_summary := evaluation_summary(baseline_eval)
+preset_summary := evaluation_summary(preset_eval)
+
+quality_delta := metric_value(preset_eval, "quality_pass_rate", 0.0) - metric_value(baseline_eval, "quality_pass_rate", 0.0)
+passed_case_delta := metric_value(preset_eval, "passed_cases", 0) - metric_value(baseline_eval, "passed_cases", 0)
+avg_grounding_delta := metric_value(preset_eval, "avg_grounding", 0.0) - metric_value(baseline_eval, "avg_grounding", 0.0)
+error_rate_delta := metric_value(preset_eval, "error_rate", 0.0) - metric_value(baseline_eval, "error_rate", 0.0)
+
+min_case_count := num_or(dict_get_or(thresholds, "min_case_count", 4), 4)
+min_quality_delta := num_or(dict_get_or(thresholds, "min_quality_pass_rate_delta", 0.25), 0.25)
+min_passed_case_delta := num_or(dict_get_or(thresholds, "min_passed_case_delta", 1), 1)
+min_avg_grounding_delta := num_or(dict_get_or(thresholds, "min_average_grounding_delta", 0.0), 0.0)
+max_error_rate_delta := num_or(dict_get_or(thresholds, "max_error_rate_delta", 0.0), 0.0)
+min_preset_quality_pass_rate := num_or(dict_get_or(thresholds, "min_preset_quality_pass_rate", 0.5), 0.5)
+
+baseline_case_count_ok := metric_value(baseline_eval, "total_cases", 0) >= min_case_count
+preset_case_count_ok := metric_value(preset_eval, "total_cases", 0) >= min_case_count
+minimum_case_count_ok := baseline_case_count_ok && preset_case_count_ok
+quality_delta_ok := quality_delta >= min_quality_delta
+passed_case_delta_ok := passed_case_delta >= min_passed_case_delta
+average_grounding_delta_ok := avg_grounding_delta >= min_avg_grounding_delta
+error_rate_delta_ok := error_rate_delta <= max_error_rate_delta
+preset_quality_floor_ok := metric_value(preset_eval, "quality_pass_rate", 0.0) >= min_preset_quality_pass_rate
+
+gates := {
+	"minimum_case_count": minimum_case_count_ok,
+	"quality_pass_rate_delta": quality_delta_ok,
+	"passed_case_delta": passed_case_delta_ok,
+	"average_grounding_delta": average_grounding_delta_ok,
+	"error_rate_delta": error_rate_delta_ok,
+	"preset_quality_floor": preset_quality_floor_ok
+}
+
+ok := true
+for key in keys(gates) {
+	if dict_get_or(gates, key, false) == false {
+		ok = false
+	}
+}
+
+result := {
+	"ok": ok,
+	"generated_at_unix_ms": current_timestamp(),
+	"output_path": output_path,
+	"thresholds_path": thresholds_path,
+	"golden_queries_path": golden_queries_path,
+	"corpus_path": corpus_path,
+	"baseline_report_path": baseline_report_path,
+	"preset_report_path": preset_report_path,
+	"thresholds": thresholds,
+	"deltas": {
+		"quality_pass_rate_delta": quality_delta,
+		"passed_case_delta": passed_case_delta,
+		"average_grounding_delta": avg_grounding_delta,
+		"error_rate_delta": error_rate_delta
+	},
+	"baseline": {
+		"runtime_overrides": baseline_runtime_overrides,
+		"summary": baseline_summary
+	},
+	"preset": {
+		"runtime_overrides": preset_runtime_overrides,
+		"summary": preset_summary
+	},
+	"gates": gates
+}
+
+write_json_file(output_path, result)
+print(to_json(result))
+
+if file_exists(release_eval_thresholds_path) {
+	delete_file(release_eval_thresholds_path)
+}
+
+if ok == false {
+	exit(1)
+}

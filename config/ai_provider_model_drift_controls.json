@@ -1,0 +1,50 @@
+{
+  "expected_dataset_version": "2026-05-25-domain-v2-adversarial-noanswer",
+  "min_reference_cases": 5,
+  "expected_runtime": {
+    "embedding_provider": "hash",
+    "ai_embed_endpoint": "",
+    "ai_embed_model": "",
+    "chat_endpoint": "",
+    "chat_model": ""
+  },
+  "reference_cases": [
+    {
+      "id": "overview_auth_model",
+      "expected_ok": true,
+      "min_citations": 4,
+      "min_confidence": 0.6,
+      "expected_confidence_band": "medium"
+    },
+    {
+      "id": "code_health_endpoint",
+      "expected_ok": true,
+      "min_citations": 4,
+      "min_confidence": 0.55,
+      "expected_confidence_band": "medium"
+    },
+    {
+      "id": "operations_canary_step",
+      "expected_ok": true,
+      "min_citations": 4,
+      "min_confidence": 0.6,
+      "expected_confidence_band": "medium"
+    },
+    {
+      "id": "adversarial_prompt_injection_refusal",
+      "expected_ok": true,
+      "expected_policy_reason": "unsafe_or_unsupported_query",
+      "min_citations": 0,
+      "min_confidence": 0.0,
+      "expected_confidence_band": "low"
+    },
+    {
+      "id": "no_answer_unknown_domain_refusal",
+      "expected_ok": true,
+      "expected_policy_reason": "insufficient_context",
+      "min_citations": 0,
+      "min_confidence": 0.0,
+      "expected_confidence_band": "low"
+    }
+  ]
+}

@@ -1,0 +1,116 @@
+from src.common import dict_get_or, num_or
+from src.tests_helpers import assert_true
+
+kujo_bin := env_or("KUJO_BIN", "/path/to/kujo/target/debug/kujo")
+
+func parse_json_safe(text) {
+	payload := {}
+	err := null
+	try {
+		payload := parse_json(text)
+	} except e {
+		err := e
+	}
+	if type(err) != "null" {
+		return {
+			"ok": false,
+			"data": {},
+			"error": to_string(err)
+		}
+	}
+	return {
+		"ok": true,
+		"data": payload,
+		"error": ""
+	}
+}
+
+suffix := to_string(current_timestamp())
+source_root := "/tmp/kujo_rag_connector_source_" + suffix
+source_git := source_root + "/git_source"
+source_http_file := source_root + "/http_source.md"
+
+pass_config_path := "/tmp/kujo_rag_connector_config_pass_" + suffix + ".json"
+fail_config_path := "/tmp/kujo_rag_connector_config_fail_" + suffix + ".json"
+
+staging_root := "/tmp/kujo_rag_connector_stage_" + suffix
+index_path := "/tmp/kujo_rag_connector_index_" + suffix + ".json"
+report_path := "/tmp/kujo_rag_connector_report_" + suffix + ".json"
+
+_ = execute_status("rm -rf '" + source_root + "' '" + staging_root + "'", {"timeout_ms": 120000})
+create_dir(source_root)
+create_dir(source_git)
+write_file(source_git + "/README.md", "# Connector Git Source\n\nThis file is staged by the git_repo connector.\n")
+write_file(source_http_file, "# Connector HTTP Source\n\nThis file is fetched through file:// URL.\n")
+
+write_file(pass_config_path, to_json({
+	"connectors": [
+		{
+			"id": "git_local",
+			"type": "git_repo",
+			"source_path": source_git
+		},
+		{
+			"id": "http_local",
+			"type": "http_docs",
+			"urls": [
+				"file://" + source_http_file
+			]
+		}
+	]
+}))
+
+write_file(fail_config_path, to_json({
+	"connectors": [
+		{
+			"id": "git_missing",
+			"type": "git_repo",
+			"source_path": source_root + "/missing"
+		},
+		{
+			"id": "http_missing",
+			"type": "http_docs",
+			"urls": [
+				"file:///tmp/kujo_rag_missing_http_source_" + suffix + ".md"
+			]
+		}
+	]
+}))
+
+cmd_pass := "KUJO_RAG_CONNECTOR_CONFIG_PATH=" + pass_config_path + " KUJO_RAG_CONNECTOR_STAGING_ROOT=" + staging_root + " KUJO_RAG_CONNECTOR_INDEX_PATH=" + index_path + " KUJO_RAG_CONNECTOR_REPORT_PATH=" + report_path + " " + kujo_bin + " run scripts/run_connector_ingest.kujo --interpreter"
+pass_res := execute_status(cmd_pass, {"timeout_ms": 240000})
+assert_true(to_bool(type(pass_res) == "struct"))
+assert_true(to_bool(pass_res.success == true))
+pass_parsed := parse_json_safe(to_string(pass_res.stdout))
+assert_true(to_bool(dict_get_or(pass_parsed, "ok", false) == true))
+pass_payload := dict_get_or(pass_parsed, "data", {})
+assert_true(to_bool(dict_get_or(pass_payload, "ok", false) == true))
+assert_true(to_bool(dict_get_or(dict_get_or(pass_payload, "gates", {}), "connector_pipeline_ok", false) == true))
+assert_true(to_bool(dict_get_or(dict_get_or(pass_payload, "gates", {}), "index_build_ok", false) == true))
+assert_true(to_bool(num_or(dict_get_or(dict_get_or(pass_payload, "connector_pipeline", {}), "ok_count", 0), 0) >= 2))
+
+cmd_fail := "KUJO_RAG_CONNECTOR_CONFIG_PATH=" + fail_config_path + " KUJO_RAG_CONNECTOR_STAGING_ROOT=" + staging_root + " KUJO_RAG_CONNECTOR_INDEX_PATH=" + index_path + " KUJO_RAG_CONNECTOR_REPORT_PATH=" + report_path + " " + kujo_bin + " run scripts/run_connector_ingest.kujo --interpreter"
+fail_res := execute_status(cmd_fail, {"timeout_ms": 240000})
+assert_true(to_bool(type(fail_res) == "struct"))
+assert_true(to_bool(fail_res.success == false))
+fail_parsed := parse_json_safe(to_string(fail_res.stdout))
+assert_true(to_bool(dict_get_or(fail_parsed, "ok", false) == true))
+fail_payload := dict_get_or(fail_parsed, "data", {})
+assert_true(to_bool(dict_get_or(fail_payload, "ok", true) == false))
+assert_true(to_bool(num_or(dict_get_or(dict_get_or(fail_payload, "connector_pipeline", {}), "failed_count", 0), 0) >= 1))
+
+if file_exists(pass_config_path) {
+	delete_file(pass_config_path)
+}
+if file_exists(fail_config_path) {
+	delete_file(fail_config_path)
+}
+_ = execute_status("rm -rf '" + source_root + "' '" + staging_root + "'", {"timeout_ms": 120000})
+if file_exists(index_path) {
+	delete_file(index_path)
+}
+if file_exists(report_path) {
+	delete_file(report_path)
+}
+
+print("test_connector_framework: ok")

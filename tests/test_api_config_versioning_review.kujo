@@ -1,0 +1,144 @@
+from src.common import dict_get_or, read_json_file_or
+from src.tests_helpers import assert_true
+
+kujo_bin := env_or("KUJO_BIN", "/path/to/kujo/target/debug/kujo")
+suffix := to_string(current_timestamp())
+
+policy_doc_path := "/tmp/kujo_rag_api_config_policy_" + suffix + ".md"
+policy_json_path := "/tmp/kujo_rag_api_config_policy_" + suffix + ".json"
+matrix_path := "/tmp/kujo_rag_api_config_matrix_" + suffix + ".json"
+migrations_readme_path := "/tmp/kujo_rag_api_config_migrations_readme_" + suffix + ".md"
+migration_template_path := "/tmp/kujo_rag_api_config_migration_template_" + suffix + ".md"
+openapi_spec_path := "/tmp/kujo_rag_api_config_openapi_" + suffix + ".json"
+release_process_doc_path := "/tmp/kujo_rag_api_config_release_process_" + suffix + ".md"
+release_artifacts_script_path := "/tmp/kujo_rag_api_config_release_artifacts_" + suffix + ".kujo"
+workflow_path := "/tmp/kujo_rag_api_config_workflow_" + suffix + ".yml"
+output_valid_path := "/tmp/kujo_rag_api_config_status_valid_" + suffix + ".json"
+output_invalid_path := "/tmp/kujo_rag_api_config_status_invalid_" + suffix + ".json"
+
+policy_doc := "# API and Config Versioning Policy\n\n## Backward Compatibility Rules\n\n## Deprecation Windows\n\n## Migration Notes for Breaking Changes\n\n## Previous Minor Compatibility Matrix\n\nSee docs/migrations and compatibility/api-config/previous_minor_matrix.json\n"
+write_file(policy_doc_path, policy_doc)
+
+policy_json := {
+	"policy_version": "1.0",
+	"current_release_semver": "1.0.0",
+	"api_contract_version": "v1",
+	"config_schema_version": 1,
+	"deprecation_windows": {
+		"api_days": 180,
+		"config_days": 180
+	},
+	"supported_previous_minor": [
+		{
+			"release": "0.9.0",
+			"api_contract_version": "v1",
+			"config_schema_version": 1,
+			"expected_compatible": true
+		}
+	]
+}
+write_file(policy_json_path, to_json(policy_json))
+
+compat_matrix := {
+	"current_release_semver": "1.0.0",
+	"entries": [
+		{
+			"release": "0.9.0",
+			"api_contract_version": "v1",
+			"config_schema_version": 1,
+			"expected_compatible": true
+		}
+	]
+}
+write_file(matrix_path, to_json(compat_matrix))
+
+openapi_spec := {
+	"openapi": "3.0.3",
+	"info": {
+		"title": "Kujo RAG HTTP API",
+		"version": "1.0.0",
+		"x-kujo-rag-api-version": "v1"
+	},
+	"paths": {}
+}
+write_file(openapi_spec_path, to_json(openapi_spec))
+
+write_file(migrations_readme_path, "# Migration Notes\n\n## Migration Notes for Breaking Changes\n")
+write_file(migration_template_path, "# Breaking Change Migration Notes Template\n")
+write_file(release_process_doc_path, "# Release Process\n\nRun kujo run scripts/run_api_config_versioning_review.kujo --interpreter\nPolicy docs/api-config-versioning-policy.md\n")
+write_file(release_artifacts_script_path, "compatibility := {\n\t\"config_schema_version\": 1,\n\t\"api_contract_version\": 1\n}\n")
+write_file(workflow_path, "name: api-config-versioning-review\non:\n  schedule:\n    - cron: '0 9 * * 3'\njobs:\n  review:\n    steps:\n      - run: kujo run scripts/run_api_config_versioning_review.kujo --interpreter\n")
+
+valid_cmd := "KUJO_RAG_API_CONFIG_POLICY_DOC_PATH=" + policy_doc_path + " KUJO_RAG_API_CONFIG_POLICY_JSON_PATH=" + policy_json_path + " KUJO_RAG_API_CONFIG_MATRIX_PATH=" + matrix_path + " KUJO_RAG_API_CONFIG_MIGRATIONS_README_PATH=" + migrations_readme_path + " KUJO_RAG_API_CONFIG_MIGRATION_TEMPLATE_PATH=" + migration_template_path + " KUJO_RAG_API_CONFIG_OPENAPI_SPEC_PATH=" + openapi_spec_path + " KUJO_RAG_API_CONFIG_RELEASE_PROCESS_DOC_PATH=" + release_process_doc_path + " KUJO_RAG_API_CONFIG_RELEASE_ARTIFACTS_SCRIPT_PATH=" + release_artifacts_script_path + " KUJO_RAG_API_CONFIG_WORKFLOW_PATH=" + workflow_path + " KUJO_RAG_API_CONFIG_OUTPUT_PATH=" + output_valid_path + " " + kujo_bin + " run scripts/run_api_config_versioning_review.kujo --interpreter"
+valid_res := execute_status(valid_cmd, {"timeout_ms": 240000})
+assert_true(to_bool(type(valid_res) == "struct"))
+assert_true(to_bool(valid_res.success == true))
+
+valid_payload := read_json_file_or(output_valid_path, {})
+assert_true(to_bool(dict_get_or(valid_payload, "ok", false) == true))
+valid_gates := dict_get_or(valid_payload, "gates", {})
+assert_true(to_bool(dict_get_or(valid_gates, "compatibility_previous_minor_tested", false) == true))
+assert_true(to_bool(dict_get_or(valid_gates, "policy_matrix_consistent", false) == true))
+assert_true(to_bool(dict_get_or(valid_gates, "workflow_defined", false) == true))
+
+incompatible_matrix := {
+	"current_release_semver": "1.0.0",
+	"entries": [
+		{
+			"release": "0.9.0",
+			"api_contract_version": "v0",
+			"config_schema_version": 1,
+			"expected_compatible": true
+		}
+	]
+}
+if file_exists(matrix_path) {
+	delete_file(matrix_path)
+}
+write_file(matrix_path, to_json(incompatible_matrix))
+
+invalid_cmd := "KUJO_RAG_API_CONFIG_POLICY_DOC_PATH=" + policy_doc_path + " KUJO_RAG_API_CONFIG_POLICY_JSON_PATH=" + policy_json_path + " KUJO_RAG_API_CONFIG_MATRIX_PATH=" + matrix_path + " KUJO_RAG_API_CONFIG_MIGRATIONS_README_PATH=" + migrations_readme_path + " KUJO_RAG_API_CONFIG_MIGRATION_TEMPLATE_PATH=" + migration_template_path + " KUJO_RAG_API_CONFIG_OPENAPI_SPEC_PATH=" + openapi_spec_path + " KUJO_RAG_API_CONFIG_RELEASE_PROCESS_DOC_PATH=" + release_process_doc_path + " KUJO_RAG_API_CONFIG_RELEASE_ARTIFACTS_SCRIPT_PATH=" + release_artifacts_script_path + " KUJO_RAG_API_CONFIG_WORKFLOW_PATH=" + workflow_path + " KUJO_RAG_API_CONFIG_OUTPUT_PATH=" + output_invalid_path + " " + kujo_bin + " run scripts/run_api_config_versioning_review.kujo --interpreter"
+invalid_res := execute_status(invalid_cmd, {"timeout_ms": 240000})
+assert_true(to_bool(type(invalid_res) == "struct"))
+assert_true(to_bool(invalid_res.success == false))
+
+invalid_payload := read_json_file_or(output_invalid_path, {})
+assert_true(to_bool(dict_get_or(invalid_payload, "ok", true) == false))
+invalid_gates := dict_get_or(invalid_payload, "gates", {})
+assert_true(to_bool(dict_get_or(invalid_gates, "compatibility_previous_minor_tested", true) == false))
+
+if file_exists(policy_doc_path) {
+	delete_file(policy_doc_path)
+}
+if file_exists(policy_json_path) {
+	delete_file(policy_json_path)
+}
+if file_exists(matrix_path) {
+	delete_file(matrix_path)
+}
+if file_exists(migrations_readme_path) {
+	delete_file(migrations_readme_path)
+}
+if file_exists(migration_template_path) {
+	delete_file(migration_template_path)
+}
+if file_exists(openapi_spec_path) {
+	delete_file(openapi_spec_path)
+}
+if file_exists(release_process_doc_path) {
+	delete_file(release_process_doc_path)
+}
+if file_exists(release_artifacts_script_path) {
+	delete_file(release_artifacts_script_path)
+}
+if file_exists(workflow_path) {
+	delete_file(workflow_path)
+}
+if file_exists(output_valid_path) {
+	delete_file(output_valid_path)
+}
+if file_exists(output_invalid_path) {
+	delete_file(output_invalid_path)
+}
+
+print("test_api_config_versioning_review: ok")

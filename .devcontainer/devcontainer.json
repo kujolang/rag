@@ -1,0 +1,22 @@
+{
+	"name": "kujo-rag-devcontainer",
+	"build": {
+		"dockerfile": "../Dockerfile",
+		"context": ".."
+	},
+	"workspaceFolder": "/workspace",
+	"workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind,consistency=cached",
+	"postCreateCommand": "kujo --version && kujo run scripts/run_config_schema_review.kujo --interpreter",
+	"customizations": {
+		"vscode": {
+			"settings": {
+				"files.eol": "\n",
+				"editor.insertSpaces": false
+			},
+			"extensions": [
+				"rust-lang.rust-analyzer",
+				"ms-azuretools.vscode-docker"
+			]
+		}
+	}
+}

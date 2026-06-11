@@ -1,0 +1,62 @@
+from src.common import dict_get_or
+from src.config import load_config
+from src.audit_log import append_audit_event, verify_audit_chain
+from src.tests_helpers import assert_true
+
+audit_path := "./results/test_security_audit_" + to_string(current_timestamp()) + ".log"
+state_path := audit_path + ".state.json"
+
+if file_exists(audit_path) {
+	delete_file(audit_path)
+}
+if file_exists(state_path) {
+	delete_file(state_path)
+}
+
+cfg := load_config({
+	"api_audit_enabled": true,
+	"api_audit_path": audit_path,
+	"api_audit_external_sink_mode": "append_file"
+})
+
+ev1 := append_audit_event(cfg, "auth_decision", "allow", {
+	"provider": "bearer",
+	"path": "/query"
+})
+assert_true(to_bool(dict_get_or(ev1, "ok", false) == true))
+
+ev2 := append_audit_event(cfg, "ingest_operation", "success", {
+	"namespace": "default",
+	"chunks": 3
+})
+assert_true(to_bool(dict_get_or(ev2, "ok", false) == true))
+assert_true(to_bool(file_exists(audit_path) == true))
+assert_true(to_bool(file_exists(state_path) == true))
+
+verified := verify_audit_chain(cfg)
+assert_true(to_bool(dict_get_or(verified, "ok", false) == true))
+assert_true(to_bool(dict_get_or(verified, "events", 0) == 2))
+
+raw := read_file(audit_path)
+lines := split(raw, "\n")
+if len(lines) >= 1 && trim(lines[0]) != "" {
+	first := parse_json(lines[0])
+	first["event_hash"] := "tampered"
+	lines[0] := to_json(first)
+	rewritten := join(lines, "\n")
+	delete_file(audit_path)
+	write_file(audit_path, rewritten)
+}
+
+tampered := verify_audit_chain(cfg)
+assert_true(to_bool(dict_get_or(tampered, "ok", true) == false))
+assert_true(to_bool(dict_get_or(dict_get_or(tampered, "error", {}), "code", "") == "audit_hash_mismatch"))
+
+if file_exists(audit_path) {
+	delete_file(audit_path)
+}
+if file_exists(state_path) {
+	delete_file(state_path)
+}
+
+print("test_audit_logging: ok")

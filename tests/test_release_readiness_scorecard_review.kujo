@@ -1,0 +1,121 @@
+from src.common import dict_get_or, read_json_file_or
+from src.tests_helpers import assert_true
+
+kujo_bin := env_or("KUJO_BIN", "/path/to/kujo/target/debug/kujo")
+
+suffix := to_string(current_timestamp())
+valid_scorecard_path := "/tmp/kujo_rag_release_readiness_valid_" + suffix + ".json"
+invalid_scorecard_path := "/tmp/kujo_rag_release_readiness_invalid_" + suffix + ".json"
+valid_output_path := "/tmp/kujo_rag_release_readiness_valid_output_" + suffix + ".json"
+invalid_output_path := "/tmp/kujo_rag_release_readiness_invalid_output_" + suffix + ".json"
+doc_path := "/tmp/kujo_rag_release_readiness_doc_" + suffix + ".md"
+release_doc_path := "/tmp/kujo_rag_release_readiness_release_doc_" + suffix + ".md"
+workflow_path := "/tmp/kujo_rag_release_readiness_workflow_" + suffix + ".yml"
+
+evidence_security_path := "/tmp/kujo_rag_release_readiness_evidence_security_" + suffix + ".md"
+evidence_reliability_path := "/tmp/kujo_rag_release_readiness_evidence_reliability_" + suffix + ".md"
+evidence_quality_path := "/tmp/kujo_rag_release_readiness_evidence_quality_" + suffix + ".md"
+evidence_scalability_path := "/tmp/kujo_rag_release_readiness_evidence_scalability_" + suffix + ".md"
+evidence_compliance_path := "/tmp/kujo_rag_release_readiness_evidence_compliance_" + suffix + ".md"
+
+write_file(doc_path, "# Release Readiness Scorecard\n\n## Weighted Readiness Criteria\n\n## Signoff Requirements\n\nRun: scripts/run_release_readiness_scorecard_review.kujo\n")
+write_file(release_doc_path, "# Release Process\n\n- kujo run scripts/run_release_readiness_scorecard_review.kujo --interpreter\n- docs/release-readiness-scorecard.md\n")
+write_file(workflow_path, "name: release-readiness-scorecard-review\non:\n  schedule:\n    - cron: '0 15 * * 1'\njobs:\n  review:\n    steps:\n      - run: kujo run scripts/run_release_readiness_scorecard_review.kujo --interpreter\n")
+
+write_file(evidence_security_path, "security")
+write_file(evidence_reliability_path, "reliability")
+write_file(evidence_quality_path, "quality")
+write_file(evidence_scalability_path, "scalability")
+write_file(evidence_compliance_path, "compliance")
+
+valid_payload := {
+	"version": "release-readiness-scorecard-v1",
+	"candidate_version": "1.2.3",
+	"evaluated_at_unix_ms": current_timestamp() - 1000,
+	"review_cadence_days": 30,
+	"owner": "Release Engineering",
+	"approvers": ["Security Director", "Platform Lead"],
+	"signed_off_by": "Release Engineering",
+	"decision": "go",
+	"minimum_weighted_score": 85,
+	"go_decision_requires_all_domains_meet_minimum": true,
+	"domains": [
+		{"name": "security", "weight": 25, "score": 93, "min_score": 85, "status": "pass", "reviewer": "Security Director", "evidence_paths": [evidence_security_path]},
+		{"name": "reliability", "weight": 20, "score": 90, "min_score": 84, "status": "pass", "reviewer": "SRE Lead", "evidence_paths": [evidence_reliability_path]},
+		{"name": "quality", "weight": 20, "score": 89, "min_score": 83, "status": "pass", "reviewer": "QA Lead", "evidence_paths": [evidence_quality_path]},
+		{"name": "scalability", "weight": 20, "score": 88, "min_score": 82, "status": "pass", "reviewer": "Platform Lead", "evidence_paths": [evidence_scalability_path]},
+		{"name": "compliance", "weight": 15, "score": 90, "min_score": 82, "status": "pass", "reviewer": "Compliance Lead", "evidence_paths": [evidence_compliance_path]}
+	]
+}
+
+invalid_payload := {
+	"version": "release-readiness-scorecard-v1",
+	"candidate_version": "bad-version",
+	"evaluated_at_unix_ms": current_timestamp() - (90 * 86400000),
+	"review_cadence_days": 30,
+	"owner": "",
+	"approvers": ["OnlyOneApprover"],
+	"signed_off_by": "",
+	"decision": "go",
+	"minimum_weighted_score": 95,
+	"go_decision_requires_all_domains_meet_minimum": true,
+	"domains": [
+		{"name": "security", "weight": 30, "score": 60, "min_score": 85, "status": "pass", "reviewer": "", "evidence_paths": ["/tmp/does_not_exist_" + suffix]},
+		{"name": "reliability", "weight": 30, "score": 70, "min_score": 84, "status": "pass", "reviewer": "SRE Lead", "evidence_paths": [evidence_reliability_path]},
+		{"name": "quality", "weight": 20, "score": 75, "min_score": 83, "status": "pass", "reviewer": "QA Lead", "evidence_paths": [evidence_quality_path]},
+		{"name": "scalability", "weight": 10, "score": 80, "min_score": 82, "status": "pass", "reviewer": "Platform Lead", "evidence_paths": [evidence_scalability_path]}
+	]
+}
+
+write_file(valid_scorecard_path, to_json(valid_payload))
+write_file(invalid_scorecard_path, to_json(invalid_payload))
+
+valid_cmd := "KUJO_RAG_RELEASE_READINESS_SCORECARD_PATH=" + valid_scorecard_path + " KUJO_RAG_RELEASE_READINESS_SCORECARD_DOC_PATH=" + doc_path + " KUJO_RAG_RELEASE_READINESS_SCORECARD_RELEASE_PROCESS_DOC_PATH=" + release_doc_path + " KUJO_RAG_RELEASE_READINESS_SCORECARD_WORKFLOW_PATH=" + workflow_path + " KUJO_RAG_RELEASE_READINESS_SCORECARD_OUTPUT_PATH=" + valid_output_path + " " + kujo_bin + " run scripts/run_release_readiness_scorecard_review.kujo --interpreter"
+valid_res := execute_status(valid_cmd, {"timeout_ms": 240000})
+assert_true(to_bool(type(valid_res) == "struct"))
+assert_true(to_bool(valid_res.success == true))
+
+valid_result := read_json_file_or(valid_output_path, {})
+assert_true(to_bool(dict_get_or(valid_result, "ok", false) == true))
+assert_true(to_bool(dict_get_or(dict_get_or(valid_result, "gates", {}), "weights_sum_100", false) == true))
+assert_true(to_bool(dict_get_or(dict_get_or(valid_result, "gates", {}), "decision_go", false) == true))
+assert_true(to_bool(dict_get_or(dict_get_or(valid_result, "gates", {}), "workflow_defined", false) == true))
+
+invalid_cmd := "KUJO_RAG_RELEASE_READINESS_SCORECARD_PATH=" + invalid_scorecard_path + " KUJO_RAG_RELEASE_READINESS_SCORECARD_DOC_PATH=" + doc_path + " KUJO_RAG_RELEASE_READINESS_SCORECARD_RELEASE_PROCESS_DOC_PATH=" + release_doc_path + " KUJO_RAG_RELEASE_READINESS_SCORECARD_WORKFLOW_PATH=" + workflow_path + " KUJO_RAG_RELEASE_READINESS_SCORECARD_OUTPUT_PATH=" + invalid_output_path + " " + kujo_bin + " run scripts/run_release_readiness_scorecard_review.kujo --interpreter"
+invalid_res := execute_status(invalid_cmd, {"timeout_ms": 240000})
+assert_true(to_bool(type(invalid_res) == "struct"))
+assert_true(to_bool(invalid_res.success == false))
+
+invalid_result := read_json_file_or(invalid_output_path, {})
+assert_true(to_bool(dict_get_or(invalid_result, "ok", true) == false))
+invalid_gates := dict_get_or(invalid_result, "gates", {})
+assert_true(to_bool(dict_get_or(invalid_gates, "required_domains_present", true) == false))
+assert_true(to_bool(dict_get_or(invalid_gates, "weights_sum_100", true) == false))
+assert_true(to_bool(dict_get_or(invalid_gates, "signoff_complete", true) == false))
+assert_true(to_bool(dict_get_or(invalid_gates, "candidate_version_defined", true) == false))
+
+cleanup_paths := [
+	valid_scorecard_path,
+	invalid_scorecard_path,
+	valid_output_path,
+	invalid_output_path,
+	doc_path,
+	release_doc_path,
+	workflow_path,
+	evidence_security_path,
+	evidence_reliability_path,
+	evidence_quality_path,
+	evidence_scalability_path,
+	evidence_compliance_path
+]
+
+cleanup_index := 0
+while cleanup_index < len(cleanup_paths) {
+	cleanup_path := cleanup_paths[cleanup_index]
+	if file_exists(cleanup_path) {
+		delete_file(cleanup_path)
+	}
+	cleanup_index = cleanup_index + 1
+}
+
+print("test_release_readiness_scorecard_review: ok")

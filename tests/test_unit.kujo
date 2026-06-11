@@ -1,0 +1,866 @@
+from src.common import tokenize, term_frequency, cosine_similarity, dict_get_or, rank_desc
+from src.chunking import chunk_document, chunk_documents
+from src.parsers import parse_file, get_parser_registry
+from src.embeddings import embed_texts, get_embedding_provider_registry
+from src.query_api import validate_api_ingest_path, validate_api_auth, parse_api_json_body, get_session_history, append_session_turn, create_ingest_job, set_ingest_job_status, get_ingest_job, resolve_cors_origin, prune_rate_state
+from src.vector_store import load_index
+from src.vector_backend import get_vector_backend_registry, load_index_with_backend, save_index_with_backend
+from src.cli_args import parse_cli, parse_int_flag
+from src.retrieval import hybrid_search
+from src.tests_helpers import assert_true
+from src.config import load_config, cfg_with_namespace
+
+func array_has_value(items, value) {
+	for item in items {
+		if to_string(item) == to_string(value) {
+			return true
+		}
+	}
+	return false
+}
+
+sample := "Kujo language kujo LANGUAGE"
+tokens := tokenize(sample)
+assert_true(to_bool(len(tokens) >= 3))
+
+freq := term_frequency(tokens)
+assert_true(to_bool(has_key(freq, "kujo") == 1))
+assert_true(to_bool(freq["kujo"] >= 2))
+
+sim_same := cosine_similarity([1.0, 0.0], [1.0, 0.0])
+assert_true(to_bool(sim_same > 0.99))
+
+sim_diff := cosine_similarity([1.0, 0.0], [0.0, 1.0])
+assert_true(to_bool(sim_diff < 0.01))
+
+rank_input := [
+	{"id": "a", "score": 10.0},
+	{"id": "b", "score": 10.0},
+	{"id": "c", "score": 8.0}
+]
+rank_output := rank_desc(rank_input, "score", 2)
+assert_true(to_bool(len(rank_output) == 2))
+assert_true(to_bool(dict_get_or(rank_output[0], "id", "") == "a"))
+assert_true(to_bool(dict_get_or(rank_output[1], "id", "") == "b"))
+
+# Retrieval filter tests (RAG-001)
+filter_index := {
+	"chunks": [
+		{
+			"chunk_id": "c1",
+			"doc_id": "d1",
+			"path": "docs/guide.md",
+			"text": "Kujo imports guide",
+			"line_start": 1,
+			"line_end": 2,
+			"meta": {
+				"kind": "markdown",
+				"tags": ["guide", "docs"],
+				"author": "alice",
+				"timestamp": "2026-05-25T09:30:00Z",
+				"source_system": "notion",
+				"sensitivity_tags": ["internal", "confidential"]
+			}
+		},
+		{
+			"chunk_id": "c2",
+			"doc_id": "d2",
+			"path": "docs/api.txt",
+			"text": "Kujo API query usage",
+			"line_start": 1,
+			"line_end": 2,
+			"meta": {
+				"kind": "text",
+				"tags": ["api", "docs"],
+				"author": "bob",
+				"timestamp": "2026-05-24",
+				"source_system": "github",
+				"sensitivity_tags": ["public"]
+			}
+		},
+		{
+			"chunk_id": "c3",
+			"doc_id": "d3",
+			"path": "notes/changelog.md",
+			"text": "Release notes and fixes",
+			"line_start": 1,
+			"line_end": 2,
+			"meta": {
+				"kind": "markdown",
+				"tags": ["release"],
+				"author": "ops",
+				"timestamp": "2025-12-01",
+				"source_system": "jira",
+				"sensitivity_tags": ["internal"]
+			}
+		}
+	],
+	"vectors": [
+		{"chunk_id": "c1", "embedding": [1.0, 0.0, 0.0]},
+		{"chunk_id": "c2", "embedding": [0.9, 0.1, 0.0]},
+		{"chunk_id": "c3", "embedding": [0.1, 0.9, 0.0]}
+	],
+	"lexical": [
+		{"chunk_id": "c1", "term_freq": {"kujo": 2, "imports": 1}, "term_count": 3},
+		{"chunk_id": "c2", "term_freq": {"kujo": 1, "api": 2, "query": 1}, "term_count": 4},
+		{"chunk_id": "c3", "term_freq": {"release": 2, "notes": 1}, "term_count": 3}
+	]
+}
+
+filter_cfg := {
+	"embedding_provider": "hash",
+	"embedding_dims": 16,
+	"top_k": 6,
+	"hybrid_alpha": 0.65,
+	"hybrid_beta": 0.35,
+	"query_expansion": false
+}
+
+all_results := hybrid_search(filter_index, "kujo query", filter_cfg)
+assert_true(to_bool(len(all_results) == 3))
+for item in all_results {
+	confidence := dict_get_or(item, "confidence", -1.0)
+	assert_true(to_bool(confidence >= 0.0))
+	assert_true(to_bool(confidence <= 1.0))
+	assert_true(to_bool(has_key(item, "provenance_score") == 1))
+	assert_true(to_bool(has_key(item, "confidence_band") == 1))
+}
+
+all_results_repeat := hybrid_search(filter_index, "kujo query", filter_cfg)
+assert_true(to_bool(len(all_results_repeat) == 3))
+assert_true(to_bool(dict_get_or(all_results[0], "confidence", 0.0) == dict_get_or(all_results_repeat[0], "confidence", -1.0)))
+
+path_results := hybrid_search(filter_index, "kujo query", {
+	"embedding_provider": "hash",
+	"embedding_dims": 16,
+	"top_k": 6,
+	"hybrid_alpha": 0.65,
+	"hybrid_beta": 0.35,
+	"query_expansion": false,
+	"query_filters": {
+		"path": "docs/"
+	}
+})
+assert_true(to_bool(len(path_results) == 2))
+for item in path_results {
+	assert_true(to_bool(contains(dict_get_or(item, "path", ""), "docs/") == 1))
+}
+
+ext_results := hybrid_search(filter_index, "kujo query", {
+	"embedding_provider": "hash",
+	"embedding_dims": 16,
+	"top_k": 6,
+	"hybrid_alpha": 0.65,
+	"hybrid_beta": 0.35,
+	"query_expansion": false,
+	"query_filters": {
+		"extension": ".txt"
+	}
+})
+assert_true(to_bool(len(ext_results) == 1))
+assert_true(to_bool(dict_get_or(ext_results[0], "path", "") == "docs/api.txt"))
+
+tag_results := hybrid_search(filter_index, "kujo query", {
+	"embedding_provider": "hash",
+	"embedding_dims": 16,
+	"top_k": 6,
+	"hybrid_alpha": 0.65,
+	"hybrid_beta": 0.35,
+	"query_expansion": false,
+	"query_filters": {
+		"tags": ["api"]
+	}
+})
+assert_true(to_bool(len(tag_results) == 1))
+assert_true(to_bool(dict_get_or(tag_results[0], "path", "") == "docs/api.txt"))
+
+combined_results := hybrid_search(filter_index, "kujo imports", {
+	"embedding_provider": "hash",
+	"embedding_dims": 16,
+	"top_k": 6,
+	"hybrid_alpha": 0.65,
+	"hybrid_beta": 0.35,
+	"query_expansion": false,
+	"query_filters": {
+		"path": "docs/",
+		"extension": "md",
+		"tags": ["guide"]
+	}
+})
+assert_true(to_bool(len(combined_results) == 1))
+assert_true(to_bool(dict_get_or(combined_results[0], "path", "") == "docs/guide.md"))
+
+policy_include_results := hybrid_search(filter_index, "kujo imports", {
+	"embedding_provider": "hash",
+	"embedding_dims": 16,
+	"top_k": 6,
+	"hybrid_alpha": 0.65,
+	"hybrid_beta": 0.35,
+	"query_expansion": false,
+	"query_filters": {
+		"include": {
+			"source_system": ["notion"],
+			"author": ["alice"],
+			"sensitivity_tags": ["internal"]
+		}
+	}
+})
+assert_true(to_bool(len(policy_include_results) == 1))
+assert_true(to_bool(dict_get_or(policy_include_results[0], "path", "") == "docs/guide.md"))
+assert_true(to_bool(dict_get_or(policy_include_results[0], "source_system", "") == "notion"))
+
+policy_exclude_results := hybrid_search(filter_index, "kujo", {
+	"embedding_provider": "hash",
+	"embedding_dims": 16,
+	"top_k": 6,
+	"hybrid_alpha": 0.65,
+	"hybrid_beta": 0.35,
+	"query_expansion": false,
+	"query_filters": {
+		"include": {
+			"path": "docs/"
+		},
+		"exclude": {
+			"sensitivity_tags": ["confidential"]
+		}
+	}
+})
+assert_true(to_bool(len(policy_exclude_results) == 1))
+assert_true(to_bool(dict_get_or(policy_exclude_results[0], "path", "") == "docs/api.txt"))
+
+policy_timestamp_results := hybrid_search(filter_index, "kujo", {
+	"embedding_provider": "hash",
+	"embedding_dims": 16,
+	"top_k": 6,
+	"hybrid_alpha": 0.65,
+	"hybrid_beta": 0.35,
+	"query_expansion": false,
+	"query_filters": {
+		"include": {
+			"timestamp": ["2026-05"],
+			"source_system": ["github"]
+		}
+	}
+})
+assert_true(to_bool(len(policy_timestamp_results) == 1))
+assert_true(to_bool(dict_get_or(policy_timestamp_results[0], "path", "") == "docs/api.txt"))
+
+# Reranking tests (RAG-002)
+rerank_index := {
+	"chunks": [
+		{"chunk_id": "r1", "doc_id": "rd1", "path": "docs/r1.md", "text": "kujo ranking", "line_start": 1, "line_end": 1, "meta": {"kind": "markdown"}},
+		{"chunk_id": "r2", "doc_id": "rd2", "path": "docs/r2.md", "text": "kujo ranking", "line_start": 1, "line_end": 1, "meta": {"kind": "markdown"}},
+		{"chunk_id": "r3", "doc_id": "rd3", "path": "docs/r3.md", "text": "kujo ranking", "line_start": 1, "line_end": 1, "meta": {"kind": "markdown"}}
+	],
+	"vectors": [
+		{"chunk_id": "r1", "embedding": [1.0, 0.0, 0.0]},
+		{"chunk_id": "r2", "embedding": [0.99, 0.01, 0.0]},
+		{"chunk_id": "r3", "embedding": [0.0, 1.0, 0.0]}
+	],
+	"lexical": [
+		{"chunk_id": "r1", "term_freq": {"kujo": 10}, "term_count": 10},
+		{"chunk_id": "r2", "term_freq": {"kujo": 9}, "term_count": 9},
+		{"chunk_id": "r3", "term_freq": {"kujo": 8}, "term_count": 8}
+	]
+}
+
+rerank_none := hybrid_search(rerank_index, "kujo", {
+	"embedding_provider": "hash",
+	"embedding_dims": 16,
+	"top_k": 2,
+	"hybrid_alpha": 0.0,
+	"hybrid_beta": 1.0,
+	"query_expansion": false,
+	"rerank_strategy": "none"
+})
+assert_true(to_bool(len(rerank_none) == 2))
+assert_true(to_bool(dict_get_or(rerank_none[0], "chunk_id", "") != ""))
+assert_true(to_bool(dict_get_or(rerank_none[1], "chunk_id", "") != ""))
+
+rerank_mmr := hybrid_search(rerank_index, "kujo", {
+	"embedding_provider": "hash",
+	"embedding_dims": 16,
+	"top_k": 2,
+	"hybrid_alpha": 0.0,
+	"hybrid_beta": 1.0,
+	"query_expansion": false,
+	"rerank_strategy": "mmr",
+	"rerank_mmr_lambda": 0.35
+})
+assert_true(to_bool(len(rerank_mmr) == 2))
+
+rerank_mmr_repeat := hybrid_search(rerank_index, "kujo", {
+	"embedding_provider": "hash",
+	"embedding_dims": 16,
+	"top_k": 2,
+	"hybrid_alpha": 0.0,
+	"hybrid_beta": 1.0,
+	"query_expansion": false,
+	"rerank_strategy": "mmr",
+	"rerank_mmr_lambda": 0.35
+})
+assert_true(to_bool(len(rerank_mmr_repeat) == 2))
+assert_true(to_bool(dict_get_or(rerank_mmr[0], "chunk_id", "") == dict_get_or(rerank_mmr_repeat[0], "chunk_id", "")))
+assert_true(to_bool(dict_get_or(rerank_mmr[1], "chunk_id", "") == dict_get_or(rerank_mmr_repeat[1], "chunk_id", "")))
+
+# CLI parsing tests
+parsed_cli := parse_cli(["ingest", "--path", "./examples/kujo_docs/example.kujo", "--recursive", "true"])
+parsed_flags := dict_get_or(parsed_cli, "flags", {})
+assert_true(to_bool(dict_get_or(parsed_flags, "path", "") == "./examples/kujo_docs/example.kujo"))
+
+valid_port := parse_int_flag({"port": "8787"}, "port", 3000)
+assert_true(to_bool(dict_get_or(valid_port, "ok", false) == true))
+assert_true(to_bool(dict_get_or(valid_port, "value", 0) == 8787))
+
+invalid_port := parse_int_flag({"port": "abc"}, "port", 3000)
+assert_true(to_bool(dict_get_or(invalid_port, "ok", true) == false))
+assert_true(to_bool(dict_get_or(invalid_port, "error", "") == "invalid_int_flag"))
+
+# Namespace isolation config tests (PRD-001)
+namespace_base_cfg := load_config({
+	"index_path": "./data/rag_index.json"
+})
+
+namespace_default := cfg_with_namespace(namespace_base_cfg, "")
+assert_true(to_bool(dict_get_or(namespace_default, "ok", false) == true))
+assert_true(to_bool(dict_get_or(namespace_default, "namespace", "") == "default"))
+
+namespace_team := cfg_with_namespace(namespace_base_cfg, "Team_A")
+assert_true(to_bool(dict_get_or(namespace_team, "ok", false) == true))
+assert_true(to_bool(dict_get_or(namespace_team, "namespace", "") == "team_a"))
+team_cfg := dict_get_or(namespace_team, "cfg", {})
+assert_true(to_bool(contains(dict_get_or(team_cfg, "index_path", ""), "__team_a.json") == 1))
+
+namespace_invalid := cfg_with_namespace(namespace_base_cfg, "../../secrets")
+assert_true(to_bool(dict_get_or(namespace_invalid, "ok", true) == false))
+assert_true(to_bool(dict_get_or(namespace_invalid, "error", "") == "invalid_namespace"))
+
+# Vector backend adapter tests (PRD-002)
+backend_registry := get_vector_backend_registry()
+assert_true(to_bool(has_key(backend_registry, "local_json") == 1))
+assert_true(to_bool(has_key(backend_registry, "memory") == 1))
+
+backend_invalid_cfg := load_config({
+	"vector_backend": "unknown-backend"
+})
+assert_true(to_bool(dict_get_or(backend_invalid_cfg, "vector_backend", "") == "local_json"))
+
+memory_backend_cfg_a := load_config({
+	"vector_backend": "memory",
+	"vector_backend_memory_key": "unit-memory-a-" + to_string(current_timestamp())
+})
+memory_index_a := load_index_with_backend(memory_backend_cfg_a)
+memory_meta_a := dict_get_or(memory_index_a, "meta", {})
+memory_meta_a["documents"] := 3
+memory_index_a["meta"] := memory_meta_a
+_ = save_index_with_backend(memory_backend_cfg_a, memory_index_a)
+
+memory_index_a_reload := load_index_with_backend(memory_backend_cfg_a)
+assert_true(to_bool(dict_get_or(dict_get_or(memory_index_a_reload, "meta", {}), "documents", 0) == 3))
+
+memory_backend_cfg_b := load_config({
+	"vector_backend": "memory",
+	"vector_backend_memory_key": "unit-memory-b-" + to_string(current_timestamp())
+})
+memory_index_b := load_index_with_backend(memory_backend_cfg_b)
+assert_true(to_bool(dict_get_or(dict_get_or(memory_index_b, "meta", {}), "documents", 0) != 3))
+
+# Chunking smoke test
+docs := [{
+	"doc_id": "doc1",
+	"path": "memory://doc1",
+	"kind": "text",
+	"content": "line one\nline two\nline three",
+	"lines": [
+		{"line": 1, "text": "line one"},
+		{"line": 2, "text": "line two"},
+		{"line": 3, "text": "line three"}
+	],
+	"meta": {}
+}]
+
+chunks := chunk_documents(docs, {
+	"chunk_strategy": "line",
+	"chunk_size": 20,
+	"chunk_overlap": 5
+})
+
+assert_true(to_bool(len(chunks) >= 1))
+assert_true(to_bool(has_key(chunks[0], "chunk_id") == 1))
+
+line_overlap_chunks := chunk_document(docs[0], {
+	"chunk_strategy": "line",
+	"chunk_size": 7,
+	"chunk_overlap": 3
+})
+assert_true(to_bool(len(line_overlap_chunks) >= 2))
+for item in line_overlap_chunks {
+	assert_true(to_bool(dict_get_or(item, "line_end", 0) >= dict_get_or(item, "line_start", 0)))
+}
+
+fixed_doc := {
+	"doc_id": "doc_fixed",
+	"path": "memory://fixed",
+	"kind": "text",
+	"content": "alpha line\nbeta line\ngamma line",
+	"lines": [
+		{"line": 1, "text": "alpha line"},
+		{"line": 2, "text": "beta line"},
+		{"line": 3, "text": "gamma line"}
+	],
+	"meta": {}
+}
+
+fixed_chunks := chunk_document(fixed_doc, {
+	"chunk_strategy": "fixed",
+	"chunk_size": 8,
+	"chunk_overlap": 2
+})
+assert_true(to_bool(len(fixed_chunks) >= 2))
+fixed_total_lines := len(dict_get_or(fixed_doc, "lines", []))
+all_coarse := true
+for item in fixed_chunks {
+	line_start := dict_get_or(item, "line_start", 0)
+	line_end := dict_get_or(item, "line_end", 0)
+	assert_true(to_bool(line_end >= line_start))
+	if line_start != 1 || line_end != fixed_total_lines {
+		all_coarse = false
+	}
+}
+assert_true(to_bool(all_coarse == false))
+
+preset_doc := {
+	"doc_id": "doc_preset_json",
+	"path": "memory://structured/records.json",
+	"kind": "structured",
+	"content": "schema: records | format: json | fields: service, incident_code, summary\nrow 1 | service: gateway | incident_code: inc_a1 | summary: normal_traffic_profile\nrow 2 | service: auth | incident_code: inc_a2 | summary: token_refresh_latency\nrow 3 | service: inventory | incident_code: inc_a3 | summary: cache_miss_spike\nrow 4 | service: orders | incident_code: inc_a4 | summary: replication_lag_warning\nrow 5 | service: billing | incident_code: inc_a5 | summary: retry_queue_growth\nrow 6 | service: search | incident_code: inc_a6 | summary: ranking_index_warmup\nrow 7 | service: reports | incident_code: inc_a7 | summary: warehouse_backfill_delay\nrow 8 | service: payments | incident_code: inc_a8 | summary: critical_orchid_outage",
+	"lines": [
+		{"line": 1, "text": "schema: records | format: json | fields: service, incident_code, summary"},
+		{"line": 2, "text": "row 1 | service: gateway | incident_code: inc_a1 | summary: normal_traffic_profile"},
+		{"line": 3, "text": "row 2 | service: auth | incident_code: inc_a2 | summary: token_refresh_latency"},
+		{"line": 4, "text": "row 3 | service: inventory | incident_code: inc_a3 | summary: cache_miss_spike"},
+		{"line": 5, "text": "row 4 | service: orders | incident_code: inc_a4 | summary: replication_lag_warning"},
+		{"line": 6, "text": "row 5 | service: billing | incident_code: inc_a5 | summary: retry_queue_growth"},
+		{"line": 7, "text": "row 6 | service: search | incident_code: inc_a6 | summary: ranking_index_warmup"},
+		{"line": 8, "text": "row 7 | service: reports | incident_code: inc_a7 | summary: warehouse_backfill_delay"},
+		{"line": 9, "text": "row 8 | service: payments | incident_code: inc_a8 | summary: critical_orchid_outage"}
+	],
+	"meta": {
+		"parser": "structured_json"
+	}
+}
+
+preset_cfg := {
+	"chunk_strategy": "line",
+	"chunk_size": 900,
+	"chunk_overlap": 150,
+	"chunk_presets_enabled": true,
+	"chunk_presets": {
+		"json": {
+			"chunk_strategy": "fixed",
+			"chunk_size": 220,
+			"chunk_overlap": 40
+		}
+	}
+}
+
+baseline_cfg := {
+	"chunk_strategy": "line",
+	"chunk_size": 900,
+	"chunk_overlap": 150,
+	"chunk_presets_enabled": false,
+	"chunk_presets": {
+		"json": {
+			"chunk_strategy": "fixed",
+			"chunk_size": 220,
+			"chunk_overlap": 40
+		}
+	}
+}
+
+baseline_chunks := chunk_document(preset_doc, baseline_cfg)
+preset_chunks := chunk_document(preset_doc, preset_cfg)
+assert_true(to_bool(len(baseline_chunks) == 1))
+assert_true(to_bool(len(preset_chunks) > 1))
+assert_true(to_bool(dict_get_or(dict_get_or(baseline_chunks[0], "meta", {}), "chunk_profile_source", "") == "baseline"))
+assert_true(to_bool(dict_get_or(dict_get_or(preset_chunks[0], "meta", {}), "chunk_profile_source", "") == "preset:json"))
+assert_true(to_bool(dict_get_or(dict_get_or(preset_chunks[0], "meta", {}), "chunk_profile_strategy", "") == "fixed"))
+
+override_doc := {
+	"doc_id": dict_get_or(preset_doc, "doc_id", ""),
+	"path": dict_get_or(preset_doc, "path", ""),
+	"kind": dict_get_or(preset_doc, "kind", "structured"),
+	"content": dict_get_or(preset_doc, "content", ""),
+	"lines": dict_get_or(preset_doc, "lines", []),
+	"meta": {
+		"parser": "structured_json",
+		"chunking_override": {
+			"chunk_strategy": "line",
+			"chunk_size": 260,
+			"chunk_overlap": 50
+		}
+	}
+}
+
+override_chunks := chunk_document(override_doc, preset_cfg)
+assert_true(to_bool(len(override_chunks) > 1))
+assert_true(to_bool(dict_get_or(dict_get_or(override_chunks[0], "meta", {}), "chunk_profile_source", "") == "doc_override"))
+assert_true(to_bool(dict_get_or(dict_get_or(override_chunks[0], "meta", {}), "chunk_profile_strategy", "") == "line"))
+
+# Registry tests (parsers + embeddings)
+parser_registry := get_parser_registry()
+assert_true(to_bool(dict_get_or(parser_registry, "md", "") == "markdown"))
+assert_true(to_bool(dict_get_or(parser_registry, "mdx", "") == "markdown"))
+assert_true(to_bool(dict_get_or(parser_registry, "pdf", "") == "pdf"))
+
+embedding_registry := get_embedding_provider_registry()
+assert_true(to_bool(dict_get_or(embedding_registry, "openai", "") == "ai"))
+assert_true(to_bool(dict_get_or(embedding_registry, "hash", "") == "hash"))
+
+unknown_provider_result := embed_texts(["registry test"], {
+	"embedding_provider": "mystery",
+	"embedding_dims": 32
+})
+assert_true(to_bool(dict_get_or(unknown_provider_result, "provider", "") == "hash"))
+assert_true(to_bool(dict_get_or(dict_get_or(unknown_provider_result, "error", {}), "code", "") == "unknown_embedding_provider"))
+
+ai_fallback_result := embed_texts(["fallback test"], {
+	"embedding_provider": "ai",
+	"embedding_dims": 32,
+	"ai_embed_endpoint": "",
+	"ai_embed_model": ""
+})
+assert_true(to_bool(dict_get_or(ai_fallback_result, "provider", "") == "hash"))
+assert_true(to_bool(dict_get_or(dict_get_or(ai_fallback_result, "error", {}), "code", "") == "ai_provider_not_configured"))
+
+mdx_test_path := "results/test_extension.mdx"
+if file_exists(mdx_test_path) {
+	delete_file(mdx_test_path)
+}
+write_file(mdx_test_path, "# Extension Heading\nSome `inline` markdown text.")
+mdx_doc := parse_file(mdx_test_path, {})
+assert_true(to_bool(dict_get_or(mdx_doc, "kind", "") == "markdown"))
+assert_true(to_bool(dict_get_or(dict_get_or(mdx_doc, "meta", {}), "parser", "") == "markdown"))
+if file_exists(mdx_test_path) {
+	delete_file(mdx_test_path)
+}
+
+metadata_test_path := "results/test_metadata_extraction.md"
+if file_exists(metadata_test_path) {
+	delete_file(metadata_test_path)
+}
+write_file(metadata_test_path, "Author: Dana Ops\nUpdated_At: 2026-05-25T10:00:00Z\nSource_System: jira\nSensitivity: internal, confidential\n\nrunbook body")
+metadata_doc := parse_file(metadata_test_path, {})
+metadata_meta := dict_get_or(metadata_doc, "meta", {})
+assert_true(to_bool(dict_get_or(metadata_meta, "author", "") == "Dana Ops"))
+assert_true(to_bool(dict_get_or(metadata_meta, "timestamp", "") == "2026-05-25T10:00:00Z"))
+assert_true(to_bool(dict_get_or(metadata_meta, "source_system", "") == "jira"))
+metadata_sensitivity := dict_get_or(metadata_meta, "sensitivity_tags", [])
+assert_true(to_bool(array_has_value(metadata_sensitivity, "internal")))
+assert_true(to_bool(array_has_value(metadata_sensitivity, "confidential")))
+assert_true(to_bool(array_has_value(dict_get_or(metadata_meta, "tags", []), "source_jira")))
+if file_exists(metadata_test_path) {
+	delete_file(metadata_test_path)
+}
+
+# Index schema migration tests
+if path_exists("results") == false {
+	create_dir("results")
+}
+
+v1_index_path := "results/test_index_v1.json"
+if file_exists(v1_index_path) {
+	delete_file(v1_index_path)
+}
+write_file(v1_index_path, to_json({
+	"version": "1.0",
+	"created_at": 1,
+	"updated_at": 1,
+	"chunks": [],
+	"vectors": [],
+	"lexical": [],
+	"meta": {
+		"documents": 0,
+		"chunks": 0,
+		"provider": "hash"
+	}
+}))
+
+migrated_v1 := load_index(v1_index_path)
+assert_true(to_bool(dict_get_or(migrated_v1, "schema_version", 0) == 2))
+assert_true(to_bool(dict_get_or(dict_get_or(migrated_v1, "meta", {}), "migrated_from_schema_version", 0) == 1))
+
+unsupported_index_path := "results/test_index_unsupported.json"
+if file_exists(unsupported_index_path) {
+	delete_file(unsupported_index_path)
+}
+write_file(unsupported_index_path, to_json({
+	"schema_version": 99,
+	"version": "99.0",
+	"chunks": [],
+	"vectors": [],
+	"lexical": [],
+	"meta": {}
+}))
+
+unsupported_index := load_index(unsupported_index_path)
+assert_true(to_bool(dict_get_or(dict_get_or(dict_get_or(unsupported_index, "meta", {}), "load_error", {}), "code", "") == "unsupported_index_schema"))
+assert_true(to_bool(dict_get_or(unsupported_index, "schema_version", 0) == 2))
+
+if file_exists(v1_index_path) {
+	delete_file(v1_index_path)
+}
+
+if file_exists(unsupported_index_path) {
+	delete_file(unsupported_index_path)
+}
+
+# API ingest path scope enforcement tests
+scope_cfg := {
+	"project_root": "/workspace/repo",
+	"api_ingest_allowed_roots": ["./examples", "/workspace/repo/docs"]
+}
+
+allowed_path := validate_api_ingest_path("./examples/kujo_docs", scope_cfg)
+assert_true(to_bool(dict_get_or(allowed_path, "ok", false) == true))
+assert_true(to_bool(dict_get_or(allowed_path, "path", "") == "/workspace/repo/examples/kujo_docs"))
+
+normalized_allowed := validate_api_ingest_path("./examples/../examples/kujo_docs", scope_cfg)
+assert_true(to_bool(dict_get_or(normalized_allowed, "ok", false) == true))
+
+blocked_path := validate_api_ingest_path("../secrets", scope_cfg)
+assert_true(to_bool(dict_get_or(blocked_path, "ok", true) == false))
+assert_true(to_bool(dict_get_or(blocked_path, "error", "") == "ingest_path_forbidden"))
+
+# API auth tests (disabled/enabled modes)
+auth_disabled := validate_api_auth({"headers": {}}, {"api_bearer_token": ""})
+assert_true(to_bool(dict_get_or(auth_disabled, "ok", false) == true))
+
+auth_missing := validate_api_auth({"headers": {}}, {"api_bearer_token": "sec-token"})
+assert_true(to_bool(dict_get_or(auth_missing, "ok", true) == false))
+assert_true(to_bool(dict_get_or(auth_missing, "status", 0) == 401))
+assert_true(to_bool(dict_get_or(auth_missing, "error", "") == "unauthorized"))
+
+auth_invalid_header := validate_api_auth({"headers": {"Authorization": "Basic abc"}}, {"api_bearer_token": "sec-token"})
+assert_true(to_bool(dict_get_or(auth_invalid_header, "ok", true) == false))
+assert_true(to_bool(dict_get_or(auth_invalid_header, "status", 0) == 401))
+assert_true(to_bool(dict_get_or(auth_invalid_header, "error", "") == "invalid_auth_header"))
+
+auth_bad_token := validate_api_auth({"headers": {"authorization": "Bearer wrong-token"}}, {"api_bearer_token": "sec-token"})
+assert_true(to_bool(dict_get_or(auth_bad_token, "ok", true) == false))
+assert_true(to_bool(dict_get_or(auth_bad_token, "status", 0) == 403))
+assert_true(to_bool(dict_get_or(auth_bad_token, "error", "") == "forbidden"))
+
+auth_good_token := validate_api_auth({"headers": {"authorization": "Bearer sec-token"}}, {"api_bearer_token": "sec-token"})
+assert_true(to_bool(dict_get_or(auth_good_token, "ok", false) == true))
+
+# Session mode tests (RAG-003)
+session_state := {
+	"sessions": {}
+}
+session_cfg := {
+	"session_history_max_turns": 2
+}
+
+session_state = append_session_turn(session_state, "alpha", {
+	"query": "q1",
+	"answer": "a1"
+}, session_cfg)
+session_state = append_session_turn(session_state, "alpha", {
+	"query": "q2",
+	"answer": "a2"
+}, session_cfg)
+session_state = append_session_turn(session_state, "alpha", {
+	"query": "q3",
+	"answer": "a3"
+}, session_cfg)
+
+alpha_history := get_session_history(session_state, "alpha", session_cfg)
+assert_true(to_bool(len(alpha_history) == 2))
+assert_true(to_bool(dict_get_or(alpha_history[0], "query", "") == "q2"))
+assert_true(to_bool(dict_get_or(alpha_history[1], "query", "") == "q3"))
+
+session_state = append_session_turn(session_state, "beta", {
+	"query": "other",
+	"answer": "thread"
+}, session_cfg)
+beta_history := get_session_history(session_state, "beta", session_cfg)
+assert_true(to_bool(len(beta_history) == 1))
+assert_true(to_bool(dict_get_or(beta_history[0], "query", "") == "other"))
+alpha_history_after := get_session_history(session_state, "alpha", session_cfg)
+assert_true(to_bool(len(alpha_history_after) == 2))
+
+# Ingest job lifecycle tests (API-001)
+job_state := {
+	"ingest_jobs": {}
+}
+job_create := create_ingest_job(job_state, "./examples/kujo_docs", true, "default")
+job_state = dict_get_or(job_create, "state", job_state)
+job := dict_get_or(job_create, "job", {})
+job_id := dict_get_or(job, "job_id", "")
+assert_true(to_bool(job_id != ""))
+assert_true(to_bool(dict_get_or(job, "status", "") == "submitted"))
+
+job_state = set_ingest_job_status(job_state, job_id, "running", {
+	"started_at": current_timestamp()
+})
+running_job := get_ingest_job(job_state, job_id)
+assert_true(to_bool(dict_get_or(running_job, "status", "") == "running"))
+
+job_state = set_ingest_job_status(job_state, job_id, "succeeded", {
+	"summary": {
+		"documents": 3,
+		"chunks": 12
+	}
+})
+succeeded_job := get_ingest_job(job_state, job_id)
+assert_true(to_bool(dict_get_or(succeeded_job, "status", "") == "succeeded"))
+assert_true(to_bool(dict_get_or(dict_get_or(succeeded_job, "result", {}), "summary", {})["documents"] == 3))
+
+missing_job := get_ingest_job(job_state, "does-not-exist")
+assert_true(to_bool(type(missing_job) == "null"))
+
+# CORS allow-list tests (API-002)
+cors_req_allowed := {
+	"headers": {
+		"Origin": "https://allowed.example"
+	}
+}
+cors_cfg_disabled := {
+	"api_cors_enabled": false,
+	"api_cors_allowed_origins": ["https://allowed.example"]
+}
+assert_true(to_bool(resolve_cors_origin(cors_req_allowed, cors_cfg_disabled) == ""))
+
+cors_cfg_enabled := {
+	"api_cors_enabled": true,
+	"api_cors_allowed_origins": ["https://allowed.example", "https://other.example"]
+}
+assert_true(to_bool(resolve_cors_origin(cors_req_allowed, cors_cfg_enabled) == "https://allowed.example"))
+
+cors_req_blocked := {
+	"headers": {
+		"Origin": "https://blocked.example"
+	}
+}
+assert_true(to_bool(resolve_cors_origin(cors_req_blocked, cors_cfg_enabled) == ""))
+
+cors_cfg_wildcard := {
+	"api_cors_enabled": true,
+	"api_cors_allowed_origins": ["*"]
+}
+assert_true(to_bool(resolve_cors_origin(cors_req_allowed, cors_cfg_wildcard) == "*"))
+
+# Rate limiter eviction tests (API-003)
+rate_state := {
+	"rate": {
+		"stale": {"window_start": 1000, "count": 1},
+		"fresh": {"window_start": 90000, "count": 1}
+	}
+}
+rate_cfg := {
+	"api_rate_limit_window_sec": 60,
+	"api_rate_limit_bucket_ttl_sec": 30,
+	"api_rate_limit_max_keys": 10
+}
+rate_state = prune_rate_state(rate_state, rate_cfg, 100000)
+assert_true(to_bool(has_key(dict_get_or(rate_state, "rate", {}), "stale") == 0))
+assert_true(to_bool(has_key(dict_get_or(rate_state, "rate", {}), "fresh") == 1))
+
+cap_state := {
+	"rate": {
+		"k1": {"window_start": 1000, "count": 1},
+		"k2": {"window_start": 2000, "count": 1},
+		"k3": {"window_start": 3000, "count": 1}
+	}
+}
+cap_cfg := {
+	"api_rate_limit_window_sec": 60,
+	"api_rate_limit_bucket_ttl_sec": 9999,
+	"api_rate_limit_max_keys": 2
+}
+cap_state = prune_rate_state(cap_state, cap_cfg, 4000)
+cap_rate := dict_get_or(cap_state, "rate", {})
+assert_true(to_bool(len(keys(cap_rate)) == 2))
+assert_true(to_bool(has_key(cap_rate, "k1") == 0))
+assert_true(to_bool(has_key(cap_rate, "k2") == 1))
+assert_true(to_bool(has_key(cap_rate, "k3") == 1))
+
+invalid_body_dict := parse_api_json_body({"body": {}}, {"api_max_body_bytes": 100})
+assert_true(to_bool(dict_get_or(invalid_body_dict, "ok", true) == false))
+assert_true(to_bool(dict_get_or(invalid_body_dict, "error", "") == "invalid_body_type"))
+assert_true(to_bool(dict_get_or(dict_get_or(invalid_body_dict, "details", {}), "actual_type", "") == "dict"))
+
+invalid_body_int := parse_api_json_body({"body": 42}, {"api_max_body_bytes": 100})
+assert_true(to_bool(dict_get_or(invalid_body_int, "ok", true) == false))
+assert_true(to_bool(dict_get_or(invalid_body_int, "error", "") == "invalid_body_type"))
+
+body_too_large := parse_api_json_body({
+	"body": "{\"query\":\"12345678901234567890\"}"
+}, {
+	"api_max_body_bytes": 10
+})
+assert_true(to_bool(dict_get_or(body_too_large, "ok", true) == false))
+assert_true(to_bool(dict_get_or(body_too_large, "error", "") == "body_too_large"))
+
+# PDF parser behavior tests (shell success and fallback)
+if path_exists("results") == false {
+	create_dir("results")
+}
+if file_exists("results/test.pdf") {
+	delete_file("results/test.pdf")
+}
+write_file("results/test.pdf", "fake")
+
+pdf_cfg_ok := {
+	"pdf_extractor_command": "echo"
+}
+pdf_doc_ok := parse_file("results/test.pdf", pdf_cfg_ok)
+assert_true(to_bool(dict_get_or(dict_get_or(pdf_doc_ok, "meta", {}), "parser", "") == "pdf_shell"))
+
+pdf_cfg_fail := {
+	"pdf_extractor_command": "definitely_missing_pdf_binary"
+}
+pdf_doc_fail := parse_file("results/missing.pdf", pdf_cfg_fail)
+assert_true(to_bool(dict_get_or(dict_get_or(pdf_doc_fail, "meta", {}), "parser", "") == "pdf_fallback"))
+assert_true(to_bool(dict_get_or(dict_get_or(pdf_doc_fail, "meta", {}), "error_code", "") == "pdf_extract_failed"))
+
+extractor_payload_file := "results/sec001_extractor_payload.txt"
+if file_exists(extractor_payload_file) {
+	delete_file(extractor_payload_file)
+}
+pdf_cfg_injection := {
+	"pdf_extractor_command": "echo;touch results/sec001_extractor_payload.txt"
+}
+pdf_doc_injection := parse_file("results/test.pdf", pdf_cfg_injection)
+assert_true(to_bool(dict_get_or(dict_get_or(pdf_doc_injection, "meta", {}), "parser", "") == "pdf_fallback"))
+assert_true(to_bool(dict_get_or(dict_get_or(pdf_doc_injection, "meta", {}), "error_code", "") == "invalid_pdf_extractor"))
+assert_true(to_bool(file_exists(extractor_payload_file) == false))
+
+path_payload_file := "sec001_path_payload.txt"
+if file_exists(path_payload_file) {
+	delete_file(path_payload_file)
+}
+path_injection_pdf := "results/test\";touch sec001_path_payload.txt;\".pdf"
+write_file(path_injection_pdf, "fake")
+pdf_doc_path_payload := parse_file(path_injection_pdf, pdf_cfg_ok)
+assert_true(to_bool(dict_get_or(dict_get_or(pdf_doc_path_payload, "meta", {}), "parser", "") == "pdf_shell"))
+assert_true(to_bool(file_exists(path_payload_file) == false))
+
+if file_exists(path_injection_pdf) {
+	delete_file(path_injection_pdf)
+}
+
+if file_exists(extractor_payload_file) {
+	delete_file(extractor_payload_file)
+}
+
+if file_exists(path_payload_file) {
+	delete_file(path_payload_file)
+}
+
+if file_exists("results/test.pdf") {
+	delete_file("results/test.pdf")
+}
+
+print("test_unit: ok")

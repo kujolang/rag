@@ -1,0 +1,84 @@
+from src.common import dict_get_or, read_json_file_or
+from src.tests_helpers import assert_true
+
+kujo_bin := env_or("KUJO_BIN", "/path/to/kujo/target/debug/kujo")
+
+func parse_json_safe(text) {
+	payload := {}
+	err := null
+	try {
+		payload := parse_json(text)
+	} except e {
+		err := e
+	}
+	if type(err) != "null" {
+		return {
+			"ok": false,
+			"data": {},
+			"error": to_string(err)
+		}
+	}
+	return {
+		"ok": true,
+		"data": payload,
+		"error": ""
+	}
+}
+
+suffix := to_string(current_timestamp())
+output_path := "/tmp/kujo_rag_release_eval_report_" + suffix + ".json"
+trend_path := "/tmp/kujo_rag_release_eval_trend_" + suffix + ".json"
+index_path := "/tmp/kujo_rag_release_eval_index_" + suffix + ".json"
+thresholds_path := "/tmp/kujo_rag_release_eval_thresholds_" + suffix + ".json"
+
+write_file(thresholds_path, to_json({
+	"min_quality_pass_rate": 0.875,
+	"max_error_rate": 0.0,
+	"max_avg_latency_ms": 10000,
+	"max_p95_latency_ms": 20000,
+	"min_average_confidence": 0.35,
+	"min_average_grounding": 0.5,
+	"min_case_count": 12
+}))
+
+cmd := "KUJO_RAG_RELEASE_EVAL_OUTPUT_PATH=" + output_path + " KUJO_RAG_RELEASE_EVAL_TREND_PATH=" + trend_path + " KUJO_RAG_RELEASE_EVAL_TREND_HISTORY_LIMIT=5 KUJO_RAG_RELEASE_EVAL_INDEX_PATH=" + index_path + " KUJO_RAG_RELEASE_EVAL_THRESHOLDS_PATH=" + thresholds_path + " " + kujo_bin + " run scripts/run_release_evaluation.kujo --interpreter"
+
+run_one := execute_status(cmd, {"timeout_ms": 240000})
+assert_true(to_bool(type(run_one) == "struct"))
+assert_true(to_bool(run_one.success == true))
+
+parsed_one := parse_json_safe(to_string(run_one.stdout))
+assert_true(to_bool(dict_get_or(parsed_one, "ok", false) == true))
+payload_one := dict_get_or(parsed_one, "data", {})
+assert_true(to_bool(dict_get_or(payload_one, "ok", false) == true))
+assert_true(to_bool(dict_get_or(payload_one, "trend_history_count", 0) >= 1))
+assert_true(to_bool(has_key(payload_one, "trend_report") == 1))
+
+run_two := execute_status(cmd, {"timeout_ms": 240000})
+assert_true(to_bool(type(run_two) == "struct"))
+assert_true(to_bool(run_two.success == true))
+
+parsed_two := parse_json_safe(to_string(run_two.stdout))
+assert_true(to_bool(dict_get_or(parsed_two, "ok", false) == true))
+payload_two := dict_get_or(parsed_two, "data", {})
+assert_true(to_bool(dict_get_or(payload_two, "trend_history_count", 0) >= 2))
+assert_true(to_bool(has_key(dict_get_or(payload_two, "trend_report", {}), "current") == 1))
+assert_true(to_bool(has_key(dict_get_or(payload_two, "trend_report", {}), "regressions") == 1))
+
+trend_payload := read_json_file_or(trend_path, {})
+assert_true(to_bool(len(dict_get_or(trend_payload, "history", [])) >= 2))
+
+if file_exists(output_path) {
+	delete_file(output_path)
+}
+if file_exists(trend_path) {
+	delete_file(trend_path)
+}
+if file_exists(index_path) {
+	delete_file(index_path)
+}
+if file_exists(thresholds_path) {
+	delete_file(thresholds_path)
+}
+
+print("test_release_eval_trend_report: ok")

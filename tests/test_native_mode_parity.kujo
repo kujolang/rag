@@ -1,0 +1,71 @@
+from src.common import dict_get_or
+
+kujo_bin := env_or("KUJO_BIN", "kujo")
+namespace := "native_mode_parity_" + to_string(current_timestamp())
+
+func expect(condition, message) {
+	if to_bool(condition) == false {
+		print("test_native_mode_parity assertion failed: " + message)
+		exit(1)
+	}
+}
+
+func run_cmd(command) {
+	res := execute_status(command, {"timeout_ms": 180000})
+	if type(res) == "struct" {
+		return {
+			"ok": res.success,
+			"stdout": to_string(res.stdout),
+			"stderr": to_string(res.stderr)
+		}
+	}
+	return {
+		"ok": false,
+		"stdout": "",
+		"stderr": "invalid execute_status result"
+	}
+}
+
+func parse_json_safe(text) {
+	obj := {}
+	err := null
+	try {
+		obj := parse_json(text)
+	} except e {
+		err := e
+	}
+	if type(err) != "null" {
+		return {
+			"ok": false,
+			"data": {},
+			"error": to_string(err)
+		}
+	}
+	return {
+		"ok": true,
+		"data": obj,
+		"error": ""
+	}
+}
+
+ingest_cmd := kujo_bin + " run main.kujo ingest --path ./examples/kujo_docs --recursive true --namespace " + namespace
+ingest_res := run_cmd(ingest_cmd)
+expect(dict_get_or(ingest_res, "ok", false) == true, "native ingest command should succeed")
+
+ingest_parsed := parse_json_safe(dict_get_or(ingest_res, "stdout", ""))
+expect(dict_get_or(ingest_parsed, "ok", false) == true, "native ingest stdout should be JSON")
+ingest_payload := dict_get_or(ingest_parsed, "data", {})
+expect(dict_get_or(ingest_payload, "ok", false) == true, "native ingest payload should report ok=true")
+expect(dict_get_or(dict_get_or(ingest_payload, "stats", {}), "docs_loaded", 0) >= 1, "native ingest should load at least one document")
+
+query_cmd := kujo_bin + " run main.kujo query --question \"What is Kujo optimized for?\" --namespace " + namespace
+query_res := run_cmd(query_cmd)
+expect(dict_get_or(query_res, "ok", false) == true, "native query command should succeed")
+
+query_parsed := parse_json_safe(dict_get_or(query_res, "stdout", ""))
+expect(dict_get_or(query_parsed, "ok", false) == true, "native query stdout should be JSON")
+query_payload := dict_get_or(query_parsed, "data", {})
+expect(dict_get_or(query_payload, "count", 0) >= 1, "native query should return at least one citation candidate")
+expect(len(dict_get_or(query_payload, "citations", [])) >= 1, "native query should include at least one citation")
+
+print("test_native_mode_parity: ok")

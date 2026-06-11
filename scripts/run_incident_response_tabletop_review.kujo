@@ -1,0 +1,333 @@
+from src.common import dict_get_or, read_json_file_or, write_json_file, str_or, num_or
+
+func ensure_dir(path_value) {
+	if path_value == "" || path_value == "." {
+		return true
+	}
+	if path_exists(path_value) {
+		return true
+	}
+	parent := dirname(path_value)
+	if parent != "" && parent != "." && parent != path_value {
+		_ = ensure_dir(parent)
+	}
+	create_dir(path_value)
+	return true
+}
+
+func ensure_parent_dir(path_value) {
+	dir := dirname(path_value)
+	if dir == "" || dir == "." {
+		return true
+	}
+	return ensure_dir(dir)
+}
+
+func normalize_text(value) {
+	return trim(str_or(value, ""))
+}
+
+func normalize_text_array(raw_items) {
+	items := []
+	if type(raw_items) != "array" {
+		return items
+	}
+	item_index := 0
+	while item_index < len(raw_items) {
+		value := normalize_text(raw_items[item_index])
+		if value != "" {
+			items = push(items, value)
+		}
+		item_index = item_index + 1
+	}
+	return items
+}
+
+func count_occurrences(text, token) {
+	if type(text) != "string" || type(token) != "string" {
+		return 0
+	}
+	if token == "" {
+		return 0
+	}
+	parts := split(text, token)
+	if len(parts) == 0 {
+		return 0
+	}
+	return len(parts) - 1
+}
+
+func text_has_token(text, token) {
+	return count_occurrences(text, token) > 0
+}
+
+func normalize_follow_up_issue(raw_issue) {
+	return {
+		"id": normalize_text(dict_get_or(raw_issue, "id", "")),
+		"title": normalize_text(dict_get_or(raw_issue, "title", "")),
+		"owner": normalize_text(dict_get_or(raw_issue, "owner", "")),
+		"status": normalize_text(dict_get_or(raw_issue, "status", "")),
+		"target_date": normalize_text(dict_get_or(raw_issue, "target_date", ""))
+	}
+}
+
+func follow_up_issue_valid(issue) {
+	return normalize_text(dict_get_or(issue, "id", "")) != "" && normalize_text(dict_get_or(issue, "title", "")) != "" && normalize_text(dict_get_or(issue, "owner", "")) != "" && normalize_text(dict_get_or(issue, "status", "")) != "" && normalize_text(dict_get_or(issue, "target_date", "")) != ""
+}
+
+func normalize_scenario(raw_scenario) {
+	raw_follow_up_issues := dict_get_or(raw_scenario, "follow_up_issues", [])
+	follow_up_issues := []
+	if type(raw_follow_up_issues) == "array" {
+		issue_index := 0
+		while issue_index < len(raw_follow_up_issues) {
+			follow_up_issues = push(follow_up_issues, normalize_follow_up_issue(raw_follow_up_issues[issue_index]))
+			issue_index = issue_index + 1
+		}
+	}
+	return {
+		"id": normalize_text(dict_get_or(raw_scenario, "id", "")),
+		"incident_type": normalize_text(dict_get_or(raw_scenario, "incident_type", "")),
+		"runbook_path": normalize_text(dict_get_or(raw_scenario, "runbook_path", "")),
+		"tabletop_report_path": normalize_text(dict_get_or(raw_scenario, "tabletop_report_path", "")),
+		"executed_at_unix_ms": num_or(dict_get_or(raw_scenario, "executed_at_unix_ms", 0), 0),
+		"facilitator": normalize_text(dict_get_or(raw_scenario, "facilitator", "")),
+		"participants": normalize_text_array(dict_get_or(raw_scenario, "participants", [])),
+		"lessons_learned": normalize_text_array(dict_get_or(raw_scenario, "lessons_learned", [])),
+		"follow_up_issues": follow_up_issues
+	}
+}
+
+func scenario_has_type(scenarios, expected_type) {
+	scenario_index := 0
+	while scenario_index < len(scenarios) {
+		scenario := scenarios[scenario_index]
+		if normalize_text(dict_get_or(scenario, "incident_type", "")) == expected_type {
+			return true
+		}
+		scenario_index = scenario_index + 1
+	}
+	return false
+}
+
+plan_path := env_or("KUJO_RAG_INCIDENT_TABLETOP_PLAN_PATH", "./config/incident_response_tabletop_plan.json")
+output_path := env_or("KUJO_RAG_INCIDENT_TABLETOP_OUTPUT_PATH", "./results/security/incident_response_tabletop_status.json")
+workflow_doc_path := env_or("KUJO_RAG_INCIDENT_TABLETOP_WORKFLOW_DOC_PATH", "./docs/incident-response-tabletop-workflow.md")
+release_process_doc_path := env_or("KUJO_RAG_RELEASE_PROCESS_DOC_PATH", "./docs/release-process.md")
+workflow_path := env_or("KUJO_RAG_INCIDENT_TABLETOP_WORKFLOW_PATH", "./.github/workflows/incident-response-tabletop-review.yml")
+
+_ = ensure_parent_dir(output_path)
+
+raw_plan := read_json_file_or(plan_path, {})
+plan_available := type(raw_plan) == "dict" && len(keys(raw_plan)) > 0
+version := normalize_text(dict_get_or(raw_plan, "version", ""))
+owner := normalize_text(dict_get_or(raw_plan, "owner", ""))
+last_drill_at_unix_ms := num_or(dict_get_or(raw_plan, "last_drill_at_unix_ms", 0), 0)
+review_cadence_days := num_or(dict_get_or(raw_plan, "review_cadence_days", 30), 30)
+if review_cadence_days < 1 {
+	review_cadence_days = 1
+}
+
+raw_scenarios := dict_get_or(raw_plan, "scenarios", [])
+scenarios := []
+if type(raw_scenarios) == "array" {
+	scenario_source_index := 0
+	while scenario_source_index < len(raw_scenarios) {
+		scenario := normalize_scenario(raw_scenarios[scenario_source_index])
+		if dict_get_or(scenario, "id", "") != "" {
+			scenarios = push(scenarios, scenario)
+		}
+		scenario_source_index = scenario_source_index + 1
+	}
+}
+
+required_types := ["auth_compromise", "data_corruption", "service_outage", "quality_regression"]
+missing_required_types := []
+required_type_index := 0
+while required_type_index < len(required_types) {
+	required_type := required_types[required_type_index]
+	if scenario_has_type(scenarios, required_type) == false {
+		missing_required_types = push(missing_required_types, required_type)
+	}
+	required_type_index = required_type_index + 1
+}
+
+required_scenarios_covered := len(missing_required_types) == 0
+
+runbooks_present := true
+reports_present := true
+follow_up_tracking_present := true
+scenarios_valid := true
+missing_runbooks := []
+missing_reports := []
+scenario_checks := []
+
+scenario_index := 0
+while scenario_index < len(scenarios) {
+	scenario := scenarios[scenario_index]
+	scenario_id := normalize_text(dict_get_or(scenario, "id", ""))
+	incident_type := normalize_text(dict_get_or(scenario, "incident_type", ""))
+	runbook_path := normalize_text(dict_get_or(scenario, "runbook_path", ""))
+	report_path := normalize_text(dict_get_or(scenario, "tabletop_report_path", ""))
+	executed_at_unix_ms := num_or(dict_get_or(scenario, "executed_at_unix_ms", 0), 0)
+	facilitator := normalize_text(dict_get_or(scenario, "facilitator", ""))
+	participants := normalize_text_array(dict_get_or(scenario, "participants", []))
+	lessons_learned := normalize_text_array(dict_get_or(scenario, "lessons_learned", []))
+	follow_up_issues := dict_get_or(scenario, "follow_up_issues", [])
+
+	runbook_exists := runbook_path != "" && path_exists(runbook_path)
+	report_exists := report_path != "" && path_exists(report_path)
+	if runbook_exists == false {
+		runbooks_present = false
+		if runbook_path != "" {
+			missing_runbooks = push(missing_runbooks, runbook_path)
+		}
+	}
+	if report_exists == false {
+		reports_present = false
+		if report_path != "" {
+			missing_reports = push(missing_reports, report_path)
+		}
+	}
+
+	issues_valid := true
+	if type(follow_up_issues) != "array" || len(follow_up_issues) == 0 {
+		issues_valid = false
+	}
+	if type(follow_up_issues) == "array" {
+		issue_index := 0
+		while issue_index < len(follow_up_issues) {
+			if follow_up_issue_valid(follow_up_issues[issue_index]) == false {
+				issues_valid = false
+			}
+			issue_index = issue_index + 1
+		}
+	}
+	if issues_valid == false {
+		follow_up_tracking_present = false
+	}
+
+	scenario_valid := scenario_id != "" && incident_type != "" && runbook_path != "" && report_path != "" && executed_at_unix_ms > 0 && facilitator != "" && len(participants) > 1 && len(lessons_learned) > 0 && issues_valid
+	if scenario_valid == false {
+		scenarios_valid = false
+	}
+
+	scenario_checks = push(scenario_checks, {
+		"id": scenario_id,
+		"incident_type": incident_type,
+		"runbook_exists": runbook_exists,
+		"report_exists": report_exists,
+		"participant_count": len(participants),
+		"lesson_count": len(lessons_learned),
+		"follow_up_issue_count": len(follow_up_issues),
+		"follow_up_tracking_valid": issues_valid,
+		"scenario_valid": scenario_valid
+	})
+
+	scenario_index = scenario_index + 1
+}
+
+last_drill_due_at_unix_ms := 0
+drill_overdue := false
+if last_drill_at_unix_ms > 0 {
+	last_drill_due_at_unix_ms = last_drill_at_unix_ms + (review_cadence_days * 86400000)
+	drill_overdue = current_timestamp() > last_drill_due_at_unix_ms
+}
+
+workflow_doc_exists := path_exists(workflow_doc_path)
+release_process_doc_exists := path_exists(release_process_doc_path)
+workflow_exists := path_exists(workflow_path)
+
+workflow_doc_text := ""
+if workflow_doc_exists {
+	workflow_doc_text = read_file(workflow_doc_path)
+}
+release_process_doc_text := ""
+if release_process_doc_exists {
+	release_process_doc_text = read_file(release_process_doc_path)
+}
+workflow_text := ""
+if workflow_exists {
+	workflow_text = read_file(workflow_path)
+}
+
+workflow_doc_defined := workflow_doc_exists && text_has_token(workflow_doc_text, "Incident Response Tabletop Workflow") && text_has_token(workflow_doc_text, "follow-up issue tracking") && text_has_token(workflow_doc_text, "scripts/run_incident_response_tabletop_review.kujo")
+workflow_doc_name := basename(workflow_doc_path)
+release_process_linked := release_process_doc_exists && text_has_token(release_process_doc_text, "run_incident_response_tabletop_review.kujo") && (text_has_token(release_process_doc_text, workflow_doc_path) || text_has_token(release_process_doc_text, workflow_doc_name))
+workflow_defined := workflow_exists && text_has_token(workflow_text, "run_incident_response_tabletop_review.kujo") && text_has_token(workflow_text, "schedule:")
+
+gates := {
+	"plan_available": plan_available,
+	"version_defined": version != "",
+	"owner_defined": owner != "",
+	"cadence_defined": review_cadence_days > 0,
+	"last_drill_defined": last_drill_at_unix_ms > 0,
+	"drill_not_overdue": drill_overdue == false,
+	"scenario_count": len(scenarios) > 0,
+	"required_scenarios_covered": required_scenarios_covered,
+	"runbooks_present": runbooks_present,
+	"reports_present": reports_present,
+	"follow_up_tracking_present": follow_up_tracking_present,
+	"scenarios_valid": scenarios_valid,
+	"workflow_doc_defined": workflow_doc_defined,
+	"release_process_linked": release_process_linked,
+	"workflow_defined": workflow_defined
+}
+
+ok := true
+gate_names := [
+	"plan_available",
+	"version_defined",
+	"owner_defined",
+	"cadence_defined",
+	"last_drill_defined",
+	"drill_not_overdue",
+	"scenario_count",
+	"required_scenarios_covered",
+	"runbooks_present",
+	"reports_present",
+	"follow_up_tracking_present",
+	"scenarios_valid",
+	"workflow_doc_defined",
+	"release_process_linked",
+	"workflow_defined"
+]
+
+gate_index := 0
+while gate_index < len(gate_names) {
+	gate_name := gate_names[gate_index]
+	if dict_get_or(gates, gate_name, false) == false {
+		ok = false
+	}
+	gate_index = gate_index + 1
+}
+
+result := {
+	"ok": ok,
+	"generated_at_unix_ms": current_timestamp(),
+	"plan_path": plan_path,
+	"output_path": output_path,
+	"workflow_doc_path": workflow_doc_path,
+	"release_process_doc_path": release_process_doc_path,
+	"workflow_path": workflow_path,
+	"version": version,
+	"owner": owner,
+	"last_drill_at_unix_ms": last_drill_at_unix_ms,
+	"review_cadence_days": review_cadence_days,
+	"last_drill_due_at_unix_ms": last_drill_due_at_unix_ms,
+	"drill_overdue": drill_overdue,
+	"scenario_count": len(scenarios),
+	"required_types": required_types,
+	"missing_required_types": missing_required_types,
+	"missing_runbooks": missing_runbooks,
+	"missing_reports": missing_reports,
+	"scenario_checks": scenario_checks,
+	"gates": gates
+}
+
+write_json_file(output_path, result)
+print(to_json(result))
+
+if ok == false {
+	exit(1)
+}

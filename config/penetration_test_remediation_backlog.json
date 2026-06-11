@@ -1,0 +1,33 @@
+{
+  "version": "pen-test-remediation-backlog-v1",
+  "updated_at_unix_ms": 1779819000000,
+  "items": [
+    {
+      "ticket_id": "SEC-PT-241",
+      "finding_id": "PT-2026-05-001",
+      "severity": "high",
+      "status": "resolved",
+      "owner": "Platform Security",
+      "target_fix_by_unix_ms": 1779991800000,
+      "resolved_at_unix_ms": 1779905400000,
+      "evidence_paths": [
+        "./docs/penetration-test-remediation-evidence.md"
+      ]
+    },
+    {
+      "ticket_id": "SEC-PT-242",
+      "finding_id": "PT-2026-05-002",
+      "severity": "critical",
+      "status": "accepted_exception",
+      "owner": "Security Team",
+      "target_fix_by_unix_ms": 1780164600000,
+      "resolved_at_unix_ms": 0,
+      "exception_id": "EXC-2026-05-PT-002",
+      "exception_approved_by": "Security Director",
+      "exception_expires_at_unix_ms": 1782417600000,
+      "evidence_paths": [
+        "./docs/penetration-test-remediation-evidence.md"
+      ]
+    }
+  ]
+}

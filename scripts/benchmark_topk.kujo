@@ -1,0 +1,98 @@
+from src.common import rank_desc, dict_get_or, num_or
+
+func build_dataset(count) {
+	items := []
+	i := 0
+	while i < count {
+		score := to_float((i * 7919) % 1000) / 10.0
+		items := push(items, {
+			"id": i,
+			"score": score
+		})
+		i := i + 1
+	}
+	return items
+}
+
+func old_rank_desc(items, score_key, top_k) {
+	arr := []
+	for item in items {
+		arr := push(arr, item)
+	}
+
+	n := len(arr)
+	i := 0
+	while i < n {
+		best := i
+		j := i + 1
+		while j < n {
+			left := num_or(dict_get_or(arr[j], score_key, 0.0), 0.0)
+			right := num_or(dict_get_or(arr[best], score_key, 0.0), 0.0)
+			if left > right {
+				best := j
+			}
+			j := j + 1
+		}
+		if best != i {
+			tmp := arr[i]
+			arr[i] := arr[best]
+			arr[best] := tmp
+		}
+		i := i + 1
+	}
+
+	limit := top_k
+	if limit > len(arr) {
+		limit := len(arr)
+	}
+	result := []
+	i = 0
+	while i < limit {
+		result := push(result, arr[i])
+		i := i + 1
+	}
+	return result
+}
+
+func ids(records) {
+	out := []
+	for record in records {
+		out := push(out, dict_get_or(record, "id", -1))
+	}
+	return out
+}
+
+size := 200
+top_k := 25
+dataset := build_dataset(size)
+
+old_start := current_timestamp()
+old_result := old_rank_desc(dataset, "score", top_k)
+old_ms := current_timestamp() - old_start
+
+new_start := current_timestamp()
+new_result := rank_desc(dataset, "score", top_k)
+new_ms := current_timestamp() - new_start
+
+old_ids := ids(old_result)
+new_ids := ids(new_result)
+rankings_match := to_json(old_ids) == to_json(new_ids)
+
+ratio := 0.0
+if new_ms > 0 {
+	ratio = to_float(old_ms) / to_float(new_ms)
+}
+
+print(to_json({
+	"ok": rankings_match,
+	"size": size,
+	"top_k": top_k,
+	"old_ms": old_ms,
+	"new_ms": new_ms,
+	"speedup_ratio": ratio,
+	"same_ranking": rankings_match
+}))
+
+if rankings_match == false {
+	exit(1)
+}

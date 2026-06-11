@@ -1,0 +1,127 @@
+from src.common import dict_get_or, read_json_file_or
+from src.tests_helpers import assert_true
+
+kujo_bin := env_or("KUJO_BIN", "/path/to/kujo/target/debug/kujo")
+suffix := to_string(current_timestamp())
+
+scenarios_path := "/tmp/kujo_rag_chaos_scenarios_" + suffix + ".json"
+doc_path := "/tmp/kujo_rag_chaos_doc_" + suffix + ".md"
+release_doc_path := "/tmp/kujo_rag_chaos_release_" + suffix + ".md"
+workflow_path := "/tmp/kujo_rag_chaos_workflow_" + suffix + ".yml"
+output_valid_path := "/tmp/kujo_rag_chaos_status_valid_" + suffix + ".json"
+output_invalid_path := "/tmp/kujo_rag_chaos_status_invalid_" + suffix + ".json"
+
+valid_payload := {
+	"suite_name": "chaos_fault_injection_review_v1",
+	"required_fault_types": ["timeout", "storage_failure", "dependency_failure"],
+	"scenarios": [
+		{
+			"fault_type": "timeout",
+			"enabled": true,
+			"expected": {
+				"bounded_behavior": "bounded",
+				"observability_signal": "metrics",
+				"recovery_check": "recovered"
+			},
+			"assertions": ["bounded_behavior", "observability_signal", "recovery_check"]
+		},
+		{
+			"fault_type": "storage_failure",
+			"enabled": true,
+			"expected": {
+				"bounded_behavior": "bounded",
+				"observability_signal": "metrics",
+				"recovery_check": "recovered"
+			},
+			"assertions": ["bounded_behavior", "observability_signal", "recovery_check"]
+		},
+		{
+			"fault_type": "dependency_failure",
+			"enabled": true,
+			"expected": {
+				"bounded_behavior": "bounded",
+				"observability_signal": "metrics",
+				"recovery_check": "recovered"
+			},
+			"assertions": ["bounded_behavior", "observability_signal", "recovery_check"]
+		}
+	]
+}
+
+write_file(scenarios_path, to_json(valid_payload))
+write_file(doc_path, "# Chaos and Fault-Injection Scenarios\n\nThis baseline covers timeout, storage failure, and dependency failure paths with graceful degradation and recovery verification requirements.\n\nRun kujo run scripts/run_chaos_fault_injection_review.kujo --interpreter\n")
+write_file(release_doc_path, "# Release Process\n\nrun_chaos_fault_injection_review.kujo\ndocs/chaos-fault-injection-scenarios.md\n")
+write_file(workflow_path, "name: chaos-fault-injection-review\non:\n  schedule:\n    - cron: '0 12 * * 3'\njobs:\n  review:\n    steps:\n      - run: kujo run scripts/run_chaos_fault_injection_review.kujo --interpreter\n")
+
+valid_cmd := "KUJO_RAG_CHAOS_SCENARIOS_PATH=" + scenarios_path + " KUJO_RAG_CHAOS_DOC_PATH=" + doc_path + " KUJO_RAG_CHAOS_RELEASE_PROCESS_DOC_PATH=" + release_doc_path + " KUJO_RAG_CHAOS_WORKFLOW_PATH=" + workflow_path + " KUJO_RAG_CHAOS_OUTPUT_PATH=" + output_valid_path + " " + kujo_bin + " run scripts/run_chaos_fault_injection_review.kujo --interpreter"
+valid_res := execute_status(valid_cmd, {"timeout_ms": 240000})
+assert_true(to_bool(type(valid_res) == "struct"))
+assert_true(to_bool(valid_res.success == true))
+
+valid_payload_out := read_json_file_or(output_valid_path, {})
+assert_true(to_bool(dict_get_or(valid_payload_out, "ok", false) == true))
+valid_gates := dict_get_or(valid_payload_out, "gates", {})
+assert_true(to_bool(dict_get_or(valid_gates, "timeout_defined", false) == true))
+assert_true(to_bool(dict_get_or(valid_gates, "dependency_failure_defined", false) == true))
+
+invalid_payload := {
+	"suite_name": "chaos_fault_injection_review_v1",
+	"required_fault_types": ["timeout", "storage_failure", "dependency_failure"],
+	"scenarios": [
+		{
+			"fault_type": "timeout",
+			"enabled": true,
+			"expected": {
+				"bounded_behavior": "bounded",
+				"observability_signal": "metrics",
+				"recovery_check": "recovered"
+			},
+			"assertions": ["bounded_behavior", "observability_signal", "recovery_check"]
+		},
+		{
+			"fault_type": "storage_failure",
+			"enabled": true,
+			"expected": {
+				"bounded_behavior": "bounded",
+				"observability_signal": "metrics",
+				"recovery_check": "recovered"
+			},
+			"assertions": ["bounded_behavior", "observability_signal", "recovery_check"]
+		}
+	]
+}
+if file_exists(scenarios_path) {
+	delete_file(scenarios_path)
+}
+write_file(scenarios_path, to_json(invalid_payload))
+
+invalid_cmd := "KUJO_RAG_CHAOS_SCENARIOS_PATH=" + scenarios_path + " KUJO_RAG_CHAOS_DOC_PATH=" + doc_path + " KUJO_RAG_CHAOS_RELEASE_PROCESS_DOC_PATH=" + release_doc_path + " KUJO_RAG_CHAOS_WORKFLOW_PATH=" + workflow_path + " KUJO_RAG_CHAOS_OUTPUT_PATH=" + output_invalid_path + " " + kujo_bin + " run scripts/run_chaos_fault_injection_review.kujo --interpreter"
+invalid_res := execute_status(invalid_cmd, {"timeout_ms": 240000})
+assert_true(to_bool(type(invalid_res) == "struct"))
+assert_true(to_bool(invalid_res.success == false))
+
+invalid_payload_out := read_json_file_or(output_invalid_path, {})
+assert_true(to_bool(dict_get_or(invalid_payload_out, "ok", true) == false))
+invalid_gates := dict_get_or(invalid_payload_out, "gates", {})
+assert_true(to_bool(dict_get_or(invalid_gates, "dependency_failure_defined", true) == false))
+
+if file_exists(scenarios_path) {
+	delete_file(scenarios_path)
+}
+if file_exists(doc_path) {
+	delete_file(doc_path)
+}
+if file_exists(release_doc_path) {
+	delete_file(release_doc_path)
+}
+if file_exists(workflow_path) {
+	delete_file(workflow_path)
+}
+if file_exists(output_valid_path) {
+	delete_file(output_valid_path)
+}
+if file_exists(output_invalid_path) {
+	delete_file(output_invalid_path)
+}
+
+print("test_chaos_fault_injection_review: ok")

@@ -1,0 +1,156 @@
+from src.common import dict_get_or, read_json_file_or, str_or, write_json_file
+
+func ensure_dir(path_value) {
+	if path_value == "" || path_value == "." {
+		return true
+	}
+	if path_exists(path_value) {
+		return true
+	}
+	parent := dirname(path_value)
+	if parent != "" && parent != "." && parent != path_value {
+		_ = ensure_dir(parent)
+	}
+	create_dir(path_value)
+	return true
+}
+
+func ensure_parent_dir(path_value) {
+	dir := dirname(path_value)
+	if dir == "" || dir == "." {
+		return true
+	}
+	return ensure_dir(dir)
+}
+
+func normalize_text(value) {
+	return trim(str_or(value, ""))
+}
+
+func count_occurrences(text, token) {
+	if type(text) != "string" || type(token) != "string" {
+		return 0
+	}
+	if token == "" {
+		return 0
+	}
+	parts := split(text, token)
+	if len(parts) == 0 {
+		return 0
+	}
+	return len(parts) - 1
+}
+
+func text_has_token(text, token) {
+	return count_occurrences(text, token) > 0
+}
+
+func list_has_value(values, target) {
+	if type(values) != "array" {
+		return false
+	}
+	target_norm := normalize_text(target)
+	i := 0
+	while i < len(values) {
+		entry_norm := normalize_text(values[i])
+		if entry_norm == target_norm {
+			return true
+		}
+		i = i + 1
+	}
+	return false
+}
+
+func scenario_gate(scenarios, fault_type) {
+	if type(scenarios) != "array" {
+		return false
+	}
+	required_fault := normalize_text(fault_type)
+	i := 0
+	while i < len(scenarios) {
+		scenario := scenarios[i]
+		if type(scenario) == "dict" {
+			scenario_fault := normalize_text(dict_get_or(scenario, "fault_type", ""))
+			if scenario_fault == required_fault {
+				enabled := to_bool(dict_get_or(scenario, "enabled", false))
+				expected := dict_get_or(scenario, "expected", {})
+				assertions := dict_get_or(scenario, "assertions", [])
+				bounded_ok := normalize_text(dict_get_or(expected, "bounded_behavior", "")) != ""
+				observability_ok := normalize_text(dict_get_or(expected, "observability_signal", "")) != ""
+				recovery_ok := normalize_text(dict_get_or(expected, "recovery_check", "")) != ""
+				assertions_ok := type(assertions) == "array" && len(assertions) >= 3 && list_has_value(assertions, "bounded_behavior") && list_has_value(assertions, "observability_signal") && list_has_value(assertions, "recovery_check")
+				return enabled && bounded_ok && observability_ok && recovery_ok && assertions_ok
+			}
+		}
+		i = i + 1
+	}
+	return false
+}
+
+scenarios_path := env_or("KUJO_RAG_CHAOS_SCENARIOS_PATH", "./config/chaos_fault_injection_scenarios.json")
+doc_path := env_or("KUJO_RAG_CHAOS_DOC_PATH", "./docs/chaos-fault-injection-scenarios.md")
+release_process_doc_path := env_or("KUJO_RAG_CHAOS_RELEASE_PROCESS_DOC_PATH", "./docs/release-process.md")
+workflow_path := env_or("KUJO_RAG_CHAOS_WORKFLOW_PATH", "./.github/workflows/chaos-fault-injection-review.yml")
+output_path := env_or("KUJO_RAG_CHAOS_OUTPUT_PATH", "./results/reliability/chaos_fault_injection_status.json")
+
+_ = ensure_parent_dir(output_path)
+
+scenarios_payload := read_json_file_or(scenarios_path, {})
+scenarios := dict_get_or(scenarios_payload, "scenarios", [])
+required_fault_types := dict_get_or(scenarios_payload, "required_fault_types", [])
+
+scenarios_defined := type(scenarios_payload) == "dict" && type(scenarios) == "array" && len(scenarios) >= 3 && list_has_value(required_fault_types, "timeout") && list_has_value(required_fault_types, "storage_failure") && list_has_value(required_fault_types, "dependency_failure")
+timeout_defined := scenario_gate(scenarios, "timeout")
+storage_failure_defined := scenario_gate(scenarios, "storage_failure")
+dependency_failure_defined := scenario_gate(scenarios, "dependency_failure")
+
+doc_exists := file_exists(doc_path)
+doc_text := ""
+if doc_exists {
+	doc_text = read_file(doc_path)
+}
+doc_defined := doc_exists && text_has_token(doc_text, "Chaos and Fault-Injection Scenarios") && text_has_token(doc_text, "timeout") && text_has_token(doc_text, "storage failure") && text_has_token(doc_text, "dependency failure") && text_has_token(doc_text, "graceful degradation") && text_has_token(doc_text, "recovery verification") && text_has_token(doc_text, "run_chaos_fault_injection_review.kujo")
+
+release_process_exists := file_exists(release_process_doc_path)
+release_process_text := ""
+if release_process_exists {
+	release_process_text = read_file(release_process_doc_path)
+}
+release_process_linked := release_process_exists && text_has_token(release_process_text, "run_chaos_fault_injection_review.kujo") && text_has_token(release_process_text, "docs/chaos-fault-injection-scenarios.md")
+
+workflow_exists := file_exists(workflow_path)
+workflow_text := ""
+if workflow_exists {
+	workflow_text = read_file(workflow_path)
+}
+workflow_defined := workflow_exists && text_has_token(workflow_text, "chaos-fault-injection-review") && text_has_token(workflow_text, "run_chaos_fault_injection_review.kujo") && text_has_token(workflow_text, "schedule:")
+
+ok := scenarios_defined && timeout_defined && storage_failure_defined && dependency_failure_defined && doc_defined && release_process_linked && workflow_defined
+
+result := {
+	"ok": ok,
+	"generated_at_unix_ms": current_timestamp(),
+	"scenarios_path": scenarios_path,
+	"doc_path": doc_path,
+	"release_process_doc_path": release_process_doc_path,
+	"workflow_path": workflow_path,
+	"gates": {
+		"scenarios_defined": scenarios_defined,
+		"timeout_defined": timeout_defined,
+		"storage_failure_defined": storage_failure_defined,
+		"dependency_failure_defined": dependency_failure_defined,
+		"doc_defined": doc_defined,
+		"release_process_linked": release_process_linked,
+		"workflow_defined": workflow_defined
+	}
+}
+
+if file_exists(output_path) {
+	delete_file(output_path)
+}
+write_json_file(output_path, result)
+print(to_json(result))
+
+if !ok {
+	exit(1)
+}

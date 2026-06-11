@@ -1,0 +1,6 @@
+.git
+.gitignore
+results
+data
+*.log
+*.tmp

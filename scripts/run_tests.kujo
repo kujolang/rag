@@ -1,0 +1,305 @@
+from src.common import read_json_file_or, dict_get_or
+
+kujo_bin := env_or("KUJO_BIN", "kujo")
+
+func normalize_text(value) {
+	if type(value) != "string" {
+		return ""
+	}
+	return trim(value)
+}
+
+func count_occurrences(text, token) {
+	if type(text) != "string" || type(token) != "string" {
+		return 0
+	}
+	if token == "" {
+		return 0
+	}
+	parts := split(text, token)
+	if len(parts) == 0 {
+		return 0
+	}
+	return len(parts) - 1
+}
+
+func supports_run_subcommand(help_text) {
+	lower_text := to_lower(help_text)
+	if count_occurrences(lower_text, " run ") > 0 {
+		return true
+	}
+	if count_occurrences(lower_text, "\nrun\n") > 0 {
+		return true
+	}
+	if count_occurrences(lower_text, "\nrun ") > 0 {
+		return true
+	}
+	if count_occurrences(lower_text, "\n  run") > 0 {
+		return true
+	}
+	return false
+}
+
+func validate_kujo_binary(bin_path) {
+	cmd := normalize_text(bin_path) + " --help"
+	res := execute_status(cmd, {"timeout_ms": 15000})
+	if type(res) != "struct" {
+		return {
+			"ok": false,
+			"code": "invalid_kujo_binary",
+			"message": "Failed to execute Kujo runtime binary.",
+			"details": {
+				"kujo_bin": bin_path,
+				"reason": "non_struct_result"
+			}
+		}
+	}
+
+	stdout := normalize_text(res.stdout)
+	stderr := normalize_text(res.stderr)
+	if to_bool(res.success) == false {
+		return {
+			"ok": false,
+			"code": "invalid_kujo_binary",
+			"message": "Configured Kujo runtime could not execute --help successfully.",
+			"details": {
+				"kujo_bin": bin_path,
+				"exit_code": res.exitcode,
+				"stderr": stderr,
+				"stdout": stdout
+			}
+		}
+	}
+
+	help_text := stdout + "\n" + stderr
+	if supports_run_subcommand(help_text) == false {
+		return {
+			"ok": false,
+			"code": "invalid_kujo_binary",
+			"message": "Configured Kujo runtime does not support the 'run' subcommand required by this project.",
+			"details": {
+				"kujo_bin": bin_path
+			}
+		}
+	}
+
+	return {
+		"ok": true,
+		"code": "",
+		"message": "",
+		"details": {
+			"kujo_bin": bin_path
+		}
+	}
+}
+
+func is_safe_test_file_path(path_value) {
+	path_text := normalize_text(path_value)
+	if path_text == "" {
+		return false
+	}
+	if to_bool(regex_match(path_text, "^[a-zA-Z0-9_./-]+$")) == false {
+		return false
+	}
+	return true
+}
+
+func parse_test_file_list(raw_list) {
+	parsed := []
+	raw_parts := split(to_string(raw_list), ",")
+	part_index := 0
+	while part_index < len(raw_parts) {
+		candidate := normalize_text(raw_parts[part_index])
+		if candidate != "" {
+			parsed = push(parsed, candidate)
+		}
+		part_index = part_index + 1
+	}
+	return parsed
+}
+
+default_tests := [
+	"tests/test_unit.kujo",
+	"tests/test_integration.kujo",
+	"tests/test_release_evaluation.kujo",
+	"tests/test_backend_contract.kujo",
+	"tests/test_bootstrap.kujo",
+	"tests/test_non_interpreter_bridge.kujo",
+	"tests/test_native_mode_parity.kujo",
+	"tests/test_api_contract.kujo",
+	"tests/test_security.kujo"
+]
+
+tests := default_tests
+fatal_error := null
+
+bin_validation := validate_kujo_binary(kujo_bin)
+if to_bool(dict_get_or(bin_validation, "ok", false)) == false {
+	fatal_error = {
+		"code": dict_get_or(bin_validation, "code", "invalid_kujo_binary"),
+		"message": dict_get_or(bin_validation, "message", "Invalid Kujo runtime binary."),
+		"details": dict_get_or(bin_validation, "details", {
+			"kujo_bin": kujo_bin
+		})
+	}
+}
+
+tests_env_raw := normalize_text(env_or("KUJO_RAG_TEST_FILES", ""))
+if tests_env_raw != "" && type(fatal_error) == "null" {
+	parsed_tests := parse_test_file_list(tests_env_raw)
+	if len(parsed_tests) == 0 {
+		fatal_error = {
+			"code": "invalid_test_file_list",
+			"message": "KUJO_RAG_TEST_FILES was provided but no valid test files were parsed.",
+			"details": {
+				"raw_value": tests_env_raw
+			}
+		}
+	}
+
+	verified_tests := []
+	list_index := 0
+	while list_index < len(parsed_tests) {
+		test_file := parsed_tests[list_index]
+		if is_safe_test_file_path(test_file) == false {
+			fatal_error = {
+				"code": "invalid_test_file_list",
+				"message": "KUJO_RAG_TEST_FILES contains an unsafe or malformed test file path.",
+				"details": {
+					"test_file": test_file,
+					"raw_value": tests_env_raw
+				}
+			}
+			break
+		}
+		if file_exists(test_file) == false {
+			fatal_error = {
+				"code": "invalid_test_file_list",
+				"message": "KUJO_RAG_TEST_FILES contains a file that does not exist.",
+				"details": {
+					"test_file": test_file,
+					"raw_value": tests_env_raw
+				}
+			}
+			break
+		}
+		verified_tests = push(verified_tests, test_file)
+		list_index = list_index + 1
+	}
+
+	if type(fatal_error) == "null" {
+		tests = verified_tests
+	}
+}
+
+if len(tests) == 0 && type(fatal_error) == "null" {
+	fatal_error = {
+		"code": "empty_test_list",
+		"message": "No tests were configured to run.",
+		"details": {
+			"kujo_bin": kujo_bin
+		}
+	}
+}
+
+warning_budget := read_json_file_or("./config/test_warning_budget.json", {
+	"total_warning_count_max": 1000,
+	"total_undefined_function_warning_count_max": 1000
+})
+if type(warning_budget) != "dict" {
+	warning_budget = {
+		"total_warning_count_max": 1000,
+		"total_undefined_function_warning_count_max": 1000
+	}
+}
+max_warning_count := dict_get_or(warning_budget, "total_warning_count_max", 1000)
+max_undefined_warning_count := dict_get_or(warning_budget, "total_undefined_function_warning_count_max", 1000)
+
+all_ok := true
+results := []
+total_warning_count := 0
+total_undefined_function_warning_count := 0
+
+if type(fatal_error) == "null" {
+	test_index := 0
+	while test_index < len(tests) {
+		test_file := tests[test_index]
+		cmd := kujo_bin + " run " + test_file + " --interpreter"
+		res := execute_status(cmd, {"timeout_ms": 120000})
+		ok := false
+		exit_code := -1
+		stdout := ""
+		stderr := ""
+		if type(res) == "struct" {
+			ok := res.success
+			exit_code := res.exitcode
+			stdout := res.stdout
+			stderr := res.stderr
+		}
+		warning_count := count_occurrences(stderr, "RUFRUN001")
+		undefined_function_warning_count := count_occurrences(stderr, "Undefined Function")
+		total_warning_count = total_warning_count + warning_count
+		total_undefined_function_warning_count = total_undefined_function_warning_count + undefined_function_warning_count
+		results = push(results, {
+			"file": test_file,
+			"ok": ok,
+			"exit_code": exit_code,
+			"warning_count": warning_count,
+			"undefined_function_warning_count": undefined_function_warning_count,
+			"stdout": stdout,
+			"stderr": stderr
+		})
+		if ok == false {
+			all_ok = false
+		}
+
+		if count_occurrences(to_lower(stderr), "unrecognized subcommand 'run'") > 0 {
+			if type(fatal_error) == "null" {
+				fatal_error = {
+					"code": "invalid_kujo_binary",
+					"message": "Configured Kujo runtime does not support the 'run' subcommand required by this project.",
+					"details": {
+						"kujo_bin": kujo_bin,
+						"failing_test": test_file
+					}
+				}
+			}
+		}
+		test_index = test_index + 1
+	}
+}
+
+warning_budget_ok := true
+if total_warning_count > max_warning_count {
+	warning_budget_ok = false
+}
+if total_undefined_function_warning_count > max_undefined_warning_count {
+	warning_budget_ok = false
+}
+if warning_budget_ok == false {
+	all_ok = false
+}
+if type(fatal_error) != "null" {
+	all_ok = false
+}
+
+print(to_json({
+	"ok": all_ok,
+	"kujo_bin": kujo_bin,
+	"configured_test_count": len(tests),
+	"fatal_error": fatal_error,
+	"warning_budget_ok": warning_budget_ok,
+	"warning_budget": {
+		"total_warning_count_max": max_warning_count,
+		"total_undefined_function_warning_count_max": max_undefined_warning_count,
+		"actual_total_warning_count": total_warning_count,
+		"actual_total_undefined_function_warning_count": total_undefined_function_warning_count
+	},
+	"total_warning_count": total_warning_count,
+	"total_undefined_function_warning_count": total_undefined_function_warning_count,
+	"results": results
+}))
+
+if all_ok == false {
+	exit(1)
+}

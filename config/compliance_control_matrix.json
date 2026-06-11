@@ -1,0 +1,178 @@
+{
+  "version": "2026.05-baseline",
+  "last_reviewed_at_unix_ms": 1779810360547,
+  "review_cadence_days": 30,
+  "frameworks": [
+    "SOC2",
+    "ISO27001"
+  ],
+  "controls": [
+    {
+      "id": "SOC2-CC6.1-ISO-A.5.15-authentication",
+      "title": "Authentication provider controls",
+      "framework_refs": [
+        "SOC2:CC6.1",
+        "ISO27001:A.5.15"
+      ],
+      "owner": "Platform Security",
+      "status": "covered",
+      "description": "Authentication decisions are policy-driven and support provider-specific validation.",
+      "code": [
+        "src/query_api.kujo",
+        "src/config.kujo"
+      ],
+      "config": [
+        ".env.example"
+      ],
+      "process": [
+        "docs/auth-providers.md"
+      ],
+      "evidence": [
+        "tests/test_auth_providers.kujo",
+        ".github/workflows/release-gates.yml"
+      ],
+      "gap_summary": "",
+      "gap_owner": "",
+      "target_date": ""
+    },
+    {
+      "id": "SOC2-CC6.6-ISO-A.8.2-authorization",
+      "title": "Namespace-scoped RBAC enforcement",
+      "framework_refs": [
+        "SOC2:CC6.6",
+        "ISO27001:A.8.2"
+      ],
+      "owner": "Platform Security",
+      "status": "covered",
+      "description": "Role and namespace access boundaries are enforced at API request time.",
+      "code": [
+        "src/query_api.kujo"
+      ],
+      "config": [
+        ".env.example"
+      ],
+      "process": [
+        "docs/rbac-authorization.md"
+      ],
+      "evidence": [
+        "tests/test_rbac_authorization.kujo"
+      ],
+      "gap_summary": "",
+      "gap_owner": "",
+      "target_date": ""
+    },
+    {
+      "id": "SOC2-CC7.2-ISO-A.8.24-audit-trail",
+      "title": "Immutable audit logging",
+      "framework_refs": [
+        "SOC2:CC7.2",
+        "ISO27001:A.8.24"
+      ],
+      "owner": "Platform Reliability",
+      "status": "covered",
+      "description": "Security-sensitive operations are emitted to tamper-evident audit streams.",
+      "code": [
+        "src/query_api.kujo"
+      ],
+      "config": [
+        ".env.example"
+      ],
+      "process": [
+        "docs/audit-logging.md"
+      ],
+      "evidence": [
+        "tests/test_audit_logging.kujo"
+      ],
+      "gap_summary": "",
+      "gap_owner": "",
+      "target_date": ""
+    },
+    {
+      "id": "SOC2-CC6.7-ISO-A.8.24-data-lifecycle",
+      "title": "Retention, legal-hold, and privacy delete controls",
+      "framework_refs": [
+        "SOC2:CC6.7",
+        "ISO27001:A.8.24"
+      ],
+      "owner": "Data Governance",
+      "status": "covered",
+      "description": "Retention windows, legal-hold safeguards, and privacy export/delete workflows are enforced and auditable.",
+      "code": [
+        "src/query_api.kujo",
+        "src/retention_policy.kujo",
+        "src/privacy_workflows.kujo"
+      ],
+      "config": [
+        ".env.example"
+      ],
+      "process": [
+        "docs/data-retention-legal-hold.md",
+        "docs/privacy-export-delete-workflows.md"
+      ],
+      "evidence": [
+        "tests/test_retention_legal_hold_controls.kujo",
+        "tests/test_privacy_export_delete_workflows.kujo"
+      ],
+      "gap_summary": "",
+      "gap_owner": "",
+      "target_date": ""
+    },
+    {
+      "id": "SOC2-CC8.1-ISO-A.8.8-vendor-risk",
+      "title": "Third-party and connector risk governance",
+      "framework_refs": [
+        "SOC2:CC8.1",
+        "ISO27001:A.8.8"
+      ],
+      "owner": "Compliance Lead",
+      "status": "partial",
+      "description": "Connector contracts and supply-chain scanning exist, but full vendor risk scoring and annual attestations are not yet automated.",
+      "code": [
+        "scripts/run_supply_chain_scan.kujo",
+        "src/connectors.kujo"
+      ],
+      "config": [
+        "config/connectors_enterprise_stubs.json"
+      ],
+      "process": [
+        "docs/supply-chain-security.md",
+        "docs/connectors-enterprise-roadmap.md"
+      ],
+      "evidence": [
+        "tests/test_supply_chain_scan.kujo",
+        ".github/workflows/release-gates.yml"
+      ],
+      "gap_summary": "Vendor assessment attestations and critical-vendor review cadence are documented only at roadmap level.",
+      "gap_owner": "Compliance Lead",
+      "target_date": "2026-06-30"
+    },
+    {
+      "id": "SOC2-CC1.2-ISO-A.5.1-control-evidence-governance",
+      "title": "Control evidence governance and ownership",
+      "framework_refs": [
+        "SOC2:CC1.2",
+        "ISO27001:A.5.1"
+      ],
+      "owner": "Compliance Lead",
+      "status": "gap",
+      "description": "Control mapping baseline is present, but formal sign-off records and exception approvals are not yet tied to a durable ticketing ledger.",
+      "code": [
+        "scripts/run_compliance_control_evidence_review.kujo"
+      ],
+      "config": [
+        "config/compliance_control_matrix.json"
+      ],
+      "process": [
+        "docs/compliance-control-mapping.md",
+        "docs/compliance-evidence-review-workflow.md"
+      ],
+      "evidence": [
+        "tests/test_compliance_control_mapping_baseline.kujo",
+        ".github/workflows/compliance-evidence-review.yml"
+      ],
+      "gap_summary": "Exception approvals and quarterly sign-off attestations require integration with external governance/ticketing systems.",
+      "gap_owner": "Compliance Lead",
+      "target_date": "2026-07-31"
+    }
+  ]
+}

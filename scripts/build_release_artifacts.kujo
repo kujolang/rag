@@ -1,0 +1,387 @@
+from src.common import dict_get_or
+
+func ensure_dir(path) {
+	if path_exists(path) == false {
+		create_dir(path)
+	}
+	return true
+}
+
+func parse_flags(raw_args) {
+	flags := {}
+	i := 0
+	while i < len(raw_args) {
+		token := raw_args[i]
+		if starts_with(token, "--") {
+			key := substring(token, 2, len(token))
+			value := "true"
+			if i + 1 < len(raw_args) {
+				next := raw_args[i + 1]
+				if starts_with(next, "--") == false {
+					value = next
+					i = i + 1
+				}
+			}
+			flags[key] := value
+		}
+		i = i + 1
+	}
+	return flags
+}
+
+func parse_int_or(value, fallback) {
+	err := null
+	parsed := fallback
+	try {
+		parsed := parse_int(value)
+	} except e {
+		err := e
+	}
+	if type(err) != "null" {
+		return fallback
+	}
+	return parsed
+}
+
+func normalize_semver(raw_version) {
+	if type(raw_version) != "string" {
+		return ""
+	}
+	version := trim(raw_version)
+	if version == "" {
+		return ""
+	}
+	if starts_with(version, "v") {
+		version = substring(version, 1, len(version))
+	}
+	parts := split(version, ".")
+	if len(parts) != 3 {
+		return ""
+	}
+	i := 0
+	while i < len(parts) {
+		part := trim(parts[i])
+		if part == "" {
+			return ""
+		}
+		n := parse_int_or(part, -1)
+		if n < 0 {
+			return ""
+		}
+		if to_string(n) != part {
+			return ""
+		}
+		i = i + 1
+	}
+	return version
+}
+
+func trim_line(value) {
+	if type(value) != "string" {
+		return ""
+	}
+	return trim(value)
+}
+
+func read_version(default_version_path) {
+	if file_exists(default_version_path) == false {
+		return ""
+	}
+	raw := trim_line(read_file(default_version_path))
+	return raw
+}
+
+func should_exclude(path_value, excluded_prefixes) {
+	path := path_value
+	if starts_with(path, "./") {
+		path = substring(path, 2, len(path))
+	}
+	i := 0
+	while i < len(excluded_prefixes) {
+		prefix := excluded_prefixes[i]
+		normalized_prefix := prefix
+		if starts_with(normalized_prefix, "./") {
+			normalized_prefix = substring(normalized_prefix, 2, len(normalized_prefix))
+		}
+		if starts_with(path, normalized_prefix) {
+			return true
+		}
+		i = i + 1
+	}
+	return false
+}
+
+func discover_release_files(include_roots, excluded_prefixes) {
+	collected := []
+	stack := []
+	i := 0
+	while i < len(include_roots) {
+		root := include_roots[i]
+		if path_exists(root) {
+			stack = push(stack, root)
+		}
+		i = i + 1
+	}
+
+	while len(stack) > 0 {
+		current := stack[len(stack) - 1]
+		stack = slice(stack, 0, len(stack) - 1)
+
+		if should_exclude(current, excluded_prefixes) {
+			continue
+		}
+
+		if path_is_file(current) {
+			collected = push(collected, current)
+			continue
+		}
+
+		if path_is_dir(current) {
+			entries := []
+			err := null
+			try {
+				entries := list_dir(current)
+			} except e {
+				err := e
+			}
+			if type(err) == "null" {
+				j := 0
+				while j < len(entries) {
+					name := entries[j]
+					child := path_join(current, name)
+					if should_exclude(child, excluded_prefixes) == false {
+						stack = push(stack, child)
+					}
+					j = j + 1
+				}
+			}
+		}
+	}
+
+	return collected
+}
+
+func sort_strings_asc(values) {
+	sorted := []
+	i := 0
+	while i < len(values) {
+		value := to_string(values[i])
+		inserted := false
+		next_sorted := []
+		j := 0
+		while j < len(sorted) {
+			existing := to_string(sorted[j])
+			if inserted == false && value < existing {
+				next_sorted = push(next_sorted, value)
+				inserted = true
+			}
+			next_sorted = push(next_sorted, existing)
+			j = j + 1
+		}
+		if inserted == false {
+			next_sorted = push(next_sorted, value)
+		}
+		sorted = next_sorted
+		i = i + 1
+	}
+	return sorted
+}
+
+func build_manifest(version, notes_path, files) {
+	normalized_files := sort_strings_asc(files)
+	entries := []
+	i := 0
+	while i < len(normalized_files) {
+		path_value := normalized_files[i]
+		contents := read_file(path_value)
+		entries = push(entries, {
+			"path": path_value,
+			"bytes": len(contents),
+			"sha256": sha256(contents)
+		})
+		i = i + 1
+	}
+
+	return {
+		"release_version": version,
+		"release_tag": "v" + version,
+		"created_at_unix_ms": current_timestamp(),
+		"release_notes_path": notes_path,
+		"compatibility": {
+			"config_schema_version": 1,
+			"api_contract_version": 1,
+			"rollback_policy": "patch-and-minor rollback supported when config schema and API contract versions match"
+		},
+		"files": entries
+	}
+}
+
+func build_cyclonedx_sbom(version, manifest) {
+	file_components := []
+	files := dict_get_or(manifest, "files", [])
+	i := 0
+	while i < len(files) {
+		entry := files[i]
+		component := {
+			"type": "file",
+			"name": dict_get_or(entry, "path", ""),
+			"hashes": [
+				{
+					"alg": "SHA-256",
+					"content": dict_get_or(entry, "sha256", "")
+				}
+			],
+			"properties": [
+				{
+					"name": "kujo_rag:file_bytes",
+					"value": to_string(dict_get_or(entry, "bytes", 0))
+				}
+			]
+		}
+		file_components = push(file_components, component)
+		i = i + 1
+	}
+
+	return {
+		"bomFormat": "CycloneDX",
+		"specVersion": "1.5",
+		"serialNumber": "urn:uuid:" + substring(sha256("kujo-rag-" + version), 0, 32),
+		"version": 1,
+		"metadata": {
+			"timestamp_unix_ms": current_timestamp(),
+			"tools": [
+				{
+					"vendor": "kujo-rag",
+					"name": "build_release_artifacts.kujo"
+				}
+			],
+			"component": {
+				"type": "application",
+				"name": "kujo-rag",
+				"version": version
+			}
+		},
+		"components": file_components
+	}
+}
+
+func write_checksums_file(path_value, manifest, manifest_path) {
+	lines := []
+	lines = push(lines, "# SHA256 checksums for " + dict_get_or(manifest, "release_tag", ""))
+	lines = push(lines, "")
+
+	files := dict_get_or(manifest, "files", [])
+	i := 0
+	while i < len(files) {
+		entry := files[i]
+		lines = push(lines, dict_get_or(entry, "sha256", "") + "  " + dict_get_or(entry, "path", ""))
+		i = i + 1
+	}
+
+	manifest_hash := sha256(read_file(manifest_path))
+	lines = push(lines, manifest_hash + "  " + manifest_path)
+
+	if file_exists(path_value) {
+		delete_file(path_value)
+	}
+	write_file(path_value, join(lines, "\n") + "\n")
+	return true
+}
+
+func write_replace_file(path_value, content) {
+	if file_exists(path_value) {
+		delete_file(path_value)
+	}
+	write_file(path_value, content)
+	return true
+}
+
+func fail_json(error_code, message, details) {
+	print(to_json({
+		"ok": false,
+		"error": error_code,
+		"message": message,
+		"details": details
+	}))
+	exit(1)
+}
+
+flags := parse_flags(args())
+
+version_input := dict_get_or(flags, "version", "")
+if trim(version_input) == "" {
+	version_input = read_version("./VERSION")
+}
+
+version := normalize_semver(version_input)
+if version == "" {
+	fail_json("invalid_version", "Release version must match SemVer (for example 1.2.3 or v1.2.3)", {
+		"version": version_input
+	})
+}
+
+release_tag := "v" + version
+notes_path := dict_get_or(flags, "notes", "./docs/releases/" + release_tag + ".md")
+if file_exists(notes_path) == false {
+	fail_json("missing_release_notes", "Release notes file not found", {
+		"notes_path": notes_path,
+		"release_tag": release_tag
+	})
+}
+
+base_output_dir := dict_get_or(flags, "output-dir", "./results/releases")
+artifact_dir := path_join(base_output_dir, release_tag)
+manifest_path := path_join(artifact_dir, "release-manifest.json")
+checksums_path := path_join(artifact_dir, "SHA256SUMS.txt")
+notes_copy_path := path_join(artifact_dir, "release-notes.md")
+sbom_path := path_join(artifact_dir, "sbom.cyclonedx.json")
+
+ensure_dir("./results")
+ensure_dir(base_output_dir)
+ensure_dir(artifact_dir)
+
+include_roots := [
+	"main.kujo",
+	"README.md",
+	".env.example",
+	"src",
+	"scripts",
+	"config",
+	"docs",
+	"tests",
+	".github/workflows"
+]
+excluded_prefixes := [
+	"results/releases",
+	"results/release_artifacts_test",
+	"results/test_release_eval_index.json",
+	"results/release_eval_index.json"
+]
+
+files := discover_release_files(include_roots, excluded_prefixes)
+if len(files) == 0 {
+	fail_json("empty_release_manifest", "No files discovered for release manifest", {
+		"include_roots": include_roots
+	})
+}
+
+manifest := build_manifest(version, notes_path, files)
+sbom := build_cyclonedx_sbom(version, manifest)
+write_replace_file(manifest_path, to_json(manifest))
+write_replace_file(sbom_path, to_json(sbom))
+write_checksums_file(checksums_path, manifest, manifest_path)
+write_replace_file(notes_copy_path, read_file(notes_path))
+
+print(to_json({
+	"ok": true,
+	"release_version": version,
+	"release_tag": release_tag,
+	"artifact_dir": artifact_dir,
+	"manifest_path": manifest_path,
+	"sbom_path": sbom_path,
+	"checksums_path": checksums_path,
+	"release_notes_path": notes_path,
+	"release_notes_artifact_path": notes_copy_path,
+	"file_count": len(dict_get_or(manifest, "files", [])),
+	"created_at_unix_ms": dict_get_or(manifest, "created_at_unix_ms", 0)
+}))

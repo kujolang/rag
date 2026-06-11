@@ -1,0 +1,79 @@
+from src.common import dict_get_or
+from src.tests_helpers import assert_true
+
+kujo_bin := env_or("KUJO_BIN", "/path/to/kujo/target/release/kujo")
+
+func parse_json_safe(text) {
+	obj := {}
+	err := null
+	try {
+		obj := parse_json(text)
+	} except e {
+		err := e
+	}
+	if type(err) != "null" {
+		return {
+			"ok": false,
+			"error": to_string(err),
+			"data": {}
+		}
+	}
+	return {
+		"ok": true,
+		"data": obj
+	}
+}
+
+base_dir := "results/test_backup_restore"
+if path_exists("results") == false {
+	create_dir("results")
+}
+if path_exists(base_dir) == false {
+	create_dir(base_dir)
+}
+
+source_index := base_dir + "/source_index.json"
+source_config := base_dir + "/source_config.json"
+backup_dir := base_dir + "/snapshot"
+
+if file_exists(source_index) { delete_file(source_index) }
+if file_exists(source_config) { delete_file(source_config) }
+write_file(source_index, to_json({"chunks": [{"id": "a1", "text": "hello"}], "version": 1}))
+write_file(source_config, to_json({"threshold": 0.9, "mode": "test"}))
+
+backup_cmd := "BACKUP_SOURCE_INDEX=" + source_index + " BACKUP_SOURCE_CONFIG=" + source_config + " BACKUP_OUTPUT_DIR=" + backup_dir + " " + kujo_bin + " run scripts/backup_state.kujo --interpreter"
+backup_res := execute_status(backup_cmd, {"timeout_ms": 120000})
+assert_true(to_bool(type(backup_res) == "struct"))
+assert_true(to_bool(backup_res.success == true))
+backup_parsed := parse_json_safe(to_string(backup_res.stdout))
+assert_true(to_bool(dict_get_or(backup_parsed, "ok", false) == true))
+backup_payload := dict_get_or(backup_parsed, "data", {})
+assert_true(to_bool(dict_get_or(backup_payload, "ok", false) == true))
+manifest_path := dict_get_or(backup_payload, "manifest", "")
+assert_true(to_bool(trim(manifest_path) != ""))
+assert_true(to_bool(file_exists(manifest_path) == true))
+
+# Corrupt current state before restore.
+if file_exists(source_index) { delete_file(source_index) }
+if file_exists(source_config) { delete_file(source_config) }
+write_file(source_index, to_json({"chunks": [], "version": 999}))
+write_file(source_config, to_json({"threshold": 0.1, "mode": "mutated"}))
+
+restore_cmd := "RESTORE_BACKUP_DIR=" + backup_dir + " RESTORE_TARGET_INDEX=" + source_index + " RESTORE_TARGET_CONFIG=" + source_config + " " + kujo_bin + " run scripts/restore_state.kujo --interpreter"
+restore_res := execute_status(restore_cmd, {"timeout_ms": 120000})
+assert_true(to_bool(type(restore_res) == "struct"))
+assert_true(to_bool(restore_res.success == true))
+restore_parsed := parse_json_safe(to_string(restore_res.stdout))
+assert_true(to_bool(dict_get_or(restore_parsed, "ok", false) == true))
+restore_payload := dict_get_or(restore_parsed, "data", {})
+assert_true(to_bool(dict_get_or(restore_payload, "ok", false) == true))
+assert_true(to_bool(dict_get_or(restore_payload, "verified", false) == true))
+
+restored_index := parse_json_safe(read_file(source_index))
+restored_config := parse_json_safe(read_file(source_config))
+assert_true(to_bool(dict_get_or(restored_index, "ok", false) == true))
+assert_true(to_bool(dict_get_or(restored_config, "ok", false) == true))
+assert_true(to_bool(dict_get_or(dict_get_or(restored_index, "data", {}), "version", 0) == 1))
+assert_true(to_bool(dict_get_or(dict_get_or(restored_config, "data", {}), "mode", "") == "test"))
+
+print("test_backup_restore_integrity: ok")

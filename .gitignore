@@ -1,0 +1,32 @@
+.env
+.env.local
+
+# Virtual environments
+.venv/
+venv/
+
+# Runtime outputs
+data/
+results/
+*.log
+*.tmp
+*.bak
+*.swp
+
+# OS/editor noise
+.DS_Store
+.vscode/
+
+# Build outputs (general)
+build/
+dist/
+coverage/
+
+# Keep legacy/unrelated ecosystems out of this Kujo-native repo
+kujo_rag/
+pyproject.toml
+__pycache__/
+*.pyc
+*.pyo
+node_modules/
+api_log.txt

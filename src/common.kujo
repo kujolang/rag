@@ -1,0 +1,216 @@
+# Shared utilities for Kujo RAG.
+
+export dict_get_or := func(obj, key, default_value) {
+	if type(obj) != "dict" {
+		return default_value
+	}
+	if has_key(obj, key) == 1 {
+		return obj[key]
+	}
+	return default_value
+}
+
+export str_or := func(value, default_value) {
+	if type(value) == "string" {
+		return value
+	}
+	return default_value
+}
+
+export num_or := func(value, default_value) {
+	if type(value) == "int" || type(value) == "float" {
+		return value
+	}
+	return default_value
+}
+
+export bool_or := func(value, default_value) {
+	if type(value) == "bool" {
+		return value
+	}
+	return default_value
+}
+
+export clamp := func(value, min_value, max_value) {
+	v := value
+	if v < min_value {
+		v := min_value
+	}
+	if v > max_value {
+		v := max_value
+	}
+	return v
+}
+
+export normalize_text := func(text) {
+	if type(text) != "string" {
+		return ""
+	}
+	clean := to_lower(text)
+	clean := regex_replace(clean, "[^a-z0-9\\s]", " ")
+	clean := regex_replace(clean, "\\s+", " ")
+	return trim(clean)
+}
+
+export tokenize := func(text) {
+	norm := normalize_text(text)
+	if norm == "" {
+		return []
+	}
+	raw := split(norm, " ")
+	tokens := []
+	for token in raw {
+		if token != "" {
+			tokens := push(tokens, token)
+		}
+	}
+	return tokens
+}
+
+export term_frequency := func(tokens) {
+	freq := {}
+	for token in tokens {
+		if token != "" {
+			count := dict_get_or(freq, token, 0)
+			freq[token] := count + 1
+		}
+	}
+	return freq
+}
+
+export dot_product := func(a, b) {
+	if type(a) != "array" || type(b) != "array" {
+		return 0.0
+	}
+	limit := len(a)
+	if len(b) < limit {
+		limit := len(b)
+	}
+	i := 0
+	total := 0.0
+	while i < limit {
+		total := total + (to_float(a[i]) * to_float(b[i]))
+		i := i + 1
+	}
+	return total
+}
+
+export magnitude := func(vec) {
+	if type(vec) != "array" {
+		return 0.0
+	}
+	total := 0.0
+	for n in vec {
+		v := to_float(n)
+		total := total + (v * v)
+	}
+	if total <= 0.0 {
+		return 0.0
+	}
+	return sqrt(total)
+}
+
+export cosine_similarity := func(a, b) {
+	denom := magnitude(a) * magnitude(b)
+	if denom <= 0.0 {
+		return 0.0
+	}
+	return dot_product(a, b) / denom
+}
+
+export rank_desc := func(items, score_key, top_k) {
+	if type(items) != "array" {
+		return []
+	}
+	if len(items) == 0 {
+		return []
+	}
+
+	limit := top_k
+	if limit < 1 {
+		return []
+	}
+	if limit > len(items) {
+		limit := len(items)
+	}
+
+	top := []
+	order := 0
+	for item in items {
+		score := num_or(dict_get_or(item, score_key, 0.0), 0.0)
+		entry := {
+			"item": item,
+			"score": score,
+			"order": order
+		}
+
+		insert_at := len(top)
+		i := 0
+		while i < len(top) {
+			current := top[i]
+			current_score := num_or(dict_get_or(current, "score", 0.0), 0.0)
+			current_order := dict_get_or(current, "order", 0)
+			if score > current_score || (score == current_score && order < current_order) {
+				insert_at := i
+				break
+			}
+			i := i + 1
+		}
+
+		before := slice(top, 0, insert_at)
+		after := slice(top, insert_at, len(top))
+		merged := []
+		for value in before {
+			merged := push(merged, value)
+		}
+		merged := push(merged, entry)
+		for value in after {
+			merged := push(merged, value)
+		}
+		top = merged
+		if len(top) > limit {
+			top = slice(top, 0, limit)
+		}
+
+		order := order + 1
+	}
+
+	result := []
+	i := 0
+	while i < len(top) {
+		result := push(result, dict_get_or(top[i], "item", {}))
+		i := i + 1
+	}
+	return result
+}
+
+export stable_chunk_id := func(path, line_start, line_end, text) {
+	seed := path + ":" + to_string(line_start) + ":" + to_string(line_end) + ":" + text
+	hash := sha256(seed)
+	return substring(hash, 0, 20)
+}
+
+export read_json_file_or := func(path, default_value) {
+	if file_exists(path) == false {
+		return default_value
+	}
+	err := null
+	data := null
+	try {
+		data := parse_json(read_file(path))
+	} except e {
+		err := e
+	}
+	if type(err) != "null" {
+		return default_value
+	}
+	return data
+}
+
+export write_json_file := func(path, value) {
+	if file_exists(path) {
+		delete_file(path)
+	}
+	write_file(path, to_json(value))
+	return true
+}

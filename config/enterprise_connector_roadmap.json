@@ -1,0 +1,63 @@
+{
+  "version": 1,
+  "updated_on": "2026-05-25",
+  "connector_backlog": [
+    {
+      "priority": 1,
+      "id": "wiki_confluence",
+      "domain": "wikis",
+      "delivery": "plugin_script_stub",
+      "status": "ready_for_spike",
+      "notes": "Confluence/knowledge-base sync with incremental space/page checkpoints"
+    },
+    {
+      "priority": 2,
+      "id": "ticketing_jira",
+      "domain": "ticketing",
+      "delivery": "plugin_script_stub",
+      "status": "ready_for_spike",
+      "notes": "Issue/ticket ingest with project and status filters"
+    },
+    {
+      "priority": 3,
+      "id": "object_storage_s3",
+      "domain": "object_storage",
+      "delivery": "plugin_script_stub",
+      "status": "ready_for_spike",
+      "notes": "Bucket prefix sync for docs and exports with checkpointed listing"
+    },
+    {
+      "priority": 4,
+      "id": "database_postgres",
+      "domain": "databases",
+      "delivery": "plugin_script_stub",
+      "status": "ready_for_spike",
+      "notes": "Read-only table/view export into staged markdown/json snapshots"
+    }
+  ],
+  "plugin_interface": {
+    "connector_type": "plugin_script",
+    "required_config_fields": [
+      "id",
+      "type",
+      "runner_script"
+    ],
+    "optional_config_fields": [
+      "enabled",
+      "timeout_ms",
+      "payload"
+    ],
+    "plugin_runtime_env": [
+      "KUJO_RAG_CONNECTOR_PLUGIN_PAYLOAD_PATH",
+      "KUJO_RAG_CONNECTOR_PLUGIN_OUTPUT_PATH",
+      "KUJO_RAG_CONNECTOR_PLUGIN_KUJO_BIN"
+    ],
+    "plugin_output_contract": {
+      "ok": "bool",
+      "error": "string",
+      "message": "string",
+      "details": "dict"
+    },
+    "default_timeout_ms": 180000
+  }
+}

@@ -1,0 +1,135 @@
+from src.common import dict_get_or
+from src.tests_helpers import assert_true
+
+kujo_bin := env_or("KUJO_BIN", "/path/to/kujo/target/release/kujo")
+
+func run_cmd(command) {
+	res := execute_status(command, {"timeout_ms": 120000})
+	if type(res) == "struct" {
+		return {
+			"ok": res.success,
+			"exit_code": res.exitcode,
+			"stdout": to_string(res.stdout),
+			"stderr": to_string(res.stderr)
+		}
+	}
+	return {
+		"ok": false,
+		"exit_code": -1,
+		"stdout": "",
+		"stderr": "invalid execute_status result"
+	}
+}
+
+func parse_json_safe(text) {
+	obj := {}
+	err := null
+	try {
+		obj := parse_json(text)
+	} except e {
+		err := e
+	}
+	if type(err) != "null" {
+		return {
+			"ok": false,
+			"error": to_string(err),
+			"data": {}
+		}
+	}
+	return {
+		"ok": true,
+		"data": obj
+	}
+}
+
+func start_server(port, env_prefix, log_file) {
+	cmd := "env " + env_prefix + " " + kujo_bin + " run main.kujo --interpreter serve --host 127.0.0.1 --port " + to_string(port) + " > " + log_file + " 2>&1 & echo $!"
+	res := run_cmd(cmd)
+	pid := trim(dict_get_or(res, "stdout", ""))
+	return pid
+}
+
+func stop_server(pid) {
+	if pid == "" {
+		return true
+	}
+	_ := run_cmd("kill " + pid + " >/dev/null 2>&1 || true")
+	_ := run_cmd("wait " + pid + " >/dev/null 2>&1 || true")
+	return true
+}
+
+func wait_for_live(port) {
+	attempt := 0
+	while attempt < 1200 {
+		res := run_cmd("curl -s http://127.0.0.1:" + to_string(port) + "/live")
+		body := trim(dict_get_or(res, "stdout", ""))
+		if body != "" {
+			parsed := parse_json_safe(body)
+			if dict_get_or(parsed, "ok", false) == true {
+				payload := dict_get_or(parsed, "data", {})
+				if dict_get_or(payload, "ok", false) == true {
+					return true
+				}
+			}
+		}
+		attempt = attempt + 1
+	}
+	return false
+}
+
+base_port := 30000 + (current_timestamp() % 10000)
+
+# Startup/readiness normal flow
+normal_port := base_port
+normal_env := "KUJO_RAG_ENV=development KUJO_RAG_API_AUTH_PROVIDER=none KUJO_RAG_API_STARTUP_GRACE_MS=300"
+normal_pid := start_server(normal_port, normal_env, "/tmp/kujo_rag_probe_normal.log")
+assert_true(to_bool(normal_pid != ""))
+assert_true(to_bool(wait_for_live(normal_port) == true))
+
+startup_initial := run_cmd("curl -s http://127.0.0.1:" + to_string(normal_port) + "/startup")
+startup_initial_parsed := parse_json_safe(dict_get_or(startup_initial, "stdout", ""))
+assert_true(to_bool(dict_get_or(startup_initial_parsed, "ok", false) == true))
+startup_initial_code := dict_get_or(dict_get_or(dict_get_or(startup_initial_parsed, "data", {}), "error", {}), "code", "")
+assert_true(to_bool(startup_initial_code == "startup_incomplete" || startup_initial_code == ""))
+
+startup_ready := false
+attempt := 0
+while attempt < 1200 {
+	startup_next := run_cmd("curl -s http://127.0.0.1:" + to_string(normal_port) + "/startup")
+	startup_next_parsed := parse_json_safe(dict_get_or(startup_next, "stdout", ""))
+	if dict_get_or(startup_next_parsed, "ok", false) == true {
+		startup_payload := dict_get_or(startup_next_parsed, "data", {})
+		if dict_get_or(startup_payload, "ok", false) == true {
+			startup_data := dict_get_or(startup_payload, "data", {})
+			if dict_get_or(startup_data, "startup_complete", false) == true {
+				startup_ready = true
+				break
+			}
+		}
+	}
+	attempt = attempt + 1
+}
+assert_true(to_bool(startup_ready == true))
+
+ready_res := run_cmd("curl -s http://127.0.0.1:" + to_string(normal_port) + "/ready")
+ready_parsed := parse_json_safe(dict_get_or(ready_res, "stdout", ""))
+assert_true(to_bool(dict_get_or(ready_parsed, "ok", false) == true))
+assert_true(to_bool(dict_get_or(dict_get_or(ready_parsed, "data", {}), "ok", false) == true))
+
+_ := stop_server(normal_pid)
+
+# Forced unready flow
+forced_port := base_port + 1
+forced_env := "KUJO_RAG_ENV=development KUJO_RAG_API_AUTH_PROVIDER=none KUJO_RAG_API_STARTUP_GRACE_MS=0 KUJO_RAG_API_READINESS_FORCE_UNREADY=true"
+forced_pid := start_server(forced_port, forced_env, "/tmp/kujo_rag_probe_forced.log")
+assert_true(to_bool(forced_pid != ""))
+assert_true(to_bool(wait_for_live(forced_port) == true))
+
+forced_ready_res := run_cmd("curl -s http://127.0.0.1:" + to_string(forced_port) + "/ready")
+forced_ready_parsed := parse_json_safe(dict_get_or(forced_ready_res, "stdout", ""))
+assert_true(to_bool(dict_get_or(forced_ready_parsed, "ok", false) == true))
+assert_true(to_bool(dict_get_or(dict_get_or(dict_get_or(forced_ready_parsed, "data", {}), "error", {}), "code", "") == "service_not_ready"))
+
+_ := stop_server(forced_pid)
+
+print("test_probe_endpoints: ok")

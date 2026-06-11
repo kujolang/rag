@@ -1,0 +1,214 @@
+from src.release_eval import run_release_evaluation
+from src.common import dict_get_or, read_json_file_or, write_json_file, num_or
+
+func ensure_dir(path_value) {
+	if path_value == "" || path_value == "." {
+		return true
+	}
+	if path_exists(path_value) {
+		return true
+	}
+	parent := dirname(path_value)
+	if parent != "" && parent != "." && parent != path_value {
+		_ = ensure_dir(parent)
+	}
+	create_dir(path_value)
+	return true
+}
+
+func ensure_parent_dir(path_value) {
+	dir := dirname(path_value)
+	if dir == "" || dir == "." {
+		return true
+	}
+	return ensure_dir(dir)
+}
+
+func normalize_comparison_thresholds(raw_thresholds) {
+	thresholds := {
+		"min_sample_count": 6,
+		"max_quality_pass_rate_drop": 0.05,
+		"max_avg_confidence_drop": 0.10,
+		"max_avg_grounding_drop": 0.05,
+		"max_error_rate_increase": 0.02,
+		"max_avg_latency_ratio": 1.30,
+		"max_p95_latency_ratio": 1.35
+	}
+	if type(raw_thresholds) != "dict" {
+		return thresholds
+	}
+
+	thresholds["min_sample_count"] = num_or(dict_get_or(raw_thresholds, "min_sample_count", thresholds["min_sample_count"]), thresholds["min_sample_count"])
+	thresholds["max_quality_pass_rate_drop"] = num_or(dict_get_or(raw_thresholds, "max_quality_pass_rate_drop", thresholds["max_quality_pass_rate_drop"]), thresholds["max_quality_pass_rate_drop"])
+	thresholds["max_avg_confidence_drop"] = num_or(dict_get_or(raw_thresholds, "max_avg_confidence_drop", thresholds["max_avg_confidence_drop"]), thresholds["max_avg_confidence_drop"])
+	thresholds["max_avg_grounding_drop"] = num_or(dict_get_or(raw_thresholds, "max_avg_grounding_drop", thresholds["max_avg_grounding_drop"]), thresholds["max_avg_grounding_drop"])
+	thresholds["max_error_rate_increase"] = num_or(dict_get_or(raw_thresholds, "max_error_rate_increase", thresholds["max_error_rate_increase"]), thresholds["max_error_rate_increase"])
+	thresholds["max_avg_latency_ratio"] = num_or(dict_get_or(raw_thresholds, "max_avg_latency_ratio", thresholds["max_avg_latency_ratio"]), thresholds["max_avg_latency_ratio"])
+	thresholds["max_p95_latency_ratio"] = num_or(dict_get_or(raw_thresholds, "max_p95_latency_ratio", thresholds["max_p95_latency_ratio"]), thresholds["max_p95_latency_ratio"])
+
+	if thresholds["min_sample_count"] < 1 {
+		thresholds["min_sample_count"] = 1
+	}
+	if thresholds["max_quality_pass_rate_drop"] < 0.0 {
+		thresholds["max_quality_pass_rate_drop"] = 0.0
+	}
+	if thresholds["max_avg_confidence_drop"] < 0.0 {
+		thresholds["max_avg_confidence_drop"] = 0.0
+	}
+	if thresholds["max_avg_grounding_drop"] < 0.0 {
+		thresholds["max_avg_grounding_drop"] = 0.0
+	}
+	if thresholds["max_error_rate_increase"] < 0.0 {
+		thresholds["max_error_rate_increase"] = 0.0
+	}
+	if thresholds["max_avg_latency_ratio"] < 0.1 {
+		thresholds["max_avg_latency_ratio"] = 0.1
+	}
+	if thresholds["max_p95_latency_ratio"] < 0.1 {
+		thresholds["max_p95_latency_ratio"] = 0.1
+	}
+
+	return thresholds
+}
+
+func baseline_metrics_from_payload(payload) {
+	if type(payload) != "dict" {
+		return {}
+	}
+	metrics := dict_get_or(payload, "metrics", {})
+	if type(metrics) == "dict" && len(keys(metrics)) > 0 {
+		return metrics
+	}
+	return payload
+}
+
+canary_eval_cfg := {
+	"golden_queries_path": env_or("KUJO_RAG_CANARY_GOLDEN_PATH", "./config/canary_replay_samples.json"),
+	"thresholds_path": env_or("KUJO_RAG_CANARY_EVAL_THRESHOLDS_PATH", "./config/canary_replay_eval_thresholds.json"),
+	"corpus_path": env_or("KUJO_RAG_CANARY_CORPUS_PATH", "./examples/release_eval_corpus"),
+	"index_path": env_or("KUJO_RAG_CANARY_INDEX_PATH", "./results/canary_release_eval_index.json"),
+	"recursive": true
+}
+
+baseline_report_path := env_or("KUJO_RAG_CANARY_BASELINE_REPORT_PATH", "./results/release_eval_report.json")
+comparison_thresholds_path := env_or("KUJO_RAG_CANARY_ACCEPTANCE_PATH", "./config/canary_replay_thresholds.json")
+output_path := env_or("KUJO_RAG_CANARY_OUTPUT_PATH", "./results/canary_release_replay_report.json")
+
+_ = ensure_parent_dir(output_path)
+
+canary_result := run_release_evaluation(canary_eval_cfg)
+canary_metrics := dict_get_or(canary_result, "metrics", {})
+
+baseline_payload := read_json_file_or(baseline_report_path, {})
+baseline_metrics := baseline_metrics_from_payload(baseline_payload)
+baseline_available := type(baseline_metrics) == "dict" && len(keys(baseline_metrics)) > 0
+
+thresholds := normalize_comparison_thresholds(read_json_file_or(comparison_thresholds_path, {}))
+
+canary_total_cases := num_or(dict_get_or(canary_metrics, "total_cases", 0), 0)
+canary_quality_pass_rate := num_or(dict_get_or(canary_metrics, "quality_pass_rate", 0.0), 0.0)
+canary_avg_confidence := num_or(dict_get_or(canary_metrics, "avg_confidence", 0.0), 0.0)
+canary_avg_grounding := num_or(dict_get_or(canary_metrics, "avg_grounding", 0.0), 0.0)
+canary_error_rate := num_or(dict_get_or(canary_metrics, "error_rate", 1.0), 1.0)
+canary_avg_latency_ms := num_or(dict_get_or(canary_metrics, "avg_latency_ms", 0.0), 0.0)
+canary_p95_latency_ms := num_or(dict_get_or(canary_metrics, "p95_latency_ms", 0.0), 0.0)
+
+baseline_quality_pass_rate := canary_quality_pass_rate
+baseline_avg_confidence := canary_avg_confidence
+baseline_avg_grounding := canary_avg_grounding
+baseline_error_rate := canary_error_rate
+baseline_avg_latency_ms := canary_avg_latency_ms
+baseline_p95_latency_ms := canary_p95_latency_ms
+
+if baseline_available {
+	baseline_quality_pass_rate = num_or(dict_get_or(baseline_metrics, "quality_pass_rate", baseline_quality_pass_rate), baseline_quality_pass_rate)
+	baseline_avg_confidence = num_or(dict_get_or(baseline_metrics, "avg_confidence", baseline_avg_confidence), baseline_avg_confidence)
+	baseline_avg_grounding = num_or(dict_get_or(baseline_metrics, "avg_grounding", baseline_avg_grounding), baseline_avg_grounding)
+	baseline_error_rate = num_or(dict_get_or(baseline_metrics, "error_rate", baseline_error_rate), baseline_error_rate)
+	baseline_avg_latency_ms = num_or(dict_get_or(baseline_metrics, "avg_latency_ms", baseline_avg_latency_ms), baseline_avg_latency_ms)
+	baseline_p95_latency_ms = num_or(dict_get_or(baseline_metrics, "p95_latency_ms", baseline_p95_latency_ms), baseline_p95_latency_ms)
+}
+
+quality_pass_rate_drop := baseline_quality_pass_rate - canary_quality_pass_rate
+avg_confidence_drop := baseline_avg_confidence - canary_avg_confidence
+avg_grounding_drop := baseline_avg_grounding - canary_avg_grounding
+error_rate_increase := canary_error_rate - baseline_error_rate
+
+avg_latency_denominator := baseline_avg_latency_ms
+if avg_latency_denominator <= 0.0 {
+	avg_latency_denominator = 1.0
+}
+p95_latency_denominator := baseline_p95_latency_ms
+if p95_latency_denominator <= 0.0 {
+	p95_latency_denominator = 1.0
+}
+
+avg_latency_ratio := to_float(canary_avg_latency_ms) / to_float(avg_latency_denominator)
+p95_latency_ratio := to_float(canary_p95_latency_ms) / to_float(p95_latency_denominator)
+
+gates := {
+	"baseline_available": baseline_available,
+	"canary_eval_ok": dict_get_or(canary_result, "ok", false) == true,
+	"minimum_sample_count": canary_total_cases >= num_or(dict_get_or(thresholds, "min_sample_count", 1), 1),
+	"quality_pass_rate_drop": quality_pass_rate_drop <= num_or(dict_get_or(thresholds, "max_quality_pass_rate_drop", 0.05), 0.05),
+	"avg_confidence_drop": avg_confidence_drop <= num_or(dict_get_or(thresholds, "max_avg_confidence_drop", 0.10), 0.10),
+	"avg_grounding_drop": avg_grounding_drop <= num_or(dict_get_or(thresholds, "max_avg_grounding_drop", 0.05), 0.05),
+	"error_rate_increase": error_rate_increase <= num_or(dict_get_or(thresholds, "max_error_rate_increase", 0.02), 0.02),
+	"avg_latency_ratio": avg_latency_ratio <= num_or(dict_get_or(thresholds, "max_avg_latency_ratio", 1.30), 1.30),
+	"p95_latency_ratio": p95_latency_ratio <= num_or(dict_get_or(thresholds, "max_p95_latency_ratio", 1.35), 1.35)
+}
+
+ok := true
+for key in keys(gates) {
+	if dict_get_or(gates, key, false) == false {
+		ok = false
+	}
+}
+
+result := {
+	"ok": ok,
+	"generated_at_unix_ms": current_timestamp(),
+	"baseline_report_path": baseline_report_path,
+	"comparison_thresholds_path": comparison_thresholds_path,
+	"output_path": output_path,
+	"thresholds": thresholds,
+	"canary_release_eval": {
+		"ok": dict_get_or(canary_result, "ok", false),
+		"dataset_version": dict_get_or(canary_result, "dataset_version", ""),
+		"metrics": canary_metrics,
+		"gates": dict_get_or(canary_result, "gates", {})
+	},
+	"baseline_metrics": {
+		"quality_pass_rate": baseline_quality_pass_rate,
+		"avg_confidence": baseline_avg_confidence,
+		"avg_grounding": baseline_avg_grounding,
+		"error_rate": baseline_error_rate,
+		"avg_latency_ms": baseline_avg_latency_ms,
+		"p95_latency_ms": baseline_p95_latency_ms
+	},
+	"canary_metrics": {
+		"total_cases": canary_total_cases,
+		"quality_pass_rate": canary_quality_pass_rate,
+		"avg_confidence": canary_avg_confidence,
+		"avg_grounding": canary_avg_grounding,
+		"error_rate": canary_error_rate,
+		"avg_latency_ms": canary_avg_latency_ms,
+		"p95_latency_ms": canary_p95_latency_ms
+	},
+	"deltas": {
+		"quality_pass_rate_drop": quality_pass_rate_drop,
+		"avg_confidence_drop": avg_confidence_drop,
+		"avg_grounding_drop": avg_grounding_drop,
+		"error_rate_increase": error_rate_increase,
+		"avg_latency_ratio": avg_latency_ratio,
+		"p95_latency_ratio": p95_latency_ratio
+	},
+	"gates": gates
+}
+
+write_json_file(output_path, result)
+print(to_json(result))
+
+if ok == false {
+	exit(1)
+}

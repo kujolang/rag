@@ -1,0 +1,189 @@
+from src.common import dict_get_or
+from src.tests_helpers import assert_true, assert_equal
+from src.embeddings import embed_texts, clear_embedding_cache, embedding_cache_metrics
+
+kujo_bin := env_or("KUJO_BIN", "/path/to/kujo/target/release/kujo")
+
+func run_cmd(command) {
+	res := execute_status(command, {"timeout_ms": 120000})
+	if type(res) == "struct" {
+		return {
+			"ok": res.success,
+			"exit_code": res.exitcode,
+			"stdout": to_string(res.stdout),
+			"stderr": to_string(res.stderr)
+		}
+	}
+	return {
+		"ok": false,
+		"exit_code": -1,
+		"stdout": "",
+		"stderr": "invalid execute_status result"
+	}
+}
+
+func parse_json_safe(text) {
+	obj := {}
+	err := null
+	try {
+		obj := parse_json(text)
+	} except e {
+		err := e
+	}
+	if type(err) != "null" {
+		return {
+			"ok": false,
+			"error": to_string(err),
+			"data": {}
+		}
+	}
+	return {
+		"ok": true,
+		"data": obj
+	}
+}
+
+func start_server(port, env_prefix, log_file) {
+	cmd := "env " + env_prefix + " " + kujo_bin + " run main.kujo --interpreter serve --host 127.0.0.1 --port " + to_string(port) + " > " + log_file + " 2>&1 & echo $!"
+	res := run_cmd(cmd)
+	return trim(dict_get_or(res, "stdout", ""))
+}
+
+func stop_server(pid) {
+	if pid == "" {
+		return true
+	}
+	_ := run_cmd("kill " + pid + " >/dev/null 2>&1 || true")
+	_ := run_cmd("wait " + pid + " >/dev/null 2>&1 || true")
+	return true
+}
+
+func wait_for_health(port) {
+	attempt := 0
+	while attempt < 5000 {
+		res := run_cmd("curl -s http://127.0.0.1:" + to_string(port) + "/health")
+		body := trim(dict_get_or(res, "stdout", ""))
+		if body != "" {
+			parsed := parse_json_safe(body)
+			if dict_get_or(parsed, "ok", false) == true {
+				payload := dict_get_or(parsed, "data", {})
+				if dict_get_or(payload, "ok", false) == true {
+					return true
+				}
+			}
+		}
+		attempt = attempt + 1
+	}
+	return false
+}
+
+func post_ingest(port) {
+	cmd := "curl -s -X POST http://127.0.0.1:" + to_string(port) + "/ingest -H \"Content-Type: application/json\" -d '{\"path\":\"./examples/kujo_docs\",\"recursive\":true}'"
+	return run_cmd(cmd)
+}
+
+func post_query(port, query_text) {
+	cmd := "curl -s -X POST http://127.0.0.1:" + to_string(port) + "/query -H \"Content-Type: application/json\" -d '{\"query\":\"" + query_text + "\"}'"
+	return run_cmd(cmd)
+}
+
+func get_metrics(port) {
+	cmd := "curl -s http://127.0.0.1:" + to_string(port) + "/metrics"
+	return run_cmd(cmd)
+}
+
+func parse_envelope_data(raw_text) {
+	parsed := parse_json_safe(raw_text)
+	if dict_get_or(parsed, "ok", false) == false {
+		return {
+			"ok": false,
+			"data": {}
+		}
+	}
+	payload := dict_get_or(parsed, "data", {})
+	if dict_get_or(payload, "ok", false) == false {
+		return {
+			"ok": false,
+			"data": {}
+		}
+	}
+	return {
+		"ok": true,
+		"data": dict_get_or(payload, "data", {})
+	}
+}
+
+base_port := 42200 + (current_timestamp() % 10000)
+api_port := base_port
+env_prefix := "KUJO_RAG_ENV=development KUJO_RAG_API_AUTH_PROVIDER=none KUJO_RAG_API_STARTUP_GRACE_MS=0 KUJO_RAG_API_INGEST_ALLOWED_ROOTS=./examples KUJO_RAG_API_QUERY_CACHE_ENABLED=true KUJO_RAG_API_QUERY_CACHE_TTL_SEC=300 KUJO_RAG_API_QUERY_CACHE_MAX_ENTRIES=128 KUJO_RAG_EMBEDDING_CACHE_ENABLED=true KUJO_RAG_EMBEDDING_CACHE_MAX_ENTRIES=4096 KUJO_RAG_INDEX_PATH=/tmp/kujo_rag_cache_" + to_string(api_port) + ".json"
+server_pid := start_server(api_port, env_prefix, "/tmp/kujo_rag_query_embedding_cache.log")
+assert_true(to_bool(server_pid != ""))
+assert_true(to_bool(wait_for_health(api_port) == true))
+
+ingest_a := parse_envelope_data(dict_get_or(post_ingest(api_port), "stdout", ""))
+assert_true(to_bool(dict_get_or(ingest_a, "ok", false) == true))
+
+query_text := "What is Kujo optimized for?"
+query_first := parse_envelope_data(dict_get_or(post_query(api_port, query_text), "stdout", ""))
+assert_true(to_bool(dict_get_or(query_first, "ok", false) == true))
+first_data := dict_get_or(query_first, "data", {})
+first_cache := dict_get_or(first_data, "cache", {})
+assert_equal(dict_get_or(first_cache, "hit", true), false)
+
+query_second := parse_envelope_data(dict_get_or(post_query(api_port, query_text), "stdout", ""))
+assert_true(to_bool(dict_get_or(query_second, "ok", false) == true))
+second_data := dict_get_or(query_second, "data", {})
+second_cache := dict_get_or(second_data, "cache", {})
+assert_equal(dict_get_or(second_cache, "hit", false), true)
+
+metrics_after_hit := parse_envelope_data(dict_get_or(get_metrics(api_port), "stdout", ""))
+assert_true(to_bool(dict_get_or(metrics_after_hit, "ok", false) == true))
+metrics_hit_data := dict_get_or(metrics_after_hit, "data", {})
+miss_before_invalidate := dict_get_or(metrics_hit_data, "cache_misses", 0)
+assert_true(to_bool(dict_get_or(metrics_hit_data, "cache_hits", 0) >= 1))
+assert_true(to_bool(miss_before_invalidate >= 1))
+assert_true(to_bool(dict_get_or(metrics_hit_data, "query_cache_entries", 0) >= 1))
+
+ingest_b := parse_envelope_data(dict_get_or(post_ingest(api_port), "stdout", ""))
+assert_true(to_bool(dict_get_or(ingest_b, "ok", false) == true))
+
+query_third := parse_envelope_data(dict_get_or(post_query(api_port, query_text), "stdout", ""))
+assert_true(to_bool(dict_get_or(query_third, "ok", false) == true))
+third_data := dict_get_or(query_third, "data", {})
+third_cache := dict_get_or(third_data, "cache", {})
+assert_equal(dict_get_or(third_cache, "hit", true), false)
+
+metrics_after_invalidate := parse_envelope_data(dict_get_or(get_metrics(api_port), "stdout", ""))
+assert_true(to_bool(dict_get_or(metrics_after_invalidate, "ok", false) == true))
+metrics_invalidate_data := dict_get_or(metrics_after_invalidate, "data", {})
+assert_true(to_bool(dict_get_or(metrics_invalidate_data, "cache_misses", 0) > miss_before_invalidate))
+
+_ := stop_server(server_pid)
+
+_ = clear_embedding_cache()
+embed_cfg := {
+	"embedding_provider": "hash",
+	"embedding_dims": 64,
+	"embedding_cache_enabled": true,
+	"embedding_cache_max_entries": 16
+}
+embed_first := embed_texts(["cache-vector-sample"], embed_cfg)
+embed_first_vectors := dict_get_or(embed_first, "vectors", [])
+assert_true(to_bool(len(embed_first_vectors) == 1))
+
+embed_stats_after_first := embedding_cache_metrics()
+assert_true(to_bool(dict_get_or(embed_stats_after_first, "size", 0) >= 1))
+
+embed_second := embed_texts(["cache-vector-sample"], embed_cfg)
+embed_second_vectors := dict_get_or(embed_second, "vectors", [])
+assert_true(to_bool(len(embed_second_vectors) == 1))
+embed_stats_after_second := embedding_cache_metrics()
+assert_true(to_bool(dict_get_or(embed_stats_after_second, "size", 0) >= 1))
+
+_ = clear_embedding_cache()
+embed_stats_after_clear := embedding_cache_metrics()
+assert_equal(dict_get_or(embed_stats_after_clear, "size", -1), 0)
+assert_equal(dict_get_or(embed_stats_after_clear, "hits", -1), 0)
+assert_equal(dict_get_or(embed_stats_after_clear, "misses", -1), 0)
+
+print("test_query_embedding_cache: ok")

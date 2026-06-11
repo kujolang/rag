@@ -1,0 +1,67 @@
+{
+  "version": "penetration-test-program-v1",
+  "last_tested_at_unix_ms": 1779819000000,
+  "review_cadence_days": 30,
+  "owner": "Security Team",
+  "scope": {
+    "in_scope": [
+      "Query API authentication and RBAC controls",
+      "Namespace isolation and privacy workflows",
+      "Release-gate and control-plane admin endpoints"
+    ],
+    "out_of_scope": [
+      "Third-party managed infrastructure outside this repository",
+      "Denial-of-service load testing beyond release-gate capacity budgets"
+    ],
+    "methodology": [
+      "Authenticated black-box API abuse testing",
+      "Privilege escalation and horizontal-access simulation",
+      "Configuration and release-gate policy bypass attempts"
+    ]
+  },
+  "severity_sla_days": {
+    "critical": 2,
+    "high": 7,
+    "medium": 30,
+    "low": 90
+  },
+  "report_artifact_path": "./docs/penetration-test-report.md",
+  "remediation_evidence_paths": [
+    "./docs/penetration-test-remediation-evidence.md"
+  ],
+  "backlog_path": "./config/penetration_test_remediation_backlog.json",
+  "findings": [
+    {
+      "id": "PT-2026-05-001",
+      "title": "Rate-limit bypass attempt via namespace hopping",
+      "severity": "high",
+      "status": "resolved",
+      "backlog_ticket": "SEC-PT-241",
+      "reported_at_unix_ms": 1779819000000,
+      "sla_due_at_unix_ms": 1779991800000,
+      "resolved_at_unix_ms": 1779905400000,
+      "exception_id": "",
+      "exception_approved_by": "",
+      "exception_expires_at_unix_ms": 0,
+      "evidence_paths": [
+        "./docs/penetration-test-remediation-evidence.md"
+      ]
+    },
+    {
+      "id": "PT-2026-05-002",
+      "title": "Admin route replay risk under degraded token lifecycle controls",
+      "severity": "critical",
+      "status": "accepted_exception",
+      "backlog_ticket": "SEC-PT-242",
+      "reported_at_unix_ms": 1779819000000,
+      "sla_due_at_unix_ms": 1780164600000,
+      "resolved_at_unix_ms": 0,
+      "exception_id": "EXC-2026-05-PT-002",
+      "exception_approved_by": "Security Director",
+      "exception_expires_at_unix_ms": 1782417600000,
+      "evidence_paths": [
+        "./docs/penetration-test-remediation-evidence.md"
+      ]
+    }
+  ]
+}

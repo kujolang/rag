@@ -1,0 +1,10 @@
+{
+	"min_sample_count": 6,
+	"max_quality_pass_rate_drop": 0.05,
+	"max_avg_confidence_drop": 0.10,
+	"max_avg_grounding_drop": 0.05,
+	"max_error_rate_increase": 0.02,
+	"max_avg_latency_ratio": 1.30,
+	"max_p95_latency_ratio": 1.35,
+	"thresholds_note": "Candidate canary metrics must remain within accepted deltas versus the latest release baseline"
+}

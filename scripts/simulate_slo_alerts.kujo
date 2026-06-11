@@ -1,0 +1,142 @@
+from src.common import dict_get_or
+
+func read_json_file(path) {
+	if file_exists(path) == false {
+		return {
+			"ok": false,
+			"error": "missing_file",
+			"message": "File not found: " + path,
+			"data": {}
+		}
+	}
+	raw := read_file(path)
+	err := null
+	parsed := {}
+	try {
+		parsed := parse_json(raw)
+	} except e {
+		err := e
+	}
+	if type(err) != "null" {
+		return {
+			"ok": false,
+			"error": "invalid_json",
+			"message": to_string(err),
+			"data": {}
+		}
+	}
+	return {
+		"ok": true,
+		"data": parsed
+	}
+}
+
+func evaluate_threshold(metric_name, value, alert_threshold, page_threshold, runbook, higher_is_bad) {
+	state := "ok"
+	if higher_is_bad {
+		if value >= page_threshold {
+			state = "page"
+		} else if value >= alert_threshold {
+			state = "alert"
+		}
+	} else {
+		if value <= page_threshold {
+			state = "page"
+		} else if value <= alert_threshold {
+			state = "alert"
+		}
+	}
+	return {
+		"metric": metric_name,
+		"value": value,
+		"state": state,
+		"runbook": runbook
+	}
+}
+
+func main() {
+	slo_path := env_or("SLO_PATH", "config/slo_targets.json")
+	metrics_path := env_or("SLO_METRICS_PATH", "results/slo_metrics_snapshot.json")
+
+	slo_res := read_json_file(slo_path)
+	if slo_res["ok"] == false {
+		print(to_json({"ok": false, "error": slo_res["error"], "message": slo_res["message"]}))
+		exit(1)
+	}
+	slos := slo_res["data"]
+
+	metrics_res := read_json_file(metrics_path)
+	if metrics_res["ok"] == false {
+		print(to_json({"ok": false, "error": metrics_res["error"], "message": metrics_res["message"]}))
+		exit(1)
+	}
+	metrics := metrics_res["data"]
+
+	alerts := []
+	availability := evaluate_threshold(
+		"availability",
+		dict_get_or(metrics, "availability", 1.0),
+		dict_get_or(dict_get_or(slos, "availability", {}), "alert_threshold", 0.992),
+		dict_get_or(dict_get_or(slos, "availability", {}), "page_threshold", 0.99),
+		dict_get_or(dict_get_or(slos, "availability", {}), "runbook", ""),
+		false
+	)
+	alerts = push(alerts, availability)
+
+	latency := evaluate_threshold(
+		"query_latency_p95_ms",
+		dict_get_or(metrics, "query_latency_p95_ms", 0),
+		dict_get_or(dict_get_or(slos, "query_latency_p95_ms", {}), "alert_threshold", 1400),
+		dict_get_or(dict_get_or(slos, "query_latency_p95_ms", {}), "page_threshold", 1700),
+		dict_get_or(dict_get_or(slos, "query_latency_p95_ms", {}), "runbook", ""),
+		true
+	)
+	alerts = push(alerts, latency)
+
+	correctness := evaluate_threshold(
+		"answer_correctness",
+		dict_get_or(metrics, "answer_correctness", 1.0),
+		dict_get_or(dict_get_or(slos, "answer_correctness", {}), "alert_threshold", 0.87),
+		dict_get_or(dict_get_or(slos, "answer_correctness", {}), "page_threshold", 0.84),
+		dict_get_or(dict_get_or(slos, "answer_correctness", {}), "runbook", ""),
+		false
+	)
+	alerts = push(alerts, correctness)
+
+	error_budget := evaluate_threshold(
+		"error_budget_burn",
+		dict_get_or(metrics, "error_budget_burn", 0.0),
+		dict_get_or(dict_get_or(slos, "error_budget", {}), "burn_alert_threshold", 0.5),
+		dict_get_or(dict_get_or(slos, "error_budget", {}), "burn_page_threshold", 0.75),
+		dict_get_or(dict_get_or(slos, "error_budget", {}), "runbook", ""),
+		true
+	)
+	alerts = push(alerts, error_budget)
+
+	has_page := false
+	has_alert := false
+	for alert in alerts {
+		state := dict_get_or(alert, "state", "ok")
+		if state == "page" {
+			has_page = true
+		}
+		if state == "alert" {
+			has_alert = true
+		}
+	}
+
+	overall := "ok"
+	if has_page {
+		overall = "page"
+	} else if has_alert {
+		overall = "alert"
+	}
+
+	print(to_json({
+		"ok": true,
+		"overall": overall,
+		"alerts": alerts
+	}))
+}
+
+main()

@@ -1,0 +1,60 @@
+{
+  "suite_name": "chaos_fault_injection_review_v1",
+  "version": "1.0.0",
+  "owner": "reliability-engineering",
+  "required_fault_types": [
+    "timeout",
+    "storage_failure",
+    "dependency_failure"
+  ],
+  "scenarios": [
+    {
+      "id": "query-timeout-injection",
+      "fault_type": "timeout",
+      "enabled": true,
+      "injection_target": "query_pipeline",
+      "expected": {
+        "bounded_behavior": "request terminates with structured timeout envelope",
+        "observability_signal": "query timeout counters and stage timing spans are emitted",
+        "recovery_check": "subsequent query without fault succeeds"
+      },
+      "assertions": [
+        "bounded_behavior",
+        "observability_signal",
+        "recovery_check"
+      ]
+    },
+    {
+      "id": "index-storage-failure-injection",
+      "fault_type": "storage_failure",
+      "enabled": true,
+      "injection_target": "vector_index_persistence",
+      "expected": {
+        "bounded_behavior": "writes fail with explicit storage_unavailable error and do not corrupt existing index state",
+        "observability_signal": "storage failure counters and audit events are emitted",
+        "recovery_check": "read-only query path remains available and write path recovers after dependency restore"
+      },
+      "assertions": [
+        "bounded_behavior",
+        "observability_signal",
+        "recovery_check"
+      ]
+    },
+    {
+      "id": "embedding-dependency-failure-injection",
+      "fault_type": "dependency_failure",
+      "enabled": true,
+      "injection_target": "embedding_provider",
+      "expected": {
+        "bounded_behavior": "ingest/query degrade gracefully with deterministic dependency_unavailable envelope",
+        "observability_signal": "dependency-failure metrics and structured logs include request correlation ids",
+        "recovery_check": "retry succeeds after dependency recovers without manual state repair"
+      },
+      "assertions": [
+        "bounded_behavior",
+        "observability_signal",
+        "recovery_check"
+      ]
+    }
+  ]
+}

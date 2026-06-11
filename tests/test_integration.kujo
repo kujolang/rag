@@ -1,0 +1,206 @@
+from src.config import load_config, ensure_runtime_dirs, cfg_with_namespace
+from src.rag_engine import build_rag_index, load_or_initialize_index, query_rag
+from src.common import dict_get_or
+from src.tests_helpers import assert_true
+
+cfg := load_config({
+	"index_path": "./results/test_index.json",
+	"chunk_strategy": "line",
+	"chunk_size": 360,
+	"chunk_overlap": 80,
+	"top_k": 4,
+	"embedding_provider": "hash"
+})
+_ := ensure_runtime_dirs(cfg)
+
+build := build_rag_index("./examples/kujo_docs", cfg, true)
+summary := dict_get_or(build, "summary", {})
+
+assert_true(to_bool(dict_get_or(summary, "documents", 0) >= 3))
+assert_true(to_bool(dict_get_or(summary, "chunks", 0) >= 3))
+
+index := load_or_initialize_index(cfg)
+query := query_rag(index, "How does Kujo handle module imports?", cfg, null, null)
+
+count := dict_get_or(query, "count", 0)
+assert_true(to_bool(count >= 1))
+
+citations := dict_get_or(query, "citations", [])
+assert_true(to_bool(len(citations) >= 1))
+
+first := citations[0]
+path := dict_get_or(first, "path", "")
+assert_true(to_bool(contains(path, "examples/kujo_docs") == 1))
+assert_true(to_bool(dict_get_or(first, "line_end", 0) >= dict_get_or(first, "line_start", 0)))
+
+answer := dict_get_or(query, "answer", "")
+assert_true(to_bool(len(trim(answer)) > 0))
+assert_true(to_bool(dict_get_or(query, "confidence", -1.0) >= 0.0))
+assert_true(to_bool(dict_get_or(query, "confidence", 2.0) <= 1.0))
+assert_true(to_bool(has_key(query, "confidence_summary") == 1))
+assert_true(to_bool(has_key(first, "confidence") == 1))
+assert_true(to_bool(has_key(first, "confidence_band") == 1))
+
+filtered_query := query_rag(index, "API", cfg, {
+	"path": "API.md",
+	"extension": "md",
+	"tags": ["markdown"]
+}, null)
+filtered_count := dict_get_or(filtered_query, "count", 0)
+assert_true(to_bool(filtered_count >= 1))
+filtered_citations := dict_get_or(filtered_query, "citations", [])
+for citation in filtered_citations {
+	assert_true(to_bool(contains(to_lower(dict_get_or(citation, "path", "")), "api.md") == 1))
+}
+
+session_query := query_rag(index, "What about performance?", cfg, null, [
+	{
+		"query": "What is Kujo optimized for?",
+		"answer": "Kujo is optimized for speed."
+	}
+])
+assert_true(to_bool(dict_get_or(session_query, "count", 0) >= 1))
+assert_true(to_bool(dict_get_or(session_query, "session_history_used", 0) >= 1))
+assert_true(to_bool(len(trim(dict_get_or(session_query, "answer", ""))) > 0))
+
+# Incremental indexing regression tests
+incremental_cfg := load_config({
+	"index_path": "./results/test_index_incremental.json",
+	"chunk_strategy": "line",
+	"chunk_size": 240,
+	"chunk_overlap": 40,
+	"top_k": 4,
+	"embedding_provider": "hash"
+})
+_ = ensure_runtime_dirs(incremental_cfg)
+
+if path_exists("./results/perf_incremental") == false {
+	create_dir("./results/perf_incremental")
+}
+
+doc_a := "./results/perf_incremental/a.md"
+doc_b := "./results/perf_incremental/b.md"
+
+if file_exists(doc_a) {
+	delete_file(doc_a)
+}
+if file_exists(doc_b) {
+	delete_file(doc_b)
+}
+
+write_file(doc_a, "# Alpha\nFirst content body")
+write_file(doc_b, "# Beta\nSecond content body")
+
+first_incremental := build_rag_index("./results/perf_incremental", incremental_cfg, true)
+first_inc_summary := dict_get_or(dict_get_or(first_incremental, "summary", {}), "incremental", {})
+assert_true(to_bool(dict_get_or(first_inc_summary, "reindexed_docs", 0) >= 2))
+
+second_incremental := build_rag_index("./results/perf_incremental", incremental_cfg, true)
+second_inc_summary := dict_get_or(dict_get_or(second_incremental, "summary", {}), "incremental", {})
+assert_true(to_bool(dict_get_or(second_inc_summary, "reindexed_docs", -1) == 0))
+assert_true(to_bool(dict_get_or(second_inc_summary, "unchanged_docs", 0) >= 2))
+
+delete_file(doc_a)
+write_file(doc_a, "# Alpha\nFirst content body changed")
+
+third_incremental := build_rag_index("./results/perf_incremental", incremental_cfg, true)
+third_inc_summary := dict_get_or(dict_get_or(third_incremental, "summary", {}), "incremental", {})
+assert_true(to_bool(dict_get_or(third_inc_summary, "reindexed_docs", 0) == 1))
+assert_true(to_bool(dict_get_or(third_inc_summary, "unchanged_docs", 0) >= 1))
+
+delete_file(doc_b)
+
+fourth_incremental := build_rag_index("./results/perf_incremental", incremental_cfg, true)
+fourth_inc_summary := dict_get_or(dict_get_or(fourth_incremental, "summary", {}), "incremental", {})
+assert_true(to_bool(dict_get_or(fourth_inc_summary, "deleted_docs", 0) >= 1))
+
+if file_exists(doc_a) {
+	delete_file(doc_a)
+}
+if file_exists(doc_b) {
+	delete_file(doc_b)
+}
+
+if file_exists("./results/test_index_incremental.json") {
+	delete_file("./results/test_index_incremental.json")
+}
+
+if file_exists("./results/test_index.json") {
+	delete_file("./results/test_index.json")
+}
+
+# Namespace isolation integration tests (PRD-001)
+ns_base_cfg := load_config({
+	"index_path": "./results/test_index_ns.json",
+	"chunk_strategy": "line",
+	"chunk_size": 220,
+	"chunk_overlap": 30,
+	"top_k": 4,
+	"embedding_provider": "hash"
+})
+
+ns_alpha_result := cfg_with_namespace(ns_base_cfg, "alpha")
+ns_beta_result := cfg_with_namespace(ns_base_cfg, "beta")
+assert_true(to_bool(dict_get_or(ns_alpha_result, "ok", false) == true))
+assert_true(to_bool(dict_get_or(ns_beta_result, "ok", false) == true))
+
+ns_alpha_cfg := dict_get_or(ns_alpha_result, "cfg", {})
+ns_beta_cfg := dict_get_or(ns_beta_result, "cfg", {})
+_ = ensure_runtime_dirs(ns_alpha_cfg)
+_ = ensure_runtime_dirs(ns_beta_cfg)
+
+ns_alpha_dir := "./results/ns_alpha_docs"
+ns_beta_dir := "./results/ns_beta_docs"
+
+if path_exists(ns_alpha_dir) == false {
+	create_dir(ns_alpha_dir)
+}
+if path_exists(ns_beta_dir) == false {
+	create_dir(ns_beta_dir)
+}
+
+write_file(ns_alpha_dir + "/alpha.md", "# Alpha namespace\nalpha-only retrieval marker")
+write_file(ns_beta_dir + "/beta.md", "# Beta namespace\nbeta-only retrieval marker")
+
+_ = build_rag_index(ns_alpha_dir, ns_alpha_cfg, true)
+_ = build_rag_index(ns_beta_dir, ns_beta_cfg, true)
+
+ns_alpha_index := load_or_initialize_index(ns_alpha_cfg)
+ns_beta_index := load_or_initialize_index(ns_beta_cfg)
+
+ns_alpha_query := query_rag(ns_alpha_index, "alpha-only retrieval marker", ns_alpha_cfg, null, null)
+ns_beta_query := query_rag(ns_beta_index, "beta-only retrieval marker", ns_beta_cfg, null, null)
+
+assert_true(to_bool(dict_get_or(ns_alpha_query, "count", 0) >= 1))
+assert_true(to_bool(dict_get_or(ns_beta_query, "count", 0) >= 1))
+
+ns_alpha_citations := dict_get_or(ns_alpha_query, "citations", [])
+ns_beta_citations := dict_get_or(ns_beta_query, "citations", [])
+
+for citation in ns_alpha_citations {
+	path_value := dict_get_or(citation, "path", "")
+	assert_true(to_bool(contains(path_value, "ns_alpha_docs") == 1))
+	assert_true(to_bool(contains(path_value, "ns_beta_docs") == 0))
+}
+
+for citation in ns_beta_citations {
+	path_value := dict_get_or(citation, "path", "")
+	assert_true(to_bool(contains(path_value, "ns_beta_docs") == 1))
+	assert_true(to_bool(contains(path_value, "ns_alpha_docs") == 0))
+}
+
+if file_exists(ns_alpha_dir + "/alpha.md") {
+	delete_file(ns_alpha_dir + "/alpha.md")
+}
+if file_exists(ns_beta_dir + "/beta.md") {
+	delete_file(ns_beta_dir + "/beta.md")
+}
+
+if file_exists("./results/test_index_ns__alpha.json") {
+	delete_file("./results/test_index_ns__alpha.json")
+}
+if file_exists("./results/test_index_ns__beta.json") {
+	delete_file("./results/test_index_ns__beta.json")
+}
+
+print("test_integration: ok")

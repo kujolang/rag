@@ -1,0 +1,77 @@
+from src.common import dict_get_or
+
+kujo_bin := env_or("KUJO_BIN", "kujo")
+
+func shell_quote(value) {
+	raw := to_string(value)
+	escaped := regex_replace(raw, "'", "'\"'\"'")
+	return "'" + escaped + "'"
+}
+
+func quoted_args(args_list) {
+	parts := []
+	for item in args_list {
+		parts := push(parts, shell_quote(item))
+	}
+	return join(parts, " ")
+}
+
+func run_command(command_text) {
+	res := execute_status(command_text, {
+		"timeout_ms": 180000
+	})
+	ok := false
+	exit_code := -1
+	stdout := ""
+	stderr := ""
+	if type(res) == "struct" {
+		ok = res.success
+		exit_code = res.exitcode
+		stdout = res.stdout
+		stderr = res.stderr
+	}
+	return {
+		"ok": ok,
+		"exit_code": exit_code,
+		"stdout": stdout,
+		"stderr": stderr,
+		"command": command_text
+	}
+}
+
+passed := args()
+if len(passed) == 0 {
+	print(to_json({
+		"ok": false,
+		"error": "missing_args",
+		"message": "Provide main.kujo command arguments, for example: ingest --path ./examples/kujo_docs --recursive true"
+	}))
+	exit(1)
+}
+
+arg_str := quoted_args(passed)
+native_cmd := kujo_bin + " run main.kujo " + arg_str
+native_result := run_command(native_cmd)
+
+if dict_get_or(native_result, "ok", false) == true {
+	print(to_json({
+		"ok": true,
+		"mode": "native",
+		"result": native_result
+	}))
+	exit(0)
+}
+
+interp_cmd := kujo_bin + " run main.kujo --interpreter " + arg_str
+interp_result := run_command(interp_cmd)
+
+print(to_json({
+	"ok": dict_get_or(interp_result, "ok", false),
+	"mode": "interpreter",
+	"native_result": native_result,
+	"result": interp_result
+}))
+
+if dict_get_or(interp_result, "ok", false) == false {
+	exit(1)
+}

@@ -1,0 +1,327 @@
+from src.common import dict_get_or, read_json_file_or, write_json_file, num_or, str_or, bool_or
+
+func ensure_dir(path_value) {
+	if path_value == "" || path_value == "." {
+		return true
+	}
+	if path_exists(path_value) {
+		return true
+	}
+	parent := dirname(path_value)
+	if parent != "" && parent != "." && parent != path_value {
+		_ = ensure_dir(parent)
+	}
+	create_dir(path_value)
+	return true
+}
+
+func ensure_parent_dir(path_value) {
+	dir := dirname(path_value)
+	if dir == "" || dir == "." {
+		return true
+	}
+	return ensure_dir(dir)
+}
+
+func confidence_band(confidence_value) {
+	if confidence_value >= 0.66 {
+		return "high"
+	}
+	if confidence_value >= 0.33 {
+		return "medium"
+	}
+	return "low"
+}
+
+func normalize_expected_runtime(raw_runtime) {
+	expected := {
+		"embedding_provider": "hash",
+		"ai_embed_endpoint": "",
+		"ai_embed_model": "",
+		"chat_endpoint": "",
+		"chat_model": ""
+	}
+	if type(raw_runtime) != "dict" {
+		return expected
+	}
+
+	expected["embedding_provider"] = to_lower(trim(str_or(dict_get_or(raw_runtime, "embedding_provider", expected["embedding_provider"]), expected["embedding_provider"])))
+	if expected["embedding_provider"] == "" {
+		expected["embedding_provider"] = "hash"
+	}
+	expected["ai_embed_endpoint"] = trim(str_or(dict_get_or(raw_runtime, "ai_embed_endpoint", expected["ai_embed_endpoint"]), expected["ai_embed_endpoint"]))
+	expected["ai_embed_model"] = trim(str_or(dict_get_or(raw_runtime, "ai_embed_model", expected["ai_embed_model"]), expected["ai_embed_model"]))
+	expected["chat_endpoint"] = trim(str_or(dict_get_or(raw_runtime, "chat_endpoint", expected["chat_endpoint"]), expected["chat_endpoint"]))
+	expected["chat_model"] = trim(str_or(dict_get_or(raw_runtime, "chat_model", expected["chat_model"]), expected["chat_model"]))
+	return expected
+}
+
+func normalize_reference_cases(raw_cases) {
+	cases := []
+	if type(raw_cases) != "array" {
+		return cases
+	}
+
+	i := 0
+	while i < len(raw_cases) {
+		item := raw_cases[i]
+		if type(item) == "dict" {
+			case_id := trim(str_or(dict_get_or(item, "id", ""), ""))
+			if case_id != "" {
+				min_citations := num_or(dict_get_or(item, "min_citations", 1), 1)
+				if min_citations < 0 {
+					min_citations = 0
+				}
+				min_confidence := num_or(dict_get_or(item, "min_confidence", 0.0), 0.0)
+				if min_confidence < 0.0 {
+					min_confidence = 0.0
+				}
+				if min_confidence > 1.0 {
+					min_confidence = 1.0
+				}
+				cases = push(cases, {
+					"id": case_id,
+					"expected_ok": bool_or(dict_get_or(item, "expected_ok", true), true),
+					"expected_policy_reason": trim(str_or(dict_get_or(item, "expected_policy_reason", ""), "")),
+					"expected_confidence_band": to_lower(trim(str_or(dict_get_or(item, "expected_confidence_band", ""), ""))),
+					"min_citations": min_citations,
+					"min_confidence": min_confidence
+				})
+			}
+		}
+		i = i + 1
+	}
+
+	return cases
+}
+
+func normalize_controls(raw_controls) {
+	controls := {
+		"expected_dataset_version": "",
+		"min_reference_cases": 1,
+		"expected_runtime": normalize_expected_runtime({}),
+		"reference_cases": []
+	}
+	if type(raw_controls) != "dict" {
+		return controls
+	}
+
+	controls["expected_dataset_version"] = trim(str_or(dict_get_or(raw_controls, "expected_dataset_version", controls["expected_dataset_version"]), controls["expected_dataset_version"]))
+	controls["min_reference_cases"] = num_or(dict_get_or(raw_controls, "min_reference_cases", controls["min_reference_cases"]), controls["min_reference_cases"])
+	if controls["min_reference_cases"] < 1 {
+		controls["min_reference_cases"] = 1
+	}
+	controls["expected_runtime"] = normalize_expected_runtime(dict_get_or(raw_controls, "expected_runtime", {}))
+	controls["reference_cases"] = normalize_reference_cases(dict_get_or(raw_controls, "reference_cases", []))
+	return controls
+}
+
+func actual_runtime_profile(release_payload) {
+	build_summary := dict_get_or(release_payload, "build_summary", {})
+	embedding_provider := to_lower(trim(str_or(dict_get_or(build_summary, "provider", env_or("KUJO_RAG_RELEASE_EVAL_EMBEDDING_PROVIDER", env_or("KUJO_RAG_EMBEDDING_PROVIDER", "hash"))), "hash")))
+	if embedding_provider == "" {
+		embedding_provider = "hash"
+	}
+	ai_embed_endpoint := trim(str_or(env_or("KUJO_RAG_AI_EMBED_ENDPOINT", ""), ""))
+	ai_embed_model := trim(str_or(env_or("KUJO_RAG_AI_EMBED_MODEL", ""), ""))
+	chat_endpoint := trim(str_or(env_or("KUJO_RAG_CHAT_ENDPOINT", ""), ""))
+	chat_model := trim(str_or(env_or("KUJO_RAG_CHAT_MODEL", ""), ""))
+	ai_mode_enabled := embedding_provider != "hash"
+	if ai_embed_model != "" || chat_model != "" {
+		ai_mode_enabled = true
+	}
+	return {
+		"embedding_provider": embedding_provider,
+		"ai_embed_endpoint": ai_embed_endpoint,
+		"ai_embed_model": ai_embed_model,
+		"chat_endpoint": chat_endpoint,
+		"chat_model": chat_model,
+		"ai_mode_enabled": ai_mode_enabled
+	}
+}
+
+func pinned_value_match(expected_value, actual_value) {
+	expected := trim(str_or(expected_value, ""))
+	actual := trim(str_or(actual_value, ""))
+	if expected == "*" {
+		return true
+	}
+	return expected == actual
+}
+
+func case_lookup_by_id(raw_results) {
+	lookup := {}
+	if type(raw_results) != "array" {
+		return lookup
+	}
+	i := 0
+	while i < len(raw_results) {
+		item := raw_results[i]
+		if type(item) == "dict" {
+			case_id := trim(str_or(dict_get_or(item, "id", ""), ""))
+			if case_id != "" {
+				lookup[case_id] = item
+			}
+		}
+		i = i + 1
+	}
+	return lookup
+}
+
+controls_path := env_or("KUJO_RAG_AI_DRIFT_CONTROLS_PATH", "./config/ai_provider_model_drift_controls.json")
+release_report_path := env_or("KUJO_RAG_AI_DRIFT_RELEASE_REPORT_PATH", "./results/release_eval_report.json")
+output_path := env_or("KUJO_RAG_AI_DRIFT_REPORT_PATH", "./results/ai_provider_model_drift_report.json")
+
+_ = ensure_parent_dir(output_path)
+
+controls := normalize_controls(read_json_file_or(controls_path, {}))
+expected_runtime := dict_get_or(controls, "expected_runtime", {})
+reference_cases := dict_get_or(controls, "reference_cases", [])
+min_reference_cases := num_or(dict_get_or(controls, "min_reference_cases", 1), 1)
+
+release_payload := read_json_file_or(release_report_path, {})
+release_report_available := type(release_payload) == "dict" && len(keys(release_payload)) > 0
+release_eval_ok := bool_or(dict_get_or(release_payload, "ok", false), false)
+actual_dataset_version := trim(str_or(dict_get_or(release_payload, "dataset_version", ""), ""))
+expected_dataset_version := trim(str_or(dict_get_or(controls, "expected_dataset_version", ""), ""))
+
+actual_runtime := actual_runtime_profile(release_payload)
+runtime_gates := {
+	"embedding_provider": pinned_value_match(dict_get_or(expected_runtime, "embedding_provider", "hash"), dict_get_or(actual_runtime, "embedding_provider", "hash")),
+	"ai_embed_endpoint": pinned_value_match(dict_get_or(expected_runtime, "ai_embed_endpoint", ""), dict_get_or(actual_runtime, "ai_embed_endpoint", "")),
+	"ai_embed_model": pinned_value_match(dict_get_or(expected_runtime, "ai_embed_model", ""), dict_get_or(actual_runtime, "ai_embed_model", "")),
+	"chat_endpoint": pinned_value_match(dict_get_or(expected_runtime, "chat_endpoint", ""), dict_get_or(actual_runtime, "chat_endpoint", "")),
+	"chat_model": pinned_value_match(dict_get_or(expected_runtime, "chat_model", ""), dict_get_or(actual_runtime, "chat_model", ""))
+}
+
+runtime_pinned_ok := true
+for gate_name in keys(runtime_gates) {
+	if dict_get_or(runtime_gates, gate_name, false) == false {
+		runtime_pinned_ok = false
+	}
+}
+
+dataset_version_gate := true
+if expected_dataset_version != "" {
+	dataset_version_gate = actual_dataset_version == expected_dataset_version
+}
+
+reference_case_count_gate := len(reference_cases) >= min_reference_cases
+results_lookup := case_lookup_by_id(dict_get_or(release_payload, "results", []))
+reference_checks := []
+reference_outputs_gate := true
+
+i := 0
+while i < len(reference_cases) {
+	reference_case := reference_cases[i]
+	case_id := str_or(dict_get_or(reference_case, "id", ""), "")
+	item_found := has_key(results_lookup, case_id) == 1
+
+	expected_ok := bool_or(dict_get_or(reference_case, "expected_ok", true), true)
+	expected_policy_reason := str_or(dict_get_or(reference_case, "expected_policy_reason", ""), "")
+	expected_confidence_band := to_lower(str_or(dict_get_or(reference_case, "expected_confidence_band", ""), ""))
+	min_citations := num_or(dict_get_or(reference_case, "min_citations", 1), 1)
+	min_confidence := num_or(dict_get_or(reference_case, "min_confidence", 0.0), 0.0)
+
+	actual_item := dict_get_or(results_lookup, case_id, {})
+	actual_ok := bool_or(dict_get_or(actual_item, "ok", false), false)
+	actual_policy_reason := str_or(dict_get_or(actual_item, "policy_reason", ""), "")
+	actual_citations := num_or(dict_get_or(actual_item, "citations_count", 0), 0)
+	actual_confidence := num_or(dict_get_or(actual_item, "confidence", 0.0), 0.0)
+	actual_band := confidence_band(actual_confidence)
+
+	ok_gate := item_found && (actual_ok == expected_ok)
+	policy_gate := item_found
+	if expected_policy_reason != "" {
+		policy_gate = policy_gate && actual_policy_reason == expected_policy_reason
+	}
+	citations_gate := item_found && actual_citations >= min_citations
+	confidence_gate := item_found && actual_confidence >= min_confidence
+	band_gate := item_found
+	if expected_confidence_band != "" {
+		band_gate = band_gate && actual_band == expected_confidence_band
+	}
+
+	case_gate := ok_gate && policy_gate && citations_gate && confidence_gate && band_gate
+	if case_gate == false {
+		reference_outputs_gate = false
+	}
+
+	reference_checks = push(reference_checks, {
+		"id": case_id,
+		"found": item_found,
+		"expected": {
+			"ok": expected_ok,
+			"policy_reason": expected_policy_reason,
+			"min_citations": min_citations,
+			"min_confidence": min_confidence,
+			"confidence_band": expected_confidence_band
+		},
+		"actual": {
+			"ok": actual_ok,
+			"policy_reason": actual_policy_reason,
+			"citations_count": actual_citations,
+			"confidence": actual_confidence,
+			"confidence_band": actual_band
+		},
+		"gates": {
+			"ok": ok_gate,
+			"policy_reason": policy_gate,
+			"citations": citations_gate,
+			"confidence": confidence_gate,
+			"confidence_band": band_gate
+		},
+		"match": case_gate
+	})
+
+	i = i + 1
+}
+
+if release_report_available == false {
+	reference_outputs_gate = false
+}
+
+if reference_case_count_gate == false {
+	reference_outputs_gate = false
+}
+
+gates := {
+	"release_report_available": release_report_available,
+	"release_eval_ok": release_eval_ok,
+	"dataset_version": dataset_version_gate,
+	"runtime_pinned": runtime_pinned_ok,
+	"reference_case_count": reference_case_count_gate,
+	"reference_outputs": reference_outputs_gate
+}
+
+ok := true
+for gate_name in keys(gates) {
+	if dict_get_or(gates, gate_name, false) == false {
+		ok = false
+	}
+}
+
+result := {
+	"ok": ok,
+	"generated_at_unix_ms": current_timestamp(),
+	"controls_path": controls_path,
+	"release_report_path": release_report_path,
+	"output_path": output_path,
+	"gates": gates,
+	"expected_dataset_version": expected_dataset_version,
+	"actual_dataset_version": actual_dataset_version,
+	"runtime": {
+		"expected": expected_runtime,
+		"actual": actual_runtime,
+		"gates": runtime_gates
+	},
+	"reference_case_count": len(reference_cases),
+	"reference_checks": reference_checks
+}
+
+write_json_file(output_path, result)
+print(to_json(result))
+
+if ok == false {
+	exit(1)
+}

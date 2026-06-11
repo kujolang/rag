@@ -1,0 +1,21 @@
+{
+	"version": "threat-model-cadence-v1",
+	"last_reviewed_at_unix_ms": 1779816000000,
+	"review_cadence_days": 30,
+	"owner": "Security Team",
+	"major_change_triggers": [
+		"new external connector class or provider integration",
+		"authentication, authorization, or token lifecycle design changes",
+		"data retention, privacy, export, or deletion workflow changes",
+		"new network trust boundary or reverse-proxy topology change"
+	],
+	"release_milestones": [
+		{
+			"name": "M5",
+			"threat_model_review_id": "TM-2026-05-M5",
+			"reviewed_at_unix_ms": 1779816000000,
+			"reviewer": "Security Team",
+			"notes": "Reviewed retrieval, privacy, and compliance changes through L053."
+		}
+	]
+}

@@ -1,0 +1,102 @@
+from src.common import dict_get_or, read_json_file_or
+from src.tests_helpers import assert_true
+
+kujo_bin := env_or("KUJO_BIN", "/path/to/kujo/target/debug/kujo")
+
+suffix := to_string(current_timestamp())
+valid_matrix_path := "/tmp/kujo_rag_compliance_matrix_valid_" + suffix + ".json"
+invalid_matrix_path := "/tmp/kujo_rag_compliance_matrix_invalid_" + suffix + ".json"
+valid_output_path := "/tmp/kujo_rag_compliance_review_valid_" + suffix + ".json"
+invalid_output_path := "/tmp/kujo_rag_compliance_review_invalid_" + suffix + ".json"
+
+write_file(valid_matrix_path, to_json({
+	"version": "test-baseline",
+	"last_reviewed_at_unix_ms": current_timestamp() - 1000,
+	"review_cadence_days": 30,
+	"controls": [
+		{
+			"id": "CTRL-1",
+			"title": "Auth coverage",
+			"framework_refs": ["SOC2:CC6.1"],
+			"owner": "Security",
+			"status": "covered",
+			"code": ["src/query_api.kujo"],
+			"config": [".env.example"],
+			"process": ["docs/auth-providers.md"],
+			"evidence": ["tests/test_auth_providers.kujo"]
+		},
+		{
+			"id": "CTRL-2",
+			"title": "Vendor risk",
+			"framework_refs": ["SOC2:CC8.1"],
+			"owner": "Compliance Lead",
+			"status": "partial",
+			"code": ["scripts/run_supply_chain_scan.kujo"],
+			"config": ["config/connectors_enterprise_stubs.json"],
+			"process": ["docs/supply-chain-security.md"],
+			"evidence": ["tests/test_supply_chain_scan.kujo"],
+			"gap_summary": "Awaiting annual vendor attestations",
+			"gap_owner": "Compliance Lead",
+			"target_date": "2026-07-01"
+		}
+	]
+}))
+
+write_file(invalid_matrix_path, to_json({
+	"version": "test-baseline",
+	"last_reviewed_at_unix_ms": current_timestamp() - 1000,
+	"review_cadence_days": 30,
+	"controls": [
+		{
+			"id": "CTRL-3",
+			"title": "Gap without owner",
+			"framework_refs": ["SOC2:CC1.2"],
+			"owner": "Compliance Lead",
+			"status": "gap",
+			"code": ["scripts/run_compliance_control_evidence_review.kujo"],
+			"config": ["config/compliance_control_matrix.json"],
+			"process": ["docs/compliance-control-mapping.md"],
+			"evidence": ["tests/test_compliance_control_mapping_baseline.kujo"],
+			"gap_summary": "Needs ticket integration",
+			"gap_owner": "",
+			"target_date": ""
+		}
+	]
+}))
+
+valid_cmd := "KUJO_RAG_COMPLIANCE_MATRIX_PATH=" + valid_matrix_path + " KUJO_RAG_COMPLIANCE_REVIEW_OUTPUT_PATH=" + valid_output_path + " " + kujo_bin + " run scripts/run_compliance_control_evidence_review.kujo --interpreter"
+valid_res := execute_status(valid_cmd, {"timeout_ms": 240000})
+assert_true(to_bool(type(valid_res) == "struct"))
+assert_true(to_bool(valid_res.success == true))
+
+valid_payload := read_json_file_or(valid_output_path, {})
+assert_true(to_bool(dict_get_or(valid_payload, "ok", false) == true))
+assert_true(to_bool(dict_get_or(valid_payload, "control_count", 0) == 2))
+assert_true(to_bool(dict_get_or(valid_payload, "unresolved_gap_count", 0) == 1))
+assert_true(to_bool(dict_get_or(dict_get_or(valid_payload, "gates", {}), "periodic_workflow_defined", false) == true))
+assert_true(to_bool(file_exists(valid_output_path) == true))
+
+invalid_cmd := "KUJO_RAG_COMPLIANCE_MATRIX_PATH=" + invalid_matrix_path + " KUJO_RAG_COMPLIANCE_REVIEW_OUTPUT_PATH=" + invalid_output_path + " " + kujo_bin + " run scripts/run_compliance_control_evidence_review.kujo --interpreter"
+invalid_res := execute_status(invalid_cmd, {"timeout_ms": 240000})
+assert_true(to_bool(type(invalid_res) == "struct"))
+assert_true(to_bool(invalid_res.success == false))
+
+invalid_payload := read_json_file_or(invalid_output_path, {})
+assert_true(to_bool(dict_get_or(invalid_payload, "ok", true) == false))
+assert_true(to_bool(dict_get_or(dict_get_or(invalid_payload, "gates", {}), "unresolved_gaps_owned", true) == false))
+assert_true(to_bool(file_exists(invalid_output_path) == true))
+
+if file_exists(valid_matrix_path) {
+	delete_file(valid_matrix_path)
+}
+if file_exists(invalid_matrix_path) {
+	delete_file(invalid_matrix_path)
+}
+if file_exists(valid_output_path) {
+	delete_file(valid_output_path)
+}
+if file_exists(invalid_output_path) {
+	delete_file(invalid_output_path)
+}
+
+print("test_compliance_control_mapping_baseline: ok")

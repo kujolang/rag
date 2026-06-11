@@ -1,0 +1,121 @@
+from src.tests_helpers import assert_true
+from src.common import dict_get_or
+from src.query_api import validate_api_auth
+
+func now_unix_seconds() {
+	return parse_int(to_string(current_timestamp() / 1000))
+}
+
+bearer_good := validate_api_auth({
+	"headers": {
+		"authorization": "Bearer sec-token"
+	}
+}, {
+	"api_auth_provider": "bearer",
+	"api_bearer_token": "sec-token"
+})
+assert_true(to_bool(dict_get_or(bearer_good, "ok", false) == true))
+assert_true(to_bool(dict_get_or(bearer_good, "provider", "") == "bearer"))
+
+bearer_next := validate_api_auth({
+	"headers": {
+		"authorization": "Bearer next-token"
+	}
+}, {
+	"api_auth_provider": "bearer",
+	"api_bearer_token": "sec-token",
+	"api_bearer_token_next": "next-token",
+	"api_bearer_revoked_tokens": []
+})
+assert_true(to_bool(dict_get_or(bearer_next, "ok", false) == true))
+assert_true(to_bool(dict_get_or(bearer_next, "token_slot", "") == "next"))
+
+bearer_revoked := validate_api_auth({
+	"headers": {
+		"authorization": "Bearer sec-token"
+	}
+}, {
+	"api_auth_provider": "bearer",
+	"api_bearer_token": "sec-token",
+	"api_bearer_token_next": "",
+	"api_bearer_revoked_tokens": ["sec-token"]
+})
+assert_true(to_bool(dict_get_or(bearer_revoked, "ok", true) == false))
+assert_true(to_bool(dict_get_or(bearer_revoked, "error", "") == "revoked_token"))
+
+jwt_cfg := {
+	"api_auth_provider": "jwt_proxy",
+	"api_jwt_issuer": "https://issuer.example",
+	"api_jwt_audience": "kujo-rag",
+	"api_jwt_clock_skew_sec": 30
+}
+
+jwt_valid := validate_api_auth({
+	"headers": {
+		"authorization": "Bearer token-1",
+		"x-kujo-claim-iss": "https://issuer.example",
+		"x-kujo-claim-aud": "kujo-rag,other",
+		"x-kujo-claim-exp": to_string(now_unix_seconds() + 600),
+		"x-kujo-claim-sub": "user-123"
+	}
+}, jwt_cfg)
+assert_true(to_bool(dict_get_or(jwt_valid, "ok", false) == true))
+assert_true(to_bool(dict_get_or(jwt_valid, "provider", "") == "jwt_proxy"))
+
+jwt_expired := validate_api_auth({
+	"headers": {
+		"authorization": "Bearer token-2",
+		"x-kujo-claim-iss": "https://issuer.example",
+		"x-kujo-claim-aud": "kujo-rag",
+		"x-kujo-claim-exp": to_string(now_unix_seconds() - 120)
+	}
+}, jwt_cfg)
+assert_true(to_bool(dict_get_or(jwt_expired, "ok", true) == false))
+assert_true(to_bool(dict_get_or(jwt_expired, "error", "") == "expired_token"))
+
+jwt_wrong_issuer := validate_api_auth({
+	"headers": {
+		"authorization": "Bearer token-3",
+		"x-kujo-claim-iss": "https://other-issuer.example",
+		"x-kujo-claim-aud": "kujo-rag",
+		"x-kujo-claim-exp": to_string(now_unix_seconds() + 600)
+	}
+}, jwt_cfg)
+assert_true(to_bool(dict_get_or(jwt_wrong_issuer, "ok", true) == false))
+assert_true(to_bool(dict_get_or(jwt_wrong_issuer, "error", "") == "invalid_token_issuer"))
+
+jwt_wrong_audience := validate_api_auth({
+	"headers": {
+		"authorization": "Bearer token-4",
+		"x-kujo-claim-iss": "https://issuer.example",
+		"x-kujo-claim-aud": "different-service",
+		"x-kujo-claim-exp": to_string(now_unix_seconds() + 600)
+	}
+}, jwt_cfg)
+assert_true(to_bool(dict_get_or(jwt_wrong_audience, "ok", true) == false))
+assert_true(to_bool(dict_get_or(jwt_wrong_audience, "error", "") == "invalid_token_audience"))
+
+jwt_missing_claims := validate_api_auth({
+	"headers": {
+		"authorization": "Bearer token-5"
+	}
+}, jwt_cfg)
+assert_true(to_bool(dict_get_or(jwt_missing_claims, "ok", true) == false))
+assert_true(to_bool(dict_get_or(jwt_missing_claims, "error", "") == "missing_token_claims"))
+
+jwt_missing_config := validate_api_auth({
+	"headers": {
+		"authorization": "Bearer token-6",
+		"x-kujo-claim-iss": "https://issuer.example",
+		"x-kujo-claim-aud": "kujo-rag",
+		"x-kujo-claim-exp": to_string(now_unix_seconds() + 600)
+	}
+}, {
+	"api_auth_provider": "jwt_proxy",
+	"api_jwt_issuer": "",
+	"api_jwt_audience": ""
+})
+assert_true(to_bool(dict_get_or(jwt_missing_config, "ok", true) == false))
+assert_true(to_bool(dict_get_or(jwt_missing_config, "error", "") == "invalid_auth_config"))
+
+print("test_auth_providers: ok")

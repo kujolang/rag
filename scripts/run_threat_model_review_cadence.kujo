@@ -1,0 +1,222 @@
+from src.common import dict_get_or, read_json_file_or, write_json_file, str_or, num_or
+
+func ensure_dir(path_value) {
+	if path_value == "" || path_value == "." {
+		return true
+	}
+	if path_exists(path_value) {
+		return true
+	}
+	parent := dirname(path_value)
+	if parent != "" && parent != "." && parent != path_value {
+		_ = ensure_dir(parent)
+	}
+	create_dir(path_value)
+	return true
+}
+
+func ensure_parent_dir(path_value) {
+	dir := dirname(path_value)
+	if dir == "" || dir == "." {
+		return true
+	}
+	return ensure_dir(dir)
+}
+
+func normalize_text(value) {
+	return trim(str_or(value, ""))
+}
+
+func count_occurrences(text, token) {
+	if type(text) != "string" || type(token) != "string" {
+		return 0
+	}
+	if token == "" {
+		return 0
+	}
+	parts := split(text, token)
+	if len(parts) == 0 {
+		return 0
+	}
+	return len(parts) - 1
+}
+
+func text_has_token(text, token) {
+	return count_occurrences(text, token) > 0
+}
+
+func normalize_text_array(raw_items) {
+	items := []
+	if type(raw_items) != "array" {
+		return items
+	}
+	item_index := 0
+	while item_index < len(raw_items) {
+		value := normalize_text(raw_items[item_index])
+		if value != "" {
+			items = push(items, value)
+		}
+		item_index = item_index + 1
+	}
+	return items
+}
+
+func normalize_milestone(raw_milestone) {
+	return {
+		"name": normalize_text(dict_get_or(raw_milestone, "name", "")),
+		"threat_model_review_id": normalize_text(dict_get_or(raw_milestone, "threat_model_review_id", "")),
+		"reviewed_at_unix_ms": num_or(dict_get_or(raw_milestone, "reviewed_at_unix_ms", 0), 0),
+		"reviewer": normalize_text(dict_get_or(raw_milestone, "reviewer", "")),
+		"notes": normalize_text(dict_get_or(raw_milestone, "notes", ""))
+	}
+}
+
+func milestone_valid(milestone) {
+	return normalize_text(dict_get_or(milestone, "name", "")) != "" && normalize_text(dict_get_or(milestone, "threat_model_review_id", "")) != "" && num_or(dict_get_or(milestone, "reviewed_at_unix_ms", 0), 0) > 0
+}
+
+func list_invalid_milestones(milestones) {
+	invalid := []
+	milestone_index := 0
+	while milestone_index < len(milestones) {
+		milestone := milestones[milestone_index]
+		if milestone_valid(milestone) == false {
+			invalid = push(invalid, {
+				"name": dict_get_or(milestone, "name", ""),
+				"threat_model_review_id": dict_get_or(milestone, "threat_model_review_id", ""),
+				"reviewed_at_unix_ms": dict_get_or(milestone, "reviewed_at_unix_ms", 0)
+			})
+		}
+		milestone_index = milestone_index + 1
+	}
+	return invalid
+}
+
+plan_path := env_or("KUJO_RAG_THREAT_MODEL_PLAN_PATH", "./config/threat_model_review_plan.json")
+output_path := env_or("KUJO_RAG_THREAT_MODEL_REVIEW_OUTPUT_PATH", "./results/security/threat_model_review_status.json")
+cadence_doc_path := env_or("KUJO_RAG_THREAT_MODEL_CADENCE_DOC_PATH", "./docs/threat-modeling-review-cadence.md")
+release_process_doc_path := env_or("KUJO_RAG_RELEASE_PROCESS_DOC_PATH", "./docs/release-process.md")
+workflow_path := env_or("KUJO_RAG_THREAT_MODEL_WORKFLOW_PATH", "./.github/workflows/threat-model-review.yml")
+
+_ = ensure_parent_dir(output_path)
+
+raw_plan := read_json_file_or(plan_path, {})
+plan_available := type(raw_plan) == "dict" && len(keys(raw_plan)) > 0
+version := normalize_text(dict_get_or(raw_plan, "version", ""))
+last_reviewed_at_unix_ms := num_or(dict_get_or(raw_plan, "last_reviewed_at_unix_ms", 0), 0)
+review_cadence_days := num_or(dict_get_or(raw_plan, "review_cadence_days", 30), 30)
+if review_cadence_days < 1 {
+	review_cadence_days = 1
+}
+owner := normalize_text(dict_get_or(raw_plan, "owner", ""))
+major_change_triggers := normalize_text_array(dict_get_or(raw_plan, "major_change_triggers", []))
+
+raw_release_milestones := dict_get_or(raw_plan, "release_milestones", [])
+release_milestones := []
+if type(raw_release_milestones) == "array" {
+	milestone_source_index := 0
+	while milestone_source_index < len(raw_release_milestones) {
+		release_milestones = push(release_milestones, normalize_milestone(raw_release_milestones[milestone_source_index]))
+		milestone_source_index = milestone_source_index + 1
+	}
+}
+
+invalid_milestones := list_invalid_milestones(release_milestones)
+milestones_tracked := len(release_milestones) > 0 && len(invalid_milestones) == 0
+
+review_due_at_unix_ms := 0
+review_overdue := false
+if last_reviewed_at_unix_ms > 0 {
+	review_due_at_unix_ms = last_reviewed_at_unix_ms + (review_cadence_days * 86400000)
+	review_overdue = current_timestamp() > review_due_at_unix_ms
+}
+
+cadence_doc_exists := path_exists(cadence_doc_path)
+release_process_doc_exists := path_exists(release_process_doc_path)
+workflow_exists := path_exists(workflow_path)
+
+cadence_doc_text := ""
+if cadence_doc_exists {
+	cadence_doc_text = read_file(cadence_doc_path)
+}
+release_process_doc_text := ""
+if release_process_doc_exists {
+	release_process_doc_text = read_file(release_process_doc_path)
+}
+release_process_doc_text_lower := to_lower(release_process_doc_text)
+workflow_text := ""
+if workflow_exists {
+	workflow_text = read_file(workflow_path)
+}
+
+cadence_doc_defined := cadence_doc_exists && text_has_token(cadence_doc_text, "Threat Modeling and Security Review Cadence") && text_has_token(cadence_doc_text, "Security Review Checklist") && text_has_token(cadence_doc_text, "Major Architectural Change Triggers")
+cadence_doc_name := basename(cadence_doc_path)
+cadence_doc_linked := text_has_token(release_process_doc_text, cadence_doc_path) || text_has_token(release_process_doc_text, cadence_doc_name)
+security_checklist_attached := release_process_doc_exists && cadence_doc_linked && text_has_token(release_process_doc_text_lower, "security review checklist")
+workflow_defined := workflow_exists && text_has_token(workflow_text, "run_threat_model_review_cadence.kujo") && text_has_token(workflow_text, "schedule:")
+
+gates := {
+	"plan_available": plan_available,
+	"version_defined": version != "",
+	"owner_defined": owner != "",
+	"cadence_defined": review_cadence_days > 0,
+	"last_review_defined": last_reviewed_at_unix_ms > 0,
+	"review_not_overdue": review_overdue == false,
+	"triggers_defined": len(major_change_triggers) > 0,
+	"milestones_tracked": milestones_tracked,
+	"cadence_doc_defined": cadence_doc_defined,
+	"security_checklist_attached": security_checklist_attached,
+	"workflow_defined": workflow_defined
+}
+
+ok := true
+gate_names := [
+	"plan_available",
+	"version_defined",
+	"owner_defined",
+	"cadence_defined",
+	"last_review_defined",
+	"review_not_overdue",
+	"triggers_defined",
+	"milestones_tracked",
+	"cadence_doc_defined",
+	"security_checklist_attached",
+	"workflow_defined"
+]
+
+gate_index := 0
+while gate_index < len(gate_names) {
+	gate_name := gate_names[gate_index]
+	if dict_get_or(gates, gate_name, false) == false {
+		ok = false
+	}
+	gate_index = gate_index + 1
+}
+
+result := {
+	"ok": ok,
+	"generated_at_unix_ms": current_timestamp(),
+	"plan_path": plan_path,
+	"output_path": output_path,
+	"cadence_doc_path": cadence_doc_path,
+	"release_process_doc_path": release_process_doc_path,
+	"workflow_path": workflow_path,
+	"version": version,
+	"owner": owner,
+	"last_reviewed_at_unix_ms": last_reviewed_at_unix_ms,
+	"review_cadence_days": review_cadence_days,
+	"review_due_at_unix_ms": review_due_at_unix_ms,
+	"review_overdue": review_overdue,
+	"major_change_trigger_count": len(major_change_triggers),
+	"major_change_triggers": major_change_triggers,
+	"milestone_count": len(release_milestones),
+	"invalid_milestones": invalid_milestones,
+	"gates": gates
+}
+
+write_json_file(output_path, result)
+print(to_json(result))
+
+if ok == false {
+	exit(1)
+}

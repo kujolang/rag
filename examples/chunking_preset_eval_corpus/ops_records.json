@@ -1,0 +1,50 @@
+[
+  {
+    "service": "gateway",
+    "incident_code": "inc_a1",
+    "owner": "platform",
+    "summary": "normal_traffic_profile"
+  },
+  {
+    "service": "auth",
+    "incident_code": "inc_a2",
+    "owner": "identity",
+    "summary": "token_refresh_latency"
+  },
+  {
+    "service": "inventory",
+    "incident_code": "inc_a3",
+    "owner": "supply",
+    "summary": "cache_miss_spike"
+  },
+  {
+    "service": "orders",
+    "incident_code": "inc_a4",
+    "owner": "fulfillment",
+    "summary": "replication_lag_warning"
+  },
+  {
+    "service": "billing",
+    "incident_code": "inc_a5",
+    "owner": "finance",
+    "summary": "retry_queue_growth"
+  },
+  {
+    "service": "search",
+    "incident_code": "inc_a6",
+    "owner": "relevance",
+    "summary": "ranking_index_warmup"
+  },
+  {
+    "service": "reports",
+    "incident_code": "inc_a7",
+    "owner": "analytics",
+    "summary": "warehouse_backfill_delay"
+  },
+  {
+    "service": "payments",
+    "incident_code": "inc_a8",
+    "owner": "sre",
+    "summary": "critical_orchid_outage"
+  }
+]

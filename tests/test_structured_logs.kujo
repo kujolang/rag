@@ -1,0 +1,105 @@
+from src.common import dict_get_or
+from src.tests_helpers import assert_true
+
+kujo_bin := env_or("KUJO_BIN", "/path/to/kujo/target/release/kujo")
+
+func run_cmd(command) {
+	res := execute_status(command, {"timeout_ms": 120000})
+	if type(res) == "struct" {
+		return {
+			"ok": res.success,
+			"exit_code": res.exitcode,
+			"stdout": to_string(res.stdout),
+			"stderr": to_string(res.stderr)
+		}
+	}
+	return {
+		"ok": false,
+		"exit_code": -1,
+		"stdout": "",
+		"stderr": "invalid execute_status result"
+	}
+}
+
+func parse_json_safe(text) {
+	obj := {}
+	err := null
+	try {
+		obj := parse_json(text)
+	} except e {
+		err := e
+	}
+	if type(err) != "null" {
+		return {
+			"ok": false,
+			"error": to_string(err),
+			"data": {}
+		}
+	}
+	return {
+		"ok": true,
+		"data": obj
+	}
+}
+
+func start_server(port, env_prefix, log_file) {
+	cmd := "env " + env_prefix + " " + kujo_bin + " run main.kujo --interpreter serve --host 127.0.0.1 --port " + to_string(port) + " > " + log_file + " 2>&1 & echo $!"
+	res := run_cmd(cmd)
+	pid := trim(dict_get_or(res, "stdout", ""))
+	return pid
+}
+
+func stop_server(pid) {
+	if pid == "" {
+		return true
+	}
+	_ := run_cmd("kill " + pid + " >/dev/null 2>&1 || true")
+	_ := run_cmd("wait " + pid + " >/dev/null 2>&1 || true")
+	return true
+}
+
+func wait_for_health(port) {
+	attempt := 0
+	while attempt < 1200 {
+		res := run_cmd("curl -s http://127.0.0.1:" + to_string(port) + "/health")
+		body := trim(dict_get_or(res, "stdout", ""))
+		if body != "" {
+			parsed := parse_json_safe(body)
+			if dict_get_or(parsed, "ok", false) == true {
+				payload := dict_get_or(parsed, "data", {})
+				if dict_get_or(payload, "ok", false) == true {
+					return true
+				}
+			}
+		}
+		attempt = attempt + 1
+	}
+	return false
+}
+
+port := 36000 + (current_timestamp() % 10000)
+log_file := "/tmp/kujo_rag_structured_logs_test.log"
+request_id := "req-structured-123"
+correlation_id := "corr-structured-xyz"
+
+env_prefix := "KUJO_RAG_ENV=development KUJO_RAG_API_AUTH_PROVIDER=none"
+pid := start_server(port, env_prefix, log_file)
+assert_true(to_bool(pid != ""))
+assert_true(to_bool(wait_for_health(port) == true))
+
+res := run_cmd("curl -s -X GET http://127.0.0.1:" + to_string(port) + "/health -H \"X-Request-ID: " + request_id + "\" -H \"X-Correlation-ID: " + correlation_id + "\"")
+parsed := parse_json_safe(dict_get_or(res, "stdout", ""))
+assert_true(to_bool(dict_get_or(parsed, "ok", false) == true))
+body := dict_get_or(parsed, "data", {})
+assert_true(to_bool(dict_get_or(body, "ok", false) == true))
+assert_true(to_bool(dict_get_or(body, "request_id", "") == request_id))
+assert_true(to_bool(dict_get_or(body, "correlation_id", "") == correlation_id))
+
+log_content := run_cmd("cat " + log_file + " | cat")
+log_text := dict_get_or(log_content, "stdout", "")
+assert_true(to_bool(contains(log_text, request_id) == 1))
+assert_true(to_bool(contains(log_text, correlation_id) == 1))
+
+_ := stop_server(pid)
+
+print("test_structured_logs: ok")

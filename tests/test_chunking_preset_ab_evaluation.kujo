@@ -1,0 +1,113 @@
+func assert_true(value) {
+	assert(to_bool(value))
+}
+
+func dict_get_or(payload, key, fallback) {
+	if type(payload) == "dict" && has_key(payload, key) == 1 {
+		return payload[key]
+	}
+	return fallback
+}
+
+kujo_bin := env_or("KUJO_BIN", "/path/to/kujo/target/debug/kujo")
+
+func parse_json_safe(text) {
+	payload := {}
+	err := null
+	try {
+		payload := parse_json(text)
+	} except e {
+		err := e
+	}
+	if type(err) != "null" {
+		return {
+			"ok": false,
+			"data": {},
+			"error": to_string(err)
+		}
+	}
+	return {
+		"ok": true,
+		"data": payload,
+		"error": ""
+	}
+}
+
+suffix := to_string(current_timestamp())
+thresholds_pass_path := "/tmp/kujo_rag_chunking_preset_ab_thresholds_pass_" + suffix + ".json"
+thresholds_fail_path := "/tmp/kujo_rag_chunking_preset_ab_thresholds_fail_" + suffix + ".json"
+report_path := "/tmp/kujo_rag_chunking_preset_ab_report_" + suffix + ".json"
+baseline_report_path := "/tmp/kujo_rag_chunking_preset_ab_baseline_release_eval_" + suffix + ".json"
+preset_report_path := "/tmp/kujo_rag_chunking_preset_ab_preset_release_eval_" + suffix + ".json"
+baseline_index_path := "/tmp/kujo_rag_chunking_preset_ab_baseline_index_" + suffix + ".json"
+preset_index_path := "/tmp/kujo_rag_chunking_preset_ab_preset_index_" + suffix + ".json"
+
+write_file(thresholds_pass_path, to_json({
+	"min_case_count": 4,
+	"min_quality_pass_rate_delta": 0.25,
+	"min_passed_case_delta": 1,
+	"min_average_grounding_delta": 0.0,
+	"max_error_rate_delta": 0.0,
+	"min_preset_quality_pass_rate": 0.5
+}))
+
+write_file(thresholds_fail_path, to_json({
+	"min_case_count": 4,
+	"min_quality_pass_rate_delta": 0.95,
+	"min_passed_case_delta": 4,
+	"min_average_grounding_delta": 0.5,
+	"max_error_rate_delta": -0.1,
+	"min_preset_quality_pass_rate": 0.99
+}))
+
+cmd_pass := "KUJO_RAG_CHUNK_PRESET_AB_THRESHOLDS_PATH=" + thresholds_pass_path + " KUJO_RAG_CHUNK_PRESET_AB_OUTPUT_PATH=" + report_path + " KUJO_RAG_CHUNK_PRESET_AB_BASELINE_REPORT_PATH=" + baseline_report_path + " KUJO_RAG_CHUNK_PRESET_AB_PRESET_REPORT_PATH=" + preset_report_path + " KUJO_RAG_CHUNK_PRESET_AB_BASELINE_INDEX_PATH=" + baseline_index_path + " KUJO_RAG_CHUNK_PRESET_AB_PRESET_INDEX_PATH=" + preset_index_path + " " + kujo_bin + " run scripts/run_chunking_preset_ab_evaluation.kujo --interpreter"
+pass_res := execute_status(cmd_pass, {"timeout_ms": 240000})
+assert_true(to_bool(type(pass_res) == "struct"))
+assert_true(to_bool(pass_res.success == true))
+
+pass_parsed := parse_json_safe(to_string(pass_res.stdout))
+assert_true(to_bool(dict_get_or(pass_parsed, "ok", false) == true))
+pass_payload := dict_get_or(pass_parsed, "data", {})
+assert_true(to_bool(dict_get_or(pass_payload, "ok", false) == true))
+assert_true(to_bool(dict_get_or(dict_get_or(pass_payload, "gates", {}), "quality_pass_rate_delta", false) == true))
+
+cmd_fail := "KUJO_RAG_CHUNK_PRESET_AB_THRESHOLDS_PATH=" + thresholds_fail_path + " KUJO_RAG_CHUNK_PRESET_AB_OUTPUT_PATH=" + report_path + " KUJO_RAG_CHUNK_PRESET_AB_BASELINE_REPORT_PATH=" + baseline_report_path + " KUJO_RAG_CHUNK_PRESET_AB_PRESET_REPORT_PATH=" + preset_report_path + " KUJO_RAG_CHUNK_PRESET_AB_BASELINE_INDEX_PATH=" + baseline_index_path + " KUJO_RAG_CHUNK_PRESET_AB_PRESET_INDEX_PATH=" + preset_index_path + " " + kujo_bin + " run scripts/run_chunking_preset_ab_evaluation.kujo --interpreter"
+fail_res := execute_status(cmd_fail, {"timeout_ms": 240000})
+assert_true(to_bool(type(fail_res) == "struct"))
+assert_true(to_bool(fail_res.success == false))
+
+fail_parsed := parse_json_safe(to_string(fail_res.stdout))
+assert_true(to_bool(dict_get_or(fail_parsed, "ok", false) == true))
+fail_payload := dict_get_or(fail_parsed, "data", {})
+assert_true(to_bool(dict_get_or(fail_payload, "ok", true) == false))
+fail_gates := dict_get_or(fail_payload, "gates", {})
+has_gate_failure := to_bool(
+	dict_get_or(fail_gates, "minimum_case_count", true) == false ||
+	dict_get_or(fail_gates, "quality_pass_rate_delta", true) == false ||
+	dict_get_or(fail_gates, "passed_case_delta", true) == false ||
+	dict_get_or(fail_gates, "average_grounding_delta", true) == false ||
+	dict_get_or(fail_gates, "error_rate_delta", true) == false ||
+	dict_get_or(fail_gates, "preset_quality_floor", true) == false
+)
+assert_true(has_gate_failure)
+
+cleanup_paths := [
+	thresholds_pass_path,
+	thresholds_fail_path,
+	report_path,
+	baseline_report_path,
+	preset_report_path,
+	baseline_index_path,
+	preset_index_path
+]
+
+i := 0
+while i < len(cleanup_paths) {
+	cleanup_path := cleanup_paths[i]
+	if file_exists(cleanup_path) {
+		delete_file(cleanup_path)
+	}
+	i = i + 1
+}
+
+print("test_chunking_preset_ab_evaluation: ok")

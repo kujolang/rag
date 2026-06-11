@@ -1,0 +1,10 @@
+{
+	"min_case_count": 12,
+	"min_quality_pass_rate": 0.875,
+	"max_error_rate": 0.0,
+	"max_avg_latency_ms": 1800,
+	"max_p95_latency_ms": 2300,
+	"min_average_confidence": 0.35,
+	"min_average_grounding": 0.5,
+	"thresholds_note": "Domain-diverse baseline updated on 2026-05-25 with versioned multi-domain release evaluation cases including adversarial/no-answer policy checks and grounding-score gating"
+}

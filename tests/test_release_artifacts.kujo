@@ -1,0 +1,57 @@
+from src.tests_helpers import assert_true
+from src.common import dict_get_or
+
+kujo_bin := env_or("KUJO_BIN", "kujo")
+output_root := "./results/release_artifacts_test"
+notes_path := output_root + "/notes.md"
+
+if path_exists("./results") == false {
+	create_dir("./results")
+}
+if path_exists(output_root) == false {
+	create_dir(output_root)
+}
+
+if file_exists(notes_path) {
+	delete_file(notes_path)
+}
+
+write_file(notes_path, "# Release v0.0.0\n\n## Summary\n- Artifact rehearsal for test.\n")
+
+cmd := kujo_bin + " run scripts/build_release_artifacts.kujo --interpreter --version 0.0.0 --notes " + notes_path + " --output-dir " + output_root
+res := execute_status(cmd, {"timeout_ms": 120000})
+
+assert_true(to_bool(res.success == true))
+assert_true(to_bool(res.exitcode == 0))
+
+payload := parse_json(res.stdout)
+assert_true(to_bool(dict_get_or(payload, "ok", false) == true))
+assert_true(to_bool(dict_get_or(payload, "release_tag", "") == "v0.0.0"))
+
+artifact_dir := dict_get_or(payload, "artifact_dir", "")
+manifest_path := dict_get_or(payload, "manifest_path", "")
+sbom_path := dict_get_or(payload, "sbom_path", "")
+checksums_path := dict_get_or(payload, "checksums_path", "")
+notes_copy_path := dict_get_or(payload, "release_notes_artifact_path", "")
+
+assert_true(to_bool(starts_with(artifact_dir, output_root + "/v0.0.0") == true))
+assert_true(to_bool(file_exists(manifest_path) == true))
+assert_true(to_bool(file_exists(sbom_path) == true))
+assert_true(to_bool(file_exists(checksums_path) == true))
+assert_true(to_bool(file_exists(notes_copy_path) == true))
+
+manifest := parse_json(read_file(manifest_path))
+assert_true(to_bool(dict_get_or(manifest, "release_version", "") == "0.0.0"))
+assert_true(to_bool(dict_get_or(manifest, "release_tag", "") == "v0.0.0"))
+assert_true(to_bool(len(dict_get_or(manifest, "files", [])) > 0))
+
+sbom := parse_json(read_file(sbom_path))
+assert_true(to_bool(dict_get_or(sbom, "bomFormat", "") == "CycloneDX"))
+assert_true(to_bool(type(dict_get_or(dict_get_or(sbom, "metadata", {}), "component", {})) == "dict"))
+assert_true(to_bool(len(dict_get_or(sbom, "components", [])) > 0))
+
+checksums_content := read_file(checksums_path)
+assert_true(to_bool(contains(checksums_content, "release-manifest.json") == 1))
+assert_true(to_bool(contains(checksums_content, "main.kujo") == 1))
+
+print("test_release_artifacts: ok")

@@ -1,0 +1,121 @@
+{
+  "dataset_version": "2026-05-25-multilingual-v1",
+  "dataset_domains": [
+    "multilingual"
+  ],
+  "dataset_languages": [
+    "english",
+    "spanish",
+    "french",
+    "german"
+  ],
+  "queries": [
+    {
+      "id": "en_canary_promotion",
+      "domain": "multilingual",
+      "language": "english",
+      "query": "When can canary traffic move from 5 percent to 50 percent?",
+      "expected_path_contains": "en_runbook.md",
+      "min_citations": 1,
+      "min_confidence": 0.25,
+      "min_grounding_score": 0.5,
+      "required_answer_terms_any": [
+        "50 percent",
+        "error budget"
+      ]
+    },
+    {
+      "id": "en_rollback_trigger",
+      "domain": "multilingual",
+      "language": "english",
+      "query": "What condition triggers rollback in the English runbook?",
+      "expected_path_contains": "en_runbook.md",
+      "min_citations": 1,
+      "min_confidence": 0.25,
+      "min_grounding_score": 0.5,
+      "required_answer_terms_any": [
+        "p95 latency",
+        "rollback"
+      ]
+    },
+    {
+      "id": "es_ticket_sev2",
+      "domain": "multilingual",
+      "language": "spanish",
+      "query": "Que exige el plan de respuesta sobre el ticket sev2?",
+      "expected_path_contains": "es_incidentes.md",
+      "min_citations": 1,
+      "min_confidence": 0.25,
+      "min_grounding_score": 0.5,
+      "required_answer_terms_any": [
+        "sev2",
+        "15 minutos"
+      ]
+    },
+    {
+      "id": "es_equipo_guardia",
+      "domain": "multilingual",
+      "language": "spanish",
+      "query": "A quien se notifica durante la primera fase del incidente?",
+      "expected_path_contains": "es_incidentes.md",
+      "min_citations": 1,
+      "min_confidence": 0.25,
+      "min_grounding_score": 0.5,
+      "required_answer_terms_any": [
+        "equipo de guardia"
+      ]
+    },
+    {
+      "id": "fr_retention_bronze",
+      "domain": "multilingual",
+      "language": "french",
+      "query": "Combien de jours les journaux bronze sont-ils gardes?",
+      "expected_path_contains": "fr_conformite.md",
+      "min_citations": 1,
+      "min_confidence": 0.25,
+      "min_grounding_score": 0.5,
+      "required_answer_terms_any": [
+        "30 jours"
+      ]
+    },
+    {
+      "id": "fr_retention_gold",
+      "domain": "multilingual",
+      "language": "french",
+      "query": "Combien de jours les journaux gold sont conserves?",
+      "expected_path_contains": "fr_conformite.md",
+      "min_citations": 1,
+      "min_confidence": 0.25,
+      "min_grounding_score": 0.5,
+      "required_answer_terms_any": [
+        "365 jours"
+      ]
+    },
+    {
+      "id": "de_doppelte_bestaetigung",
+      "domain": "multilingual",
+      "language": "german",
+      "query": "Was verlangt die Betriebsrichtlinie vor dem Rollback?",
+      "expected_path_contains": "de_betrieb.md",
+      "min_citations": 1,
+      "min_confidence": 0.25,
+      "min_grounding_score": 0.5,
+      "required_answer_terms_any": [
+        "doppelte bestaetigung"
+      ]
+    },
+    {
+      "id": "de_erster_schritt",
+      "domain": "multilingual",
+      "language": "german",
+      "query": "Was ist der erste Schritt im Rollback laut Betriebsrichtlinie?",
+      "expected_path_contains": "de_betrieb.md",
+      "min_citations": 1,
+      "min_confidence": 0.25,
+      "min_grounding_score": 0.5,
+      "required_answer_terms_any": [
+        "stoppen neuer schreibvorgaenge"
+      ]
+    }
+  ]
+}

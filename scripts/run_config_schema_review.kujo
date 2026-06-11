@@ -1,0 +1,451 @@
+from src.common import dict_get_or, read_json_file_or, str_or, write_json_file
+from src.config import default_config, validate_config
+
+func ensure_dir(path_value) {
+	if path_value == "" || path_value == "." {
+		return true
+	}
+	if path_exists(path_value) {
+		return true
+	}
+	parent := dirname(path_value)
+	if parent != "" && parent != "." && parent != path_value {
+		_ = ensure_dir(parent)
+	}
+	create_dir(path_value)
+	return true
+}
+
+func ensure_parent_dir(path_value) {
+	dir := dirname(path_value)
+	if dir == "" || dir == "." {
+		return true
+	}
+	return ensure_dir(dir)
+}
+
+func normalize_text(value) {
+	return trim(str_or(value, ""))
+}
+
+func count_occurrences(text, token) {
+	if type(text) != "string" || type(token) != "string" {
+		return 0
+	}
+	if token == "" {
+		return 0
+	}
+	parts := split(text, token)
+	if len(parts) == 0 {
+		return 0
+	}
+	return len(parts) - 1
+}
+
+func text_has_token(text, token) {
+	return count_occurrences(text, token) > 0
+}
+
+func parse_bool_env(name, default_value) {
+	raw := to_lower(trim(env_or(name, "")))
+	if raw == "" {
+		return default_value
+	}
+	return raw == "1" || raw == "true" || raw == "yes" || raw == "on"
+}
+
+func sort_strings_asc(values) {
+	arr := []
+	index := 0
+	while index < len(values) {
+		arr = push(arr, to_string(values[index]))
+		index = index + 1
+	}
+
+	i := 0
+	while i < len(arr) {
+		j := 0
+		while j < len(arr) - i - 1 {
+			if arr[j] > arr[j + 1] {
+				tmp := arr[j]
+				arr[j] = arr[j + 1]
+				arr[j + 1] = tmp
+			}
+			j = j + 1
+		}
+		i = i + 1
+	}
+
+	return arr
+}
+
+func expected_type(value) {
+	vt := type(value)
+	if vt == "int" || vt == "float" || vt == "bool" || vt == "string" || vt == "array" || vt == "dict" {
+		return vt
+	}
+	return "unknown"
+}
+
+func contains_value(values, target) {
+	index := 0
+	while index < len(values) {
+		if values[index] == target {
+			return true
+		}
+		index = index + 1
+	}
+	return false
+}
+
+func recommendation_for_key(key, value) {
+	lower := to_lower(key)
+
+	if lower == "strict_config" {
+		return "Set true for production deployments."
+	}
+	if lower == "runtime_environment" {
+		return "Set to production in production environments."
+	}
+	if text_has_token(lower, "token") || text_has_token(lower, "api_key") || text_has_token(lower, "secret") || text_has_token(lower, "passphrase") || text_has_token(lower, "key_file") {
+		return "Inject via secret management; do not commit plaintext values."
+	}
+	if text_has_token(lower, "_enabled") {
+		if value == true {
+			return "Keep enabled only with monitoring and rollback readiness in place."
+		}
+		return "Keep disabled until explicitly required, then enable with controls documented."
+	}
+	if text_has_token(lower, "path") || text_has_token(lower, "file") || text_has_token(lower, "root") {
+		return "Use deployment-stable paths with least-privilege file permissions."
+	}
+	if text_has_token(lower, "ttl") || text_has_token(lower, "timeout") || text_has_token(lower, "window") || text_has_token(lower, "max_") || text_has_token(lower, "limit") {
+		return "Start with default and tune from observed latency/error-budget telemetry."
+	}
+	if type(value) == "array" {
+		return "Use explicit allowlists tailored to tenant and environment boundaries."
+	}
+	if type(value) == "dict" {
+		return "Keep schema-compatible structure; modify only through reviewed change control."
+	}
+	return "Use default unless workload or compliance requirements justify override."
+}
+
+func format_markdown_cell(value) {
+	text := ""
+	if type(value) == "string" {
+		text = value
+	} else {
+		text = to_json(value)
+	}
+	text = replace(text, "\n", " ")
+	text = replace(text, "|", "\\|")
+	return text
+}
+
+func generate_schema_entries(defaults) {
+	entries := []
+	ordered_keys := sort_strings_asc(keys(defaults))
+	index := 0
+	while index < len(ordered_keys) {
+		key := ordered_keys[index]
+		value := defaults[key]
+		entries = push(entries, {
+			"key": key,
+			"type": expected_type(value),
+			"default": value,
+			"production_recommendation": recommendation_for_key(key, value)
+		})
+		index = index + 1
+	}
+	return entries
+}
+
+func generate_schema_doc(entries, examples_path) {
+	lines := []
+	lines = push(lines, "# Config Schema Reference")
+	lines = push(lines, "")
+	lines = push(lines, "This reference documents every runtime configuration key exposed by `src/config.kujo`.")
+	lines = push(lines, "")
+	lines = push(lines, "Generated and validated by `scripts/run_config_schema_review.kujo`.")
+	lines = push(lines, "")
+	lines = push(lines, "## Key Reference")
+	lines = push(lines, "")
+	lines = push(lines, "| Key | Type | Default | Production Recommendation |")
+	lines = push(lines, "|---|---|---|---|")
+
+	index := 0
+	while index < len(entries) {
+		entry := entries[index]
+		key := format_markdown_cell(dict_get_or(entry, "key", ""))
+		type_value := format_markdown_cell(dict_get_or(entry, "type", ""))
+		default_value := format_markdown_cell(dict_get_or(entry, "default", ""))
+		recommendation := format_markdown_cell(dict_get_or(entry, "production_recommendation", ""))
+		lines = push(lines, "| " + key + " | " + type_value + " | " + default_value + " | " + recommendation + " |")
+		index = index + 1
+	}
+
+	lines = push(lines, "")
+	lines = push(lines, "## Invalid Configuration Examples")
+	lines = push(lines, "")
+	lines = push(lines, "Invalid config cases and expected validation errors are defined in `" + examples_path + "`.")
+	lines = push(lines, "")
+	lines = push(lines, "Validate examples with:")
+	lines = push(lines, "")
+	lines = push(lines, "- `kujo run scripts/run_config_schema_review.kujo --interpreter`")
+
+	return join(lines, "\n") + "\n"
+}
+
+func collect_error_codes(report) {
+	codes := []
+	errors := dict_get_or(report, "errors", [])
+	if type(errors) != "array" {
+		return codes
+	}
+	index := 0
+	while index < len(errors) {
+		err := errors[index]
+		if type(err) == "dict" {
+			code := normalize_text(dict_get_or(err, "code", ""))
+			if code != "" {
+				codes = push(codes, code)
+			}
+		}
+		index = index + 1
+	}
+	return codes
+}
+
+func validate_examples(defaults, examples) {
+	if type(examples) != "array" || len(examples) == 0 {
+		return {
+			"ok": false,
+			"failed": ["examples_missing"]
+		}
+	}
+
+	failed := []
+	example_index := 0
+	while example_index < len(examples) {
+		example := examples[example_index]
+		name := "example_" + to_string(example_index)
+		if type(example) == "dict" {
+			name = normalize_text(dict_get_or(example, "name", name))
+		}
+
+		if type(example) != "dict" {
+			failed = push(failed, name + ":invalid_example_object")
+			example_index = example_index + 1
+			continue
+		}
+
+		overrides := dict_get_or(example, "overrides", {})
+		expected_codes := dict_get_or(example, "expected_error_codes", [])
+		if type(overrides) != "dict" || type(expected_codes) != "array" || len(expected_codes) == 0 {
+			failed = push(failed, name + ":invalid_example_shape")
+			example_index = example_index + 1
+			continue
+		}
+
+		cfg := {}
+		for key in keys(defaults) {
+			cfg[key] := defaults[key]
+		}
+		for key in keys(overrides) {
+			cfg[key] := overrides[key]
+		}
+
+		report := validate_config(cfg)
+		report_ok := dict_get_or(report, "ok", true)
+		actual_codes := collect_error_codes(report)
+		example_ok := report_ok == false
+
+		code_index := 0
+		while code_index < len(expected_codes) {
+			expected_code := normalize_text(expected_codes[code_index])
+			if expected_code != "" {
+				if contains_value(actual_codes, expected_code) == false {
+					example_ok = false
+				}
+			}
+			code_index = code_index + 1
+		}
+
+		if example_ok == false {
+			failed = push(failed, name)
+		}
+
+		example_index = example_index + 1
+	}
+
+	return {
+		"ok": len(failed) == 0,
+		"failed": failed
+	}
+}
+
+schema_json_path := env_or("KUJO_RAG_CONFIG_SCHEMA_JSON_PATH", "./config/config_schema_reference.json")
+schema_doc_path := env_or("KUJO_RAG_CONFIG_SCHEMA_DOC_PATH", "./docs/config-schema-reference.md")
+examples_path := env_or("KUJO_RAG_CONFIG_VALIDATION_EXAMPLES_PATH", "./config/config_validation_examples.json")
+release_process_doc_path := env_or("KUJO_RAG_CONFIG_SCHEMA_RELEASE_PROCESS_DOC_PATH", "./docs/release-process.md")
+workflow_path := env_or("KUJO_RAG_CONFIG_SCHEMA_WORKFLOW_PATH", "./.github/workflows/config-schema-review.yml")
+output_path := env_or("KUJO_RAG_CONFIG_SCHEMA_OUTPUT_PATH", "./results/config/config_schema_review_status.json")
+regenerate := parse_bool_env("KUJO_RAG_CONFIG_SCHEMA_REGENERATE", false)
+
+_ = ensure_parent_dir(schema_json_path)
+_ = ensure_parent_dir(schema_doc_path)
+_ = ensure_parent_dir(output_path)
+
+defaults := default_config()
+default_keys := sort_strings_asc(keys(defaults))
+
+if regenerate {
+	entries := generate_schema_entries(defaults)
+	payload := {
+		"version": "1.0",
+		"generated_at_unix_ms": current_timestamp(),
+		"source": "src/config.kujo:default_config",
+		"key_count": len(entries),
+		"entries": entries
+	}
+	if file_exists(schema_json_path) {
+		delete_file(schema_json_path)
+	}
+	write_json_file(schema_json_path, payload)
+
+	doc_text := generate_schema_doc(entries, examples_path)
+	if file_exists(schema_doc_path) {
+		delete_file(schema_doc_path)
+	}
+	write_file(schema_doc_path, doc_text)
+}
+
+schema := read_json_file_or(schema_json_path, {})
+schema_entries := dict_get_or(schema, "entries", [])
+schema_defined := type(schema) == "dict" && type(schema_entries) == "array" && len(schema_entries) > 0
+
+schema_map := {}
+if schema_defined {
+	entry_index := 0
+	while entry_index < len(schema_entries) {
+		entry := schema_entries[entry_index]
+		if type(entry) == "dict" {
+			key := normalize_text(dict_get_or(entry, "key", ""))
+			if key != "" {
+				schema_map[key] := entry
+			}
+		}
+		entry_index = entry_index + 1
+	}
+}
+
+missing_schema_keys := []
+invalid_schema_entries := []
+schema_coverage_ok := schema_defined
+
+if schema_defined {
+	key_index := 0
+	while key_index < len(default_keys) {
+		key := default_keys[key_index]
+		if has_key(schema_map, key) == 0 {
+			missing_schema_keys = push(missing_schema_keys, key)
+			schema_coverage_ok = false
+		} else {
+			entry := schema_map[key]
+			entry_type := normalize_text(dict_get_or(entry, "type", ""))
+			entry_default := dict_get_or(entry, "default", null)
+			recommendation := normalize_text(dict_get_or(entry, "production_recommendation", ""))
+			expected := expected_type(defaults[key])
+			default_matches := to_json(entry_default) == to_json(defaults[key])
+			if entry_type != expected || default_matches == false || recommendation == "" {
+				invalid_schema_entries = push(invalid_schema_entries, key)
+				schema_coverage_ok = false
+			}
+		}
+		key_index = key_index + 1
+	}
+}
+
+examples_doc := read_json_file_or(examples_path, {})
+examples_list := dict_get_or(examples_doc, "examples", [])
+examples_defined := type(examples_doc) == "dict" && type(examples_list) == "array" && len(examples_list) > 0
+
+example_validation := validate_examples(defaults, examples_list)
+examples_validation_ok := examples_defined && dict_get_or(example_validation, "ok", false)
+failed_examples := dict_get_or(example_validation, "failed", [])
+
+doc_exists := file_exists(schema_doc_path)
+doc_text := ""
+if doc_exists {
+	doc_text = read_file(schema_doc_path)
+}
+
+schema_doc_defined := doc_exists && text_has_token(doc_text, "# Config Schema Reference") && text_has_token(doc_text, "| Key | Type | Default | Production Recommendation |") && text_has_token(doc_text, "## Invalid Configuration Examples")
+
+schema_doc_coverage_ok := schema_doc_defined
+missing_doc_keys := []
+if schema_doc_defined {
+	key_index := 0
+	while key_index < len(default_keys) {
+		key := default_keys[key_index]
+		if text_has_token(doc_text, "| " + key + " |") == false {
+			missing_doc_keys = push(missing_doc_keys, key)
+			schema_doc_coverage_ok = false
+		}
+		key_index = key_index + 1
+	}
+}
+
+release_process_doc := ""
+release_process_exists := file_exists(release_process_doc_path)
+if release_process_exists {
+	release_process_doc = read_file(release_process_doc_path)
+}
+release_process_linked := release_process_exists && text_has_token(release_process_doc, "run_config_schema_review.kujo") && text_has_token(release_process_doc, "docs/config-schema-reference.md")
+
+workflow_doc := ""
+workflow_exists := file_exists(workflow_path)
+if workflow_exists {
+	workflow_doc = read_file(workflow_path)
+}
+workflow_defined := workflow_exists && text_has_token(workflow_doc, "config-schema-review") && text_has_token(workflow_doc, "run_config_schema_review.kujo") && text_has_token(workflow_doc, "schedule:")
+
+ok := schema_defined && schema_coverage_ok && examples_defined && examples_validation_ok && schema_doc_defined && schema_doc_coverage_ok && release_process_linked && workflow_defined
+
+result := {
+	"ok": ok,
+	"generated_at_unix_ms": current_timestamp(),
+	"regenerate": regenerate,
+	"schema_json_path": schema_json_path,
+	"schema_doc_path": schema_doc_path,
+	"examples_path": examples_path,
+	"release_process_doc_path": release_process_doc_path,
+	"workflow_path": workflow_path,
+	"expected_key_count": len(default_keys),
+	"schema_entry_count": len(schema_entries),
+	"missing_schema_keys": missing_schema_keys,
+	"invalid_schema_entries": invalid_schema_entries,
+	"missing_doc_keys": missing_doc_keys,
+	"failed_examples": failed_examples,
+	"gates": {
+		"schema_defined": schema_defined,
+		"schema_coverage_ok": schema_coverage_ok,
+		"examples_defined": examples_defined,
+		"examples_validation_ok": examples_validation_ok,
+		"schema_doc_defined": schema_doc_defined,
+		"schema_doc_coverage_ok": schema_doc_coverage_ok,
+		"release_process_linked": release_process_linked,
+		"workflow_defined": workflow_defined
+	}
+}
+
+if file_exists(output_path) {
+	delete_file(output_path)
+}
+write_json_file(output_path, result)
+print(to_json(result))
+
+if !ok {
+	exit(1)
+}

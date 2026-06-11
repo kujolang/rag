@@ -1,0 +1,114 @@
+from src.rag_engine import query_rag
+from src.common import dict_get_or
+
+func expect(condition, message) {
+	if condition == false {
+		print("FAIL: " + message)
+		exit(1)
+	}
+}
+
+func make_index(prefix, text, term_freq, term_count) {
+	chunk_id := prefix + "_chunk_1"
+	return {
+		"chunks": [{
+			"chunk_id": chunk_id,
+			"doc_id": prefix + "_doc_1",
+			"path": "./" + prefix + ".md",
+			"line_start": 1,
+			"line_end": 1,
+			"text": text,
+			"meta": {
+				"kind": "text",
+				"tags": [prefix]
+			}
+		}],
+		"vectors": [{
+			"chunk_id": chunk_id,
+			"embedding": [0.0, 0.0, 0.0, 0.0]
+		}],
+		"lexical": [{
+			"chunk_id": chunk_id,
+			"term_freq": term_freq,
+			"term_count": term_count
+		}],
+		"meta": {}
+	}
+}
+
+func base_cfg() {
+	return {
+		"top_k": 4,
+		"hybrid_alpha": 0.0,
+		"hybrid_beta": 1.0,
+		"query_expansion": false,
+		"query_safe_response_enabled": true,
+		"query_safe_response_min_overlap_ratio": 0.15
+	}
+}
+
+func cfg_with_policy(policy) {
+	cfg := base_cfg()
+	cfg["query_response_policy"] = policy
+	return cfg
+}
+
+func test_style_profiles() {
+	index := make_index("style", "critical outage runbook", {
+		"critical": 3,
+		"outage": 3
+	}, 6)
+
+	strict_result := query_rag(index, "critical outage", cfg_with_policy({"style": "strict_extractive", "safety_mode": "permissive"}), {}, [])
+	strict_answer := to_string(dict_get_or(strict_result, "answer", ""))
+	expect(starts_with(strict_answer, "- ./style.md"), "strict_extractive should return extractive citation lines")
+
+	concise_result := query_rag(index, "critical outage", cfg_with_policy({"style": "concise", "safety_mode": "permissive"}), {}, [])
+	concise_answer := to_string(dict_get_or(concise_result, "answer", ""))
+	expect(starts_with(concise_answer, "Concise answer based on top evidence:"), "concise style should return concise prefix")
+
+	expanded_result := query_rag(index, "critical outage", cfg_with_policy({"style": "expanded", "safety_mode": "permissive"}), {}, [])
+	expanded_answer := to_string(dict_get_or(expanded_result, "answer", ""))
+	expect(starts_with(expanded_answer, "Answer draft based on retrieved sources:"), "expanded style should include expanded header")
+}
+
+func test_strict_safety_mode() {
+	index := make_index("strict", "critical outage notes", {
+		"critical": 2,
+		"outage": 2
+	}, 4)
+	cfg := cfg_with_policy({
+		"style": "expanded",
+		"safety_mode": "strict",
+		"min_citations": 2,
+		"min_confidence": 0.45
+	})
+	result := query_rag(index, "critical outage", cfg, {}, [])
+	policy := dict_get_or(result, "safe_response_policy", {})
+	expect(dict_get_or(policy, "triggered", false) == true, "strict safety mode should trigger when evidence confidence/coverage is low")
+	expect(dict_get_or(result, "count", 0) == 0, "strict safety mode should suppress citations when unsafe")
+}
+
+func test_permissive_safety_mode() {
+	index := make_index("permissive", "critical outage notes", {
+		"critical": 2,
+		"outage": 2
+	}, 4)
+	cfg := cfg_with_policy({
+		"style": "concise",
+		"safety_mode": "permissive"
+	})
+	result := query_rag(index, "totally unrelated question", cfg, {}, [])
+	policy := dict_get_or(result, "safe_response_policy", {})
+	expect(dict_get_or(policy, "triggered", false) == false, "permissive safety mode should allow low-overlap responses")
+	expect(dict_get_or(result, "count", 0) >= 1, "permissive safety mode should keep available citations")
+}
+
+func run_all() {
+	test_style_profiles()
+	test_strict_safety_mode()
+	test_permissive_safety_mode()
+	print("test_response_policy_controls: ok")
+}
+
+run_all()

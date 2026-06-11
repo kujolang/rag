@@ -1,0 +1,50 @@
+name: threat-model-review
+
+on:
+  schedule:
+    - cron: "0 6 1 * *"
+  workflow_dispatch:
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      KUJO_RUNTIME_REF: "7819d1475e909ec88f510c9927445791ea928836"
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Build Kujo runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          git init /tmp/kujo-runtime
+          git -C /tmp/kujo-runtime remote add origin https://github.com/kujolang/kujo.git
+          git -C /tmp/kujo-runtime fetch --depth 1 origin "$KUJO_RUNTIME_REF"
+          git -C /tmp/kujo-runtime checkout --detach "$KUJO_RUNTIME_REF"
+          cargo build --release --locked --manifest-path /tmp/kujo-runtime/Cargo.toml
+          echo "/tmp/kujo-runtime/target/release" >> "$GITHUB_PATH"
+
+      - name: Verify Kujo runtime
+        run: kujo --version
+
+      - name: Run threat model cadence review
+        shell: bash
+        run: |
+          set -euo pipefail
+          kujo run scripts/run_threat_model_review_cadence.kujo --interpreter > threat-model-review.json
+          cat threat-model-review.json
+
+      - name: Upload threat model review artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: threat-model-review
+          path: |
+            threat-model-review.json
+            results/security/threat_model_review_status.json

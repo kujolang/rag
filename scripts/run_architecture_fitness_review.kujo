@@ -1,0 +1,273 @@
+from src.common import dict_get_or, read_json_file_or, str_or, write_json_file
+
+func ensure_dir(path_value) {
+	if path_value == "" || path_value == "." {
+		return true
+	}
+	if path_exists(path_value) {
+		return true
+	}
+	parent := dirname(path_value)
+	if parent != "" && parent != "." && parent != path_value {
+		_ = ensure_dir(parent)
+	}
+	create_dir(path_value)
+	return true
+}
+
+func ensure_parent_dir(path_value) {
+	dir := dirname(path_value)
+	if dir == "" || dir == "." {
+		return true
+	}
+	return ensure_dir(dir)
+}
+
+func normalize_text(value) {
+	return trim(str_or(value, ""))
+}
+
+func count_occurrences(text, token) {
+	if type(text) != "string" || type(token) != "string" {
+		return 0
+	}
+	if token == "" {
+		return 0
+	}
+	parts := split(text, token)
+	if len(parts) == 0 {
+		return 0
+	}
+	return len(parts) - 1
+}
+
+func text_has_token(text, token) {
+	return count_occurrences(text, token) > 0
+}
+
+func evaluate_forbidden_dependencies(rules) {
+	violations := []
+	checked_count := 0
+	failed_count := 0
+
+	if type(rules) != "array" {
+		return {
+			"ok": false,
+			"checked_count": 0,
+			"failed_count": 1,
+			"violations": [
+				{
+					"reason": "forbidden_dependencies_not_array"
+				}
+			]
+		}
+	}
+
+	i := 0
+	while i < len(rules) {
+		rule := rules[i]
+		source_path := normalize_text(dict_get_or(rule, "source_path", ""))
+		forbidden_tokens := dict_get_or(rule, "forbidden_tokens", [])
+		reason := ""
+		rule_ok := true
+
+		if source_path == "" {
+			rule_ok = false
+			reason = "missing_source_path"
+		}
+		if type(forbidden_tokens) != "array" || len(forbidden_tokens) == 0 {
+			rule_ok = false
+			if reason == "" {
+				reason = "missing_forbidden_tokens"
+			}
+		}
+		if rule_ok && file_exists(source_path) == false {
+			rule_ok = false
+			reason = "source_missing"
+		}
+
+		hit_token := ""
+		if rule_ok {
+			source_text := read_file(source_path)
+			j := 0
+			while j < len(forbidden_tokens) {
+				token := normalize_text(forbidden_tokens[j])
+				if token != "" && text_has_token(source_text, token) {
+					rule_ok = false
+					reason = "forbidden_token_present"
+					hit_token = token
+					break
+				}
+				j = j + 1
+			}
+		}
+
+		checked_count = checked_count + 1
+		if !rule_ok {
+			failed_count = failed_count + 1
+			violations = push(violations, {
+				"source_path": source_path,
+				"reason": reason,
+				"hit_token": hit_token
+			})
+		}
+
+		i = i + 1
+	}
+
+	passed := checked_count > 0 && failed_count == 0
+	return {
+		"ok": passed,
+		"checked_count": checked_count,
+		"failed_count": failed_count,
+		"violations": violations
+	}
+}
+
+func evaluate_required_extension_points(rules) {
+	violations := []
+	checked_count := 0
+	failed_count := 0
+
+	if type(rules) != "array" {
+		return {
+			"ok": false,
+			"checked_count": 0,
+			"failed_count": 1,
+			"violations": [
+				{
+					"reason": "required_extension_points_not_array"
+				}
+			]
+		}
+	}
+
+	i := 0
+	while i < len(rules) {
+		rule := rules[i]
+		path := normalize_text(dict_get_or(rule, "path", ""))
+		required_tokens := dict_get_or(rule, "required_tokens", [])
+		reason := ""
+		rule_ok := true
+
+		if path == "" {
+			rule_ok = false
+			reason = "missing_path"
+		}
+		if type(required_tokens) != "array" || len(required_tokens) == 0 {
+			rule_ok = false
+			if reason == "" {
+				reason = "missing_required_tokens"
+			}
+		}
+		if rule_ok && file_exists(path) == false {
+			rule_ok = false
+			reason = "path_missing"
+		}
+
+		hit_token := ""
+		if rule_ok {
+			text := read_file(path)
+			j := 0
+			while j < len(required_tokens) {
+				token := normalize_text(required_tokens[j])
+				if token != "" && text_has_token(text, token) == false {
+					rule_ok = false
+					reason = "required_token_missing"
+					hit_token = token
+					break
+				}
+				j = j + 1
+			}
+		}
+
+		checked_count = checked_count + 1
+		if !rule_ok {
+			failed_count = failed_count + 1
+			violations = push(violations, {
+				"path": path,
+				"reason": reason,
+				"token": hit_token
+			})
+		}
+
+		i = i + 1
+	}
+
+	passed := checked_count > 0 && failed_count == 0
+	return {
+		"ok": passed,
+		"checked_count": checked_count,
+		"failed_count": failed_count,
+		"violations": violations
+	}
+}
+
+rules_path := env_or("KUJO_RAG_ARCH_FITNESS_RULES_PATH", "./config/architecture_fitness_rules.json")
+doc_path := env_or("KUJO_RAG_ARCH_FITNESS_DOC_PATH", "./docs/architecture-fitness-functions.md")
+release_process_doc_path := env_or("KUJO_RAG_ARCH_FITNESS_RELEASE_PROCESS_DOC_PATH", "./docs/release-process.md")
+workflow_path := env_or("KUJO_RAG_ARCH_FITNESS_WORKFLOW_PATH", "./.github/workflows/architecture-fitness-review.yml")
+output_path := env_or("KUJO_RAG_ARCH_FITNESS_OUTPUT_PATH", "./results/architecture/architecture_fitness_status.json")
+
+_ = ensure_parent_dir(output_path)
+
+rules_payload := read_json_file_or(rules_path, {})
+forbidden_rules := dict_get_or(rules_payload, "forbidden_dependencies", [])
+required_extension_rules := dict_get_or(rules_payload, "required_extension_points", [])
+
+rules_defined := type(rules_payload) == "dict" && type(forbidden_rules) == "array" && len(forbidden_rules) > 0 && type(required_extension_rules) == "array" && len(required_extension_rules) > 0
+
+forbidden_summary := evaluate_forbidden_dependencies(forbidden_rules)
+extension_summary := evaluate_required_extension_points(required_extension_rules)
+
+doc_exists := file_exists(doc_path)
+doc_text := ""
+if doc_exists {
+	doc_text = read_file(doc_path)
+}
+doc_defined := doc_exists && text_has_token(doc_text, "Architecture Fitness Functions and Guardrails") && text_has_token(doc_text, "forbidden dependencies") && text_has_token(doc_text, "extension points") && text_has_token(doc_text, "run_architecture_fitness_review.kujo")
+
+release_process_exists := file_exists(release_process_doc_path)
+release_process_text := ""
+if release_process_exists {
+	release_process_text = read_file(release_process_doc_path)
+}
+release_process_linked := release_process_exists && text_has_token(release_process_text, "run_architecture_fitness_review.kujo") && text_has_token(release_process_text, "docs/architecture-fitness-functions.md")
+
+workflow_exists := file_exists(workflow_path)
+workflow_text := ""
+if workflow_exists {
+	workflow_text = read_file(workflow_path)
+}
+workflow_defined := workflow_exists && text_has_token(workflow_text, "architecture-fitness-review") && text_has_token(workflow_text, "run_architecture_fitness_review.kujo") && text_has_token(workflow_text, "schedule:")
+
+ok := rules_defined && to_bool(dict_get_or(forbidden_summary, "ok", false)) && to_bool(dict_get_or(extension_summary, "ok", false)) && doc_defined && release_process_linked && workflow_defined
+
+result := {
+	"ok": ok,
+	"generated_at_unix_ms": current_timestamp(),
+	"rules_path": rules_path,
+	"doc_path": doc_path,
+	"release_process_doc_path": release_process_doc_path,
+	"workflow_path": workflow_path,
+	"gates": {
+		"rules_defined": rules_defined,
+		"forbidden_dependencies_enforced": to_bool(dict_get_or(forbidden_summary, "ok", false)),
+		"required_extension_points_enforced": to_bool(dict_get_or(extension_summary, "ok", false)),
+		"doc_defined": doc_defined,
+		"release_process_linked": release_process_linked,
+		"workflow_defined": workflow_defined
+	},
+	"forbidden_dependencies": forbidden_summary,
+	"required_extension_points": extension_summary
+}
+
+if file_exists(output_path) {
+	delete_file(output_path)
+}
+write_json_file(output_path, result)
+print(to_json(result))
+
+if !ok {
+	exit(1)
+}

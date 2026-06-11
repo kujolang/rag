@@ -1,0 +1,19 @@
+from src.config import load_config, ensure_runtime_dirs
+from src.rag_engine import build_rag_index, query_rag
+
+cfg := load_config({})
+_ := ensure_runtime_dirs(cfg)
+
+question := "What is Kujo and what does it optimize for?"
+all_args := args()
+if len(all_args) > 0 {
+	joined := join(all_args, " ")
+	if trim(joined) != "" {
+		question := joined
+	}
+}
+
+result := build_rag_index("./examples/kujo_docs", cfg, true)
+index := result["index"]
+answer := query_rag(index, question, cfg, null, null)
+print(to_json(answer))

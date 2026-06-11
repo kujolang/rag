@@ -1,0 +1,48 @@
+{
+  "connectors": [
+    {
+      "id": "wiki_confluence_stub",
+      "type": "plugin_script",
+      "enabled": false,
+      "runner_script": "./scripts/connectors/example_enterprise_connector_stub.kujo",
+      "timeout_ms": 180000,
+      "payload": {
+        "source_path": "./examples/release_eval_corpus",
+        "source_label": "wiki_confluence"
+      }
+    },
+    {
+      "id": "ticketing_jira_stub",
+      "type": "plugin_script",
+      "enabled": false,
+      "runner_script": "./scripts/connectors/example_enterprise_connector_stub.kujo",
+      "timeout_ms": 180000,
+      "payload": {
+        "source_path": "./examples/release_eval_corpus",
+        "source_label": "ticketing_jira"
+      }
+    },
+    {
+      "id": "object_storage_s3_stub",
+      "type": "plugin_script",
+      "enabled": false,
+      "runner_script": "./scripts/connectors/example_enterprise_connector_stub.kujo",
+      "timeout_ms": 180000,
+      "payload": {
+        "source_path": "./examples/release_eval_corpus",
+        "source_label": "object_storage_s3"
+      }
+    },
+    {
+      "id": "database_postgres_stub",
+      "type": "plugin_script",
+      "enabled": false,
+      "runner_script": "./scripts/connectors/example_enterprise_connector_stub.kujo",
+      "timeout_ms": 180000,
+      "payload": {
+        "source_path": "./examples/release_eval_corpus",
+        "source_label": "database_postgres"
+      }
+    }
+  ]
+}

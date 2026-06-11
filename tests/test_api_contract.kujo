@@ -1,0 +1,301 @@
+from src.common import dict_get_or
+from src.tests_helpers import assert_true
+
+kujo_bin := env_or("KUJO_BIN", "/path/to/kujo/target/release/kujo")
+
+func run_cmd(command) {
+	res := execute_status(command, {"timeout_ms": 120000})
+	if type(res) == "struct" {
+		return {
+			"ok": res.success,
+			"exit_code": res.exitcode,
+			"stdout": to_string(res.stdout),
+			"stderr": to_string(res.stderr)
+		}
+	}
+	return {
+		"ok": false,
+		"exit_code": -1,
+		"stdout": "",
+		"stderr": "invalid execute_status result"
+	}
+}
+
+func parse_json_safe(text) {
+	obj := {}
+	err := null
+	try {
+		obj := parse_json(text)
+	} except e {
+		err := e
+	}
+	if type(err) != "null" {
+		return {
+			"ok": false,
+			"error": to_string(err),
+			"data": {}
+		}
+	}
+	return {
+		"ok": true,
+		"data": obj
+	}
+}
+
+func start_server(port, env_prefix, log_file) {
+	cmd := "env " + env_prefix + " " + kujo_bin + " run main.kujo --interpreter serve --host 127.0.0.1 --port " + to_string(port) + " > " + log_file + " 2>&1 & echo $!"
+	res := run_cmd(cmd)
+	pid := trim(dict_get_or(res, "stdout", ""))
+	return pid
+}
+
+func stop_server(pid) {
+	if pid == "" {
+		return true
+	}
+	_ := run_cmd("kill " + pid + " >/dev/null 2>&1 || true")
+	_ := run_cmd("wait " + pid + " >/dev/null 2>&1 || true")
+	return true
+}
+
+func wait_for_health(port) {
+	attempt := 0
+	while attempt < 800 {
+		res := run_cmd("curl -s http://127.0.0.1:" + to_string(port) + "/health")
+		body := trim(dict_get_or(res, "stdout", ""))
+		if body != "" {
+			parsed := parse_json_safe(body)
+			if dict_get_or(parsed, "ok", false) == true {
+				return true
+			}
+		}
+		attempt := attempt + 1
+	}
+	return false
+}
+
+func post_json(port, path, payload) {
+	cmd := "curl -s -X POST http://127.0.0.1:" + to_string(port) + path + " -H \"Content-Type: application/json\" -d '" + payload + "'"
+	return run_cmd(cmd)
+}
+
+func repeat_text(char, count) {
+	out := ""
+	i := 0
+	while i < count {
+		out = out + char
+		i = i + 1
+	}
+	return out
+}
+
+func require_true(condition, label) {
+	if to_bool(condition) == false {
+		print("test_api_contract assertion failed: " + label)
+		exit(1)
+	}
+}
+
+# Main API contract checks
+base_port := 18000 + (current_timestamp() % 10000)
+main_port := base_port
+main_env := ""
+main_pid := start_server(main_port, main_env, "/tmp/kujo_rag_api_contract_main.log")
+assert_true(to_bool(main_pid != ""))
+assert_true(to_bool(wait_for_health(main_port) == true))
+
+health_res := run_cmd("curl -s http://127.0.0.1:" + to_string(main_port) + "/health")
+health_parsed := parse_json_safe(dict_get_or(health_res, "stdout", ""))
+assert_true(to_bool(dict_get_or(health_parsed, "ok", false) == true))
+assert_true(to_bool(dict_get_or(dict_get_or(health_parsed, "data", {}), "ok", false) == true))
+
+ingest_res := post_json(main_port, "/ingest", "{\"path\":\"./examples/kujo_docs\",\"recursive\":true}")
+ingest_parsed := parse_json_safe(dict_get_or(ingest_res, "stdout", ""))
+print("checkpoint: ingest default")
+assert_true(to_bool(dict_get_or(ingest_parsed, "ok", false) == true))
+assert_true(to_bool(dict_get_or(dict_get_or(ingest_parsed, "data", {}), "ok", false) == true))
+
+ingest_ns_res := post_json(main_port, "/ingest", "{\"path\":\"./examples/kujo_docs\",\"recursive\":true,\"namespace\":\"alpha\"}")
+ingest_ns_parsed := parse_json_safe(dict_get_or(ingest_ns_res, "stdout", ""))
+print("checkpoint: ingest namespace")
+assert_true(to_bool(dict_get_or(ingest_ns_parsed, "ok", false) == true))
+assert_true(to_bool(dict_get_or(dict_get_or(dict_get_or(ingest_ns_parsed, "data", {}), "data", {}), "namespace", "") == "alpha"))
+
+query_res := post_json(main_port, "/query", "{\"query\":\"Kujo speed\"}")
+query_parsed := parse_json_safe(dict_get_or(query_res, "stdout", ""))
+print("checkpoint: query default")
+assert_true(to_bool(dict_get_or(query_parsed, "ok", false) == true))
+assert_true(to_bool(dict_get_or(dict_get_or(query_parsed, "data", {}), "ok", false) == true))
+query_data := dict_get_or(dict_get_or(query_parsed, "data", {}), "data", {})
+assert_true(to_bool(dict_get_or(query_data, "confidence", -1.0) >= 0.0))
+assert_true(to_bool(dict_get_or(query_data, "confidence", 2.0) <= 1.0))
+assert_true(to_bool(has_key(query_data, "confidence_summary") == 1))
+query_stage_timings := {}
+if has_key(query_data, "stage_timings_ms") == 1 {
+	query_stage_timings = query_data["stage_timings_ms"]
+}
+require_true(has_key(query_stage_timings, "tokenize") == 1, "query stage tokenize present")
+require_true(has_key(query_stage_timings, "embed") == 1, "query stage embed present")
+require_true(has_key(query_stage_timings, "retrieve") == 1, "query stage retrieve present")
+require_true(has_key(query_stage_timings, "rerank") == 1, "query stage rerank present")
+require_true(has_key(query_stage_timings, "synthesize") == 1, "query stage synthesize present")
+
+query_ns_res := post_json(main_port, "/query", "{\"query\":\"Kujo speed\",\"namespace\":\"alpha\"}")
+query_ns_parsed := parse_json_safe(dict_get_or(query_ns_res, "stdout", ""))
+print("checkpoint: query namespace")
+assert_true(to_bool(dict_get_or(query_ns_parsed, "ok", false) == true))
+assert_true(to_bool(dict_get_or(dict_get_or(dict_get_or(query_ns_parsed, "data", {}), "data", {}), "namespace", "") == "alpha"))
+query_ns_data := dict_get_or(dict_get_or(query_ns_parsed, "data", {}), "data", {})
+ns_citations := dict_get_or(query_ns_data, "citations", [])
+if len(ns_citations) > 0 {
+	assert_true(to_bool(has_key(ns_citations[0], "confidence") == 1))
+	assert_true(to_bool(has_key(ns_citations[0], "provenance_score") == 1))
+}
+
+invalid_namespace_res := post_json(main_port, "/query", "{\"query\":\"Kujo speed\",\"namespace\":123}")
+invalid_namespace_parsed := parse_json_safe(dict_get_or(invalid_namespace_res, "stdout", ""))
+print("checkpoint: invalid namespace")
+assert_true(to_bool(dict_get_or(invalid_namespace_parsed, "ok", false) == true))
+assert_true(to_bool(dict_get_or(dict_get_or(dict_get_or(invalid_namespace_parsed, "data", {}), "error", {}), "code", "") == "invalid_namespace"))
+
+query_filtered_res := post_json(main_port, "/query", "{\"query\":\"Kujo speed\",\"filters\":{\"path\":\"__no_such_path_marker__\"}}")
+query_filtered_parsed := parse_json_safe(dict_get_or(query_filtered_res, "stdout", ""))
+print("checkpoint: query filtered")
+assert_true(to_bool(dict_get_or(query_filtered_parsed, "ok", false) == true))
+assert_true(to_bool(dict_get_or(dict_get_or(dict_get_or(query_filtered_parsed, "data", {}), "data", {}), "count", -1) == 0))
+assert_true(to_bool(dict_get_or(dict_get_or(dict_get_or(dict_get_or(query_filtered_parsed, "data", {}), "data", {}), "filters", {}), "path", "") == "__no_such_path_marker__"))
+
+query_explain_res := post_json(main_port, "/query", "{\"query\":\"Kujo speed\",\"include_retrieval_explanation\":true}")
+query_explain_parsed := parse_json_safe(dict_get_or(query_explain_res, "stdout", ""))
+print("checkpoint: query explanation")
+assert_true(to_bool(dict_get_or(query_explain_parsed, "ok", false) == true))
+query_explain_data := dict_get_or(dict_get_or(query_explain_parsed, "data", {}), "data", {})
+assert_true(to_bool(has_key(query_explain_data, "retrieval_explanation") == 1))
+query_explain_meta := dict_get_or(query_explain_data, "retrieval_explanation", {})
+assert_true(to_bool(dict_get_or(query_explain_meta, "enabled", false) == true))
+assert_true(to_bool(has_key(query_explain_meta, "ranking") == 1))
+
+invalid_explain_res := post_json(main_port, "/query", "{\"query\":\"Kujo speed\",\"include_retrieval_explanation\":\"yes\"}")
+invalid_explain_parsed := parse_json_safe(dict_get_or(invalid_explain_res, "stdout", ""))
+print("checkpoint: invalid explanation flag")
+assert_true(to_bool(dict_get_or(invalid_explain_parsed, "ok", false) == true))
+assert_true(to_bool(dict_get_or(dict_get_or(dict_get_or(invalid_explain_parsed, "data", {}), "error", {}), "code", "") == "invalid_retrieval_explanation_flag"))
+
+privacy_export_res := post_json(main_port, "/privacy/export", "{\"namespace\":\"alpha\",\"export_type\":\"contract\"}")
+privacy_export_parsed := parse_json_safe(dict_get_or(privacy_export_res, "stdout", ""))
+print("checkpoint: privacy export")
+assert_true(to_bool(dict_get_or(privacy_export_parsed, "ok", false) == true))
+privacy_export_wrapper := dict_get_or(privacy_export_parsed, "data", {})
+assert_true(to_bool(dict_get_or(privacy_export_wrapper, "ok", false) == true))
+privacy_export_data := dict_get_or(privacy_export_wrapper, "data", {})
+privacy_export_path := to_string(dict_get_or(dict_get_or(privacy_export_data, "export", {}), "path", ""))
+assert_true(to_bool(privacy_export_path != ""))
+assert_true(to_bool(file_exists(privacy_export_path)))
+
+privacy_delete_res := post_json(main_port, "/privacy/delete", "{\"namespace\":\"alpha\",\"reason\":\"contract_check\"}")
+privacy_delete_parsed := parse_json_safe(dict_get_or(privacy_delete_res, "stdout", ""))
+print("checkpoint: privacy delete")
+assert_true(to_bool(dict_get_or(privacy_delete_parsed, "ok", false) == true))
+privacy_delete_wrapper := dict_get_or(privacy_delete_parsed, "data", {})
+assert_true(to_bool(dict_get_or(privacy_delete_wrapper, "ok", false) == true))
+privacy_delete_data := dict_get_or(privacy_delete_wrapper, "data", {})
+assert_true(to_bool(dict_get_or(dict_get_or(privacy_delete_data, "summary_after", {}), "chunk_count", -1) == 0))
+
+alpha_after_delete_res := post_json(main_port, "/query", "{\"query\":\"Kujo speed\",\"namespace\":\"alpha\"}")
+alpha_after_delete_parsed := parse_json_safe(dict_get_or(alpha_after_delete_res, "stdout", ""))
+print("checkpoint: query namespace after privacy delete")
+assert_true(to_bool(dict_get_or(alpha_after_delete_parsed, "ok", false) == true))
+assert_true(to_bool(dict_get_or(dict_get_or(alpha_after_delete_parsed, "data", {}), "ok", false) == true))
+
+metrics_res := run_cmd("curl -s http://127.0.0.1:" + to_string(main_port) + "/metrics")
+print("metrics_raw=" + dict_get_or(metrics_res, "stdout", ""))
+metrics_parsed := parse_json_safe(dict_get_or(metrics_res, "stdout", ""))
+print("checkpoint: metrics")
+assert_true(to_bool(dict_get_or(metrics_parsed, "ok", false) == true))
+metrics_data := dict_get_or(dict_get_or(metrics_parsed, "data", {}), "data", {})
+print("metrics_data=" + to_json(metrics_data))
+assert_true(to_bool(has_key(metrics_data, "ingest_requests") == 1))
+assert_true(to_bool(has_key(metrics_data, "query_requests") == 1))
+assert_true(to_bool(dict_get_or(metrics_data, "ingest_requests", -1) >= 0))
+assert_true(to_bool(dict_get_or(metrics_data, "query_requests", -1) >= 0))
+assert_true(to_bool(has_key(dict_get_or(metrics_data, "ingest_latency_ms", {}), "lt_100ms") == 1))
+assert_true(to_bool(has_key(dict_get_or(metrics_data, "query_latency_ms", {}), "lt_100ms") == 1))
+query_stage_metrics := {}
+if has_key(metrics_data, "query_stage_timings_ms") == 1 {
+	query_stage_metrics = metrics_data["query_stage_timings_ms"]
+}
+require_true(has_key(query_stage_metrics, "tokenize") == 1, "metrics stage tokenize present")
+require_true(has_key(query_stage_metrics, "embed") == 1, "metrics stage embed present")
+require_true(has_key(query_stage_metrics, "retrieve") == 1, "metrics stage retrieve present")
+require_true(has_key(query_stage_metrics, "rerank") == 1, "metrics stage rerank present")
+require_true(has_key(query_stage_metrics, "synthesize") == 1, "metrics stage synthesize present")
+tokenize_stage_metrics := {}
+if has_key(query_stage_metrics, "tokenize") == 1 {
+	tokenize_stage_metrics = query_stage_metrics["tokenize"]
+}
+tokenize_stage_samples := 0
+if has_key(tokenize_stage_metrics, "samples") == 1 {
+	tokenize_stage_samples = tokenize_stage_metrics["samples"]
+}
+require_true(tokenize_stage_samples >= 0, "metrics stage tokenize sample count")
+
+invalid_filters_res := post_json(main_port, "/query", "{\"query\":\"Kujo speed\",\"filters\":\"bad\"}")
+invalid_filters_parsed := parse_json_safe(dict_get_or(invalid_filters_res, "stdout", ""))
+print("checkpoint: invalid filters")
+assert_true(to_bool(dict_get_or(invalid_filters_parsed, "ok", false) == true))
+assert_true(to_bool(dict_get_or(dict_get_or(dict_get_or(invalid_filters_parsed, "data", {}), "error", {}), "code", "") == "invalid_filters"))
+
+bad_json_res := run_cmd("curl -s -X POST http://127.0.0.1:" + to_string(main_port) + "/query -H \"Content-Type: application/json\" -d '{bad-json'" )
+bad_json_parsed := parse_json_safe(dict_get_or(bad_json_res, "stdout", ""))
+print("checkpoint: bad json")
+assert_true(to_bool(dict_get_or(bad_json_parsed, "ok", false) == true))
+assert_true(to_bool(dict_get_or(dict_get_or(dict_get_or(bad_json_parsed, "data", {}), "error", {}), "code", "") == "invalid_json"))
+
+query_large_payload := "{\"query\":\"" + repeat_text("q", 4500) + "\"}"
+query_large_res := post_json(main_port, "/query", query_large_payload)
+print("checkpoint: large query")
+query_large_raw := to_string(query_large_res["stdout"])
+assert_true(contains(query_large_raw, "query_too_large") > 0)
+
+_ := stop_server(main_pid)
+
+# Dedicated rate-limit contract checks
+rate_port := base_port + 1
+rate_env := ""
+rate_pid := start_server(rate_port, rate_env, "/tmp/kujo_rag_api_contract_rate.log")
+assert_true(to_bool(rate_pid != ""))
+assert_true(to_bool(wait_for_health(rate_port) == true))
+
+i := 0
+rate_body := ""
+while i < 130 {
+	rate_res := run_cmd("curl -s http://127.0.0.1:" + to_string(rate_port) + "/health")
+	rate_body = dict_get_or(rate_res, "stdout", "")
+	i = i + 1
+}
+_ = rate_body
+rate_limited_count_res := run_cmd("grep -c '\"status\":429' /tmp/kujo_rag_api_contract_rate.log || true")
+rate_limited_count := trim(to_string(rate_limited_count_res["stdout"]))
+assert_true(to_bool(rate_limited_count != "0"))
+
+_ := stop_server(rate_pid)
+
+# Dedicated tenant quota contract checks
+quota_port := base_port + 2
+quota_env := "KUJO_RAG_API_AUTH_PROVIDER=none KUJO_RAG_API_TENANT_QUOTA_ENABLED=true KUJO_RAG_API_TENANT_QUERY_RATE_WINDOW_SEC=60 KUJO_RAG_API_TENANT_QUERY_RATE_MAX_REQUESTS=1 KUJO_RAG_API_TENANT_INGEST_MAX_CHUNKS_PER_REQUEST=50000 KUJO_RAG_API_TENANT_STORAGE_MAX_CHUNKS=1"
+quota_pid := start_server(quota_port, quota_env, "/tmp/kujo_rag_api_contract_quota.log")
+require_true(quota_pid != "", "quota server pid")
+require_true(wait_for_health(quota_port) == true, "quota server health")
+
+_ = post_json(quota_port, "/query", "{\"query\":\"Kujo speed\",\"namespace\":\"quota\"}")
+quota_query_two := post_json(quota_port, "/query", "{\"query\":\"Kujo speed\",\"namespace\":\"quota\"}")
+quota_query_two_raw := to_string(quota_query_two["stdout"])
+require_true(index_of(quota_query_two_raw, "tenant_query_quota_exceeded") >= 0, "query-rate quota response code")
+
+quota_ingest := post_json(quota_port, "/ingest", "{\"path\":\"./examples/kujo_docs\",\"recursive\":true,\"namespace\":\"quota\"}")
+quota_ingest_raw := to_string(quota_ingest["stdout"])
+require_true(index_of(quota_ingest_raw, "tenant_storage_quota_exceeded") >= 0, "storage quota response code")
+
+_ = stop_server(quota_pid)
+
+print("test_api_contract: ok")

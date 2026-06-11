@@ -1,0 +1,99 @@
+func default_backup_dir() {
+	return "results/backups/backup-" + to_string(current_timestamp())
+}
+
+func read_json_file(path) {
+	if file_exists(path) == false {
+		return {
+			"ok": false,
+			"error": "missing_file",
+			"message": "File not found: " + path,
+			"data": {}
+		}
+	}
+	raw := read_file(path)
+	err := null
+	parsed := {}
+	try {
+		parsed := parse_json(raw)
+	} except e {
+		err := e
+	}
+	if type(err) != "null" {
+		return {
+			"ok": false,
+			"error": "invalid_json",
+			"message": to_string(err),
+			"data": {}
+		}
+	}
+	return {
+		"ok": true,
+		"data": parsed
+	}
+}
+
+func main() {
+	index_source := env_or("BACKUP_SOURCE_INDEX", "data/rag_index.json")
+	config_source := env_or("BACKUP_SOURCE_CONFIG", "config/release_eval_thresholds.json")
+	output_dir := env_or("BACKUP_OUTPUT_DIR", default_backup_dir())
+
+	create_dir(output_dir)
+
+	if file_exists(index_source) == false {
+		print(to_json({"ok": false, "error": "missing_index_source", "path": index_source}))
+		exit(1)
+	}
+	if file_exists(config_source) == false {
+		print(to_json({"ok": false, "error": "missing_config_source", "path": config_source}))
+		exit(1)
+	}
+
+	index_content := read_file(index_source)
+	config_content := read_file(config_source)
+
+	index_backup := output_dir + "/index.backup.json"
+	config_backup := output_dir + "/config.backup.json"
+	manifest_path := output_dir + "/manifest.json"
+
+	if file_exists(index_backup) {
+		delete_file(index_backup)
+	}
+	if file_exists(config_backup) {
+		delete_file(config_backup)
+	}
+	if file_exists(manifest_path) {
+		delete_file(manifest_path)
+	}
+
+	write_file(index_backup, index_content)
+	write_file(config_backup, config_content)
+
+	manifest := {
+		"ok": true,
+		"created_at": current_timestamp(),
+		"files": {
+			"index": {
+				"source": index_source,
+				"backup": index_backup,
+				"sha256": sha256(index_content)
+			},
+			"config": {
+				"source": config_source,
+				"backup": config_backup,
+				"sha256": sha256(config_content)
+			}
+		}
+	}
+
+	write_file(manifest_path, to_json(manifest))
+	print(to_json({
+		"ok": true,
+		"backup_dir": output_dir,
+		"manifest": manifest_path,
+		"index_backup": index_backup,
+		"config_backup": config_backup
+	}))
+}
+
+main()

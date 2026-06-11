@@ -1,0 +1,165 @@
+from src.common import dict_get_or
+from src.tests_helpers import assert_true, assert_equal
+
+kujo_bin := env_or("KUJO_BIN", "/path/to/kujo/target/release/kujo")
+
+func run_cmd(command) {
+	res := execute_status(command, {"timeout_ms": 120000})
+	if type(res) == "struct" {
+		return {
+			"ok": res.success,
+			"exit_code": res.exitcode,
+			"stdout": to_string(res.stdout),
+			"stderr": to_string(res.stderr)
+		}
+	}
+	return {
+		"ok": false,
+		"exit_code": -1,
+		"stdout": "",
+		"stderr": "invalid execute_status result"
+	}
+}
+
+func parse_json_safe(text) {
+	obj := {}
+	err := null
+	try {
+		obj := parse_json(text)
+	} except e {
+		err := e
+	}
+	if type(err) != "null" {
+		return {
+			"ok": false,
+			"error": to_string(err),
+			"data": {}
+		}
+	}
+	return {
+		"ok": true,
+		"data": obj
+	}
+}
+
+func start_server(port, env_prefix, log_file) {
+	cmd := "env " + env_prefix + " " + kujo_bin + " run main.kujo --interpreter serve --host 127.0.0.1 --port " + to_string(port) + " > " + log_file + " 2>&1 & echo $!"
+	res := run_cmd(cmd)
+	pid := trim(dict_get_or(res, "stdout", ""))
+	return pid
+}
+
+func stop_server(pid) {
+	if pid == "" {
+		return true
+	}
+	_ := run_cmd("kill " + pid + " >/dev/null 2>&1 || true")
+	_ := run_cmd("wait " + pid + " >/dev/null 2>&1 || true")
+	return true
+}
+
+func wait_for_health(port) {
+	attempt := 0
+	while attempt < 5000 {
+		res := run_cmd("curl -s http://127.0.0.1:" + to_string(port) + "/health")
+		body := trim(dict_get_or(res, "stdout", ""))
+		if body != "" {
+			parsed := parse_json_safe(body)
+			if dict_get_or(parsed, "ok", false) == true {
+				payload := dict_get_or(parsed, "data", {})
+				if dict_get_or(payload, "ok", false) == true {
+					return true
+				}
+			}
+		}
+		attempt = attempt + 1
+	}
+	return false
+}
+
+func post_ingest_job(port) {
+	cmd := "curl -s -X POST http://127.0.0.1:" + to_string(port) + "/ingest/jobs -H \"Content-Type: application/json\" -d '{\"path\":\"./examples/kujo_docs\",\"recursive\":true}'"
+	return run_cmd(cmd)
+}
+
+func poll_job_status(port, job_id) {
+	cmd := "curl -s -X POST http://127.0.0.1:" + to_string(port) + "/ingest/jobs/status -H \"Content-Type: application/json\" -d '{\"job_id\":\"" + job_id + "\"}'"
+	return run_cmd(cmd)
+}
+
+func read_job_from_response(raw_text) {
+	parsed := parse_json_safe(raw_text)
+	if dict_get_or(parsed, "ok", false) == false {
+		return {
+			"ok": false,
+			"job": {},
+			"data": {}
+		}
+	}
+	payload := dict_get_or(parsed, "data", {})
+	if dict_get_or(payload, "ok", false) == false {
+		return {
+			"ok": false,
+			"job": {},
+			"data": {}
+		}
+	}
+	data := dict_get_or(payload, "data", {})
+	return {
+		"ok": true,
+		"job": dict_get_or(data, "job", {}),
+		"data": data
+	}
+}
+
+base_port := 42100 + (current_timestamp() % 10000)
+queue_port := base_port
+inline_port := base_port + 1
+
+queue_env := "KUJO_RAG_ENV=development KUJO_RAG_API_AUTH_PROVIDER=none KUJO_RAG_API_STARTUP_GRACE_MS=0 KUJO_RAG_API_INGEST_ALLOWED_ROOTS=./examples KUJO_RAG_API_INGEST_JOBS_MODE=queue KUJO_RAG_API_INGEST_WORKER_BATCH_SIZE=1 KUJO_RAG_API_INGEST_WORKER_MAX_RUNNING=1 KUJO_RAG_INDEX_PATH=/tmp/kujo_rag_async_queue_" + to_string(queue_port) + ".json"
+queue_pid := start_server(queue_port, queue_env, "/tmp/kujo_rag_async_ingest_queue.log")
+assert_true(to_bool(queue_pid != ""))
+assert_true(to_bool(wait_for_health(queue_port) == true))
+
+queue_create := post_ingest_job(queue_port)
+queue_create_payload := read_job_from_response(dict_get_or(queue_create, "stdout", ""))
+assert_true(to_bool(dict_get_or(queue_create_payload, "ok", false) == true))
+queue_create_data := dict_get_or(queue_create_payload, "data", {})
+queue_job := dict_get_or(queue_create_payload, "job", {})
+queue_job_id := trim(to_string(dict_get_or(queue_create_data, "job_id", "")))
+assert_true(to_bool(queue_job_id != ""))
+assert_equal(dict_get_or(queue_create_data, "worker_mode", ""), "queue")
+assert_equal(dict_get_or(queue_job, "status", ""), "submitted")
+
+final_status := ""
+attempt := 0
+while attempt < 20 {
+	status_res := poll_job_status(queue_port, queue_job_id)
+	status_payload := read_job_from_response(dict_get_or(status_res, "stdout", ""))
+	assert_true(to_bool(dict_get_or(status_payload, "ok", false) == true))
+	status_job := dict_get_or(status_payload, "job", {})
+	final_status = to_string(dict_get_or(status_job, "status", ""))
+	if final_status == "succeeded" || final_status == "failed" {
+		break
+	}
+	attempt = attempt + 1
+}
+assert_equal(final_status, "succeeded")
+_ := stop_server(queue_pid)
+
+inline_env := "KUJO_RAG_ENV=development KUJO_RAG_API_AUTH_PROVIDER=none KUJO_RAG_API_STARTUP_GRACE_MS=0 KUJO_RAG_API_INGEST_ALLOWED_ROOTS=./examples KUJO_RAG_API_INGEST_JOBS_MODE=inline KUJO_RAG_INDEX_PATH=/tmp/kujo_rag_async_inline_" + to_string(inline_port) + ".json"
+inline_pid := start_server(inline_port, inline_env, "/tmp/kujo_rag_async_ingest_inline.log")
+assert_true(to_bool(inline_pid != ""))
+assert_true(to_bool(wait_for_health(inline_port) == true))
+
+inline_create := post_ingest_job(inline_port)
+inline_payload := read_job_from_response(dict_get_or(inline_create, "stdout", ""))
+assert_true(to_bool(dict_get_or(inline_payload, "ok", false) == true))
+inline_data := dict_get_or(inline_payload, "data", {})
+inline_job := dict_get_or(inline_payload, "job", {})
+assert_equal(dict_get_or(inline_data, "worker_mode", ""), "inline")
+assert_equal(dict_get_or(inline_job, "status", ""), "succeeded")
+
+_ := stop_server(inline_pid)
+
+print("test_async_ingest_workers: ok")

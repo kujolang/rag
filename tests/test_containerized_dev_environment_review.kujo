@@ -1,0 +1,78 @@
+from src.common import dict_get_or, read_json_file_or
+from src.tests_helpers import assert_true
+
+kujo_bin := env_or("KUJO_BIN", "/path/to/kujo/target/debug/kujo")
+suffix := to_string(current_timestamp())
+
+dockerfile_path := "/tmp/kujo_rag_dockerfile_" + suffix
+compose_path := "/tmp/kujo_rag_compose_" + suffix + ".yml"
+devcontainer_path := "/tmp/kujo_rag_devcontainer_" + suffix + ".json"
+doc_path := "/tmp/kujo_rag_container_doc_" + suffix + ".md"
+release_doc_path := "/tmp/kujo_rag_container_release_" + suffix + ".md"
+workflow_path := "/tmp/kujo_rag_container_workflow_" + suffix + ".yml"
+output_valid_path := "/tmp/kujo_rag_container_status_valid_" + suffix + ".json"
+output_invalid_path := "/tmp/kujo_rag_container_status_invalid_" + suffix + ".json"
+
+write_file(dockerfile_path, "FROM rust:1.81-bookworm\nRUN cargo build --release --locked\nCMD [\"kujo\", \"run\", \"main.kujo\", \"--interpreter\", \"serve\"]\n")
+write_file(compose_path, "services:\n  kujo-rag:\n    ports:\n      - \"8787:8787\"\n    command: [\"kujo\", \"run\", \"main.kujo\", \"--interpreter\", \"serve\"]\n")
+write_file(devcontainer_path, to_json({
+	"name": "kujo-rag-devcontainer",
+	"workspaceFolder": "/workspace",
+	"postCreateCommand": "kujo --version"
+}))
+write_file(doc_path, "# Containerized and Devcontainer Development Environment\n\n## One-Command Container Quick Start\n\nRun docker compose up --build\n\n## Native Workflow Compatibility\n\nkujo run scripts/run_containerized_dev_environment_review.kujo --interpreter\n")
+write_file(release_doc_path, "# Release Process\n\nrun_containerized_dev_environment_review.kujo\ndocs/containerized-dev-environment.md\n")
+write_file(workflow_path, "name: containerized-dev-environment-review\non:\n  schedule:\n    - cron: '0 11 * * 5'\njobs:\n  review:\n    steps:\n      - run: kujo run scripts/run_containerized_dev_environment_review.kujo --interpreter\n")
+
+valid_cmd := "KUJO_RAG_DOCKERFILE_PATH=" + dockerfile_path + " KUJO_RAG_DOCKER_COMPOSE_PATH=" + compose_path + " KUJO_RAG_DEVCONTAINER_PATH=" + devcontainer_path + " KUJO_RAG_CONTAINER_ENV_DOC_PATH=" + doc_path + " KUJO_RAG_CONTAINER_ENV_RELEASE_PROCESS_DOC_PATH=" + release_doc_path + " KUJO_RAG_CONTAINER_ENV_WORKFLOW_PATH=" + workflow_path + " KUJO_RAG_CONTAINER_ENV_OUTPUT_PATH=" + output_valid_path + " " + kujo_bin + " run scripts/run_containerized_dev_environment_review.kujo --interpreter"
+valid_res := execute_status(valid_cmd, {"timeout_ms": 240000})
+assert_true(to_bool(type(valid_res) == "struct"))
+assert_true(to_bool(valid_res.success == true))
+
+valid_payload := read_json_file_or(output_valid_path, {})
+assert_true(to_bool(dict_get_or(valid_payload, "ok", false) == true))
+valid_gates := dict_get_or(valid_payload, "gates", {})
+assert_true(to_bool(dict_get_or(valid_gates, "compose_defined", false) == true))
+assert_true(to_bool(dict_get_or(valid_gates, "workflow_defined", false) == true))
+
+if file_exists(compose_path) {
+	delete_file(compose_path)
+}
+write_file(compose_path, "services:\n  kujo-rag:\n    command: [\"kujo\", \"run\", \"main.kujo\", \"--interpreter\", \"query\"]\n")
+
+invalid_cmd := "KUJO_RAG_DOCKERFILE_PATH=" + dockerfile_path + " KUJO_RAG_DOCKER_COMPOSE_PATH=" + compose_path + " KUJO_RAG_DEVCONTAINER_PATH=" + devcontainer_path + " KUJO_RAG_CONTAINER_ENV_DOC_PATH=" + doc_path + " KUJO_RAG_CONTAINER_ENV_RELEASE_PROCESS_DOC_PATH=" + release_doc_path + " KUJO_RAG_CONTAINER_ENV_WORKFLOW_PATH=" + workflow_path + " KUJO_RAG_CONTAINER_ENV_OUTPUT_PATH=" + output_invalid_path + " " + kujo_bin + " run scripts/run_containerized_dev_environment_review.kujo --interpreter"
+invalid_res := execute_status(invalid_cmd, {"timeout_ms": 240000})
+assert_true(to_bool(type(invalid_res) == "struct"))
+assert_true(to_bool(invalid_res.success == false))
+
+invalid_payload := read_json_file_or(output_invalid_path, {})
+assert_true(to_bool(dict_get_or(invalid_payload, "ok", true) == false))
+invalid_gates := dict_get_or(invalid_payload, "gates", {})
+assert_true(to_bool(dict_get_or(invalid_gates, "compose_defined", true) == false))
+
+if file_exists(dockerfile_path) {
+	delete_file(dockerfile_path)
+}
+if file_exists(compose_path) {
+	delete_file(compose_path)
+}
+if file_exists(devcontainer_path) {
+	delete_file(devcontainer_path)
+}
+if file_exists(doc_path) {
+	delete_file(doc_path)
+}
+if file_exists(release_doc_path) {
+	delete_file(release_doc_path)
+}
+if file_exists(workflow_path) {
+	delete_file(workflow_path)
+}
+if file_exists(output_valid_path) {
+	delete_file(output_valid_path)
+}
+if file_exists(output_invalid_path) {
+	delete_file(output_invalid_path)
+}
+
+print("test_containerized_dev_environment_review: ok")

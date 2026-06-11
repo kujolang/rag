@@ -1,0 +1,23 @@
+{
+  "release_eval_thresholds": {
+    "min_quality_pass_rate": 0.875,
+    "max_error_rate": 0.0,
+    "max_avg_latency_ms": 10000,
+    "max_p95_latency_ms": 20000,
+    "min_average_confidence": 0.25,
+    "min_average_grounding": 0.5,
+    "min_case_count": 8
+  },
+  "language_thresholds": {
+    "min_language_count": 4,
+    "required_languages": [
+      "english",
+      "spanish",
+      "french",
+      "german"
+    ],
+    "min_language_quality_pass_rate": 0.75,
+    "min_non_english_quality_pass_rate": 0.75,
+    "min_non_english_case_count": 3
+  }
+}

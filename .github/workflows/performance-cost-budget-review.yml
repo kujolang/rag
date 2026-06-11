@@ -1,0 +1,63 @@
+name: performance-cost-budget-review
+
+on:
+  schedule:
+    - cron: "0 14 * * 1"
+  workflow_dispatch:
+
+jobs:
+  performance-cost-budget-review:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    env:
+      KUJO_RUNTIME_REF: "7819d1475e909ec88f510c9927445791ea928836"
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Build Kujo runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          git init /tmp/kujo-runtime
+          git -C /tmp/kujo-runtime remote add origin https://github.com/kujolang/kujo.git
+          git -C /tmp/kujo-runtime fetch --depth 1 origin "$KUJO_RUNTIME_REF"
+          git -C /tmp/kujo-runtime checkout --detach "$KUJO_RUNTIME_REF"
+          cargo build --release --locked --manifest-path /tmp/kujo-runtime/Cargo.toml
+          echo "/tmp/kujo-runtime/target/release" >> "$GITHUB_PATH"
+
+      - name: Verify Kujo runtime
+        run: kujo --version
+
+      - name: Run large-corpus benchmark suite
+        shell: bash
+        run: |
+          set -euo pipefail
+          kujo run scripts/run_large_corpus_benchmarks.kujo --interpreter > large-corpus-benchmarks.json
+          cat large-corpus-benchmarks.json
+
+      - name: Run performance and cost budget review gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          kujo run scripts/run_performance_cost_budget_review.kujo --interpreter > performance-cost-budget-status.json
+          cat performance-cost-budget-status.json
+
+      - name: Upload performance and cost budget artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: performance-cost-budget-review
+          path: |
+            large-corpus-benchmarks.json
+            performance-cost-budget-status.json
+            results/large_corpus_benchmark_report.json
+            results/large_corpus_benchmark_trend.json
+            results/performance/performance_cost_budget_status.json
+            results/performance/performance_cost_budget_trend.json
+            config/performance_cost_budget_policy.json
+            docs/performance-cost-budget-gates.md

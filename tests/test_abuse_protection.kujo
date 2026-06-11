@@ -1,0 +1,128 @@
+from src.common import dict_get_or
+from src.tests_helpers import assert_true
+
+kujo_bin := env_or("KUJO_BIN", "/path/to/kujo/target/release/kujo")
+
+func run_cmd(command) {
+	res := execute_status(command, {"timeout_ms": 120000})
+	if type(res) == "struct" {
+		return {
+			"ok": res.success,
+			"exit_code": res.exitcode,
+			"stdout": to_string(res.stdout),
+			"stderr": to_string(res.stderr)
+		}
+	}
+	return {
+		"ok": false,
+		"exit_code": -1,
+		"stdout": "",
+		"stderr": "invalid execute_status result"
+	}
+}
+
+func parse_json_safe(text) {
+	obj := {}
+	err := null
+	try {
+		obj := parse_json(text)
+	} except e {
+		err := e
+	}
+	if type(err) != "null" {
+		return {
+			"ok": false,
+			"error": to_string(err),
+			"data": {}
+		}
+	}
+	return {
+		"ok": true,
+		"data": obj
+	}
+}
+
+func start_server(port, env_prefix, log_file) {
+	cmd := "env " + env_prefix + " " + kujo_bin + " run main.kujo --interpreter serve --host 127.0.0.1 --port " + to_string(port) + " > " + log_file + " 2>&1 & echo $!"
+	res := run_cmd(cmd)
+	pid := trim(dict_get_or(res, "stdout", ""))
+	return pid
+}
+
+func stop_server(pid) {
+	if pid == "" {
+		return true
+	}
+	_ := run_cmd("kill " + pid + " >/dev/null 2>&1 || true")
+	_ := run_cmd("wait " + pid + " >/dev/null 2>&1 || true")
+	return true
+}
+
+func wait_for_health(port) {
+	attempt := 0
+	while attempt < 80 {
+		res := run_cmd("curl -s http://127.0.0.1:" + to_string(port) + "/health")
+		body := trim(dict_get_or(res, "stdout", ""))
+		if body != "" {
+			parsed := parse_json_safe(body)
+			if dict_get_or(parsed, "ok", false) == true {
+				payload := dict_get_or(parsed, "data", {})
+				if dict_get_or(payload, "ok", false) == true {
+					return true
+				}
+			}
+		}
+		attempt = attempt + 1
+	}
+	return false
+}
+
+base_port := 9200 + (current_timestamp() % 100)
+
+# Burst-limit behavior
+burst_port := base_port
+burst_env := "KUJO_RAG_API_RATE_LIMIT_WINDOW_SEC=60 KUJO_RAG_API_RATE_LIMIT_MAX_REQUESTS=500 KUJO_RAG_API_RATE_LIMIT_BURST_WINDOW_SEC=2 KUJO_RAG_API_RATE_LIMIT_BURST_MAX_REQUESTS=3 KUJO_RAG_API_ANOMALY_HOOK_ENABLED=true"
+burst_pid := start_server(burst_port, burst_env, "/tmp/kujo_rag_abuse_burst.log")
+assert_true(to_bool(burst_pid != ""))
+assert_true(to_bool(wait_for_health(burst_port) == true))
+
+j := 0
+burst_body := ""
+while j < 6 {
+	burst_res := run_cmd("curl -s http://127.0.0.1:" + to_string(burst_port) + "/health")
+	burst_body = dict_get_or(burst_res, "stdout", "")
+	j = j + 1
+}
+burst_parsed := parse_json_safe(burst_body)
+assert_true(to_bool(dict_get_or(dict_get_or(dict_get_or(burst_parsed, "data", {}), "error", {}), "code", "") == "burst_limited"))
+
+_ := stop_server(burst_pid)
+
+# Static blocklist behavior
+blocked_port := base_port + 1
+blocked_env := "KUJO_RAG_API_ABUSE_BLOCKLIST_IPS=127.0.0.1,unknown"
+blocked_pid := start_server(blocked_port, blocked_env, "/tmp/kujo_rag_abuse_blocked.log")
+assert_true(to_bool(blocked_pid != ""))
+
+blocked_ok := false
+attempt := 0
+while attempt < 60 {
+	blocked_res := run_cmd("curl -s http://127.0.0.1:" + to_string(blocked_port) + "/health")
+	blocked_body := trim(dict_get_or(blocked_res, "stdout", ""))
+	if blocked_body != "" {
+		blocked_parsed := parse_json_safe(blocked_body)
+		if dict_get_or(blocked_parsed, "ok", false) == true {
+			blocked_code := dict_get_or(dict_get_or(dict_get_or(blocked_parsed, "data", {}), "error", {}), "code", "")
+			if blocked_code == "ip_blocked" {
+				blocked_ok = true
+				break
+			}
+		}
+	}
+	attempt = attempt + 1
+}
+assert_true(to_bool(blocked_ok == true))
+
+_ := stop_server(blocked_pid)
+
+print("test_abuse_protection: ok")

@@ -1,0 +1,52 @@
+{
+  "version": "1.0.0",
+  "suite_name": "architecture_fitness_review_v1",
+  "forbidden_dependencies": [
+    {
+      "source_path": "src/retrieval.kujo",
+      "forbidden_tokens": [
+        "from src.query_api import"
+      ],
+      "rationale": "retrieval layer must stay API-agnostic"
+    },
+    {
+      "source_path": "src/ingestion.kujo",
+      "forbidden_tokens": [
+        "from src.query_api import"
+      ],
+      "rationale": "ingestion layer must not depend on HTTP route handlers"
+    },
+    {
+      "source_path": "src/vector_store.kujo",
+      "forbidden_tokens": [
+        "from src.query_api import"
+      ],
+      "rationale": "storage layer must stay decoupled from API layer"
+    }
+  ],
+  "required_extension_points": [
+    {
+      "path": "src/parsers.kujo",
+      "required_tokens": [
+        "get_parser_registry"
+      ],
+      "rationale": "parser extensibility must be registry-driven"
+    },
+    {
+      "path": "src/embeddings.kujo",
+      "required_tokens": [
+        "get_embedding_provider_registry"
+      ],
+      "rationale": "embedding extensibility must be registry-driven"
+    },
+    {
+      "path": "docs/extension-guide.md",
+      "required_tokens": [
+        "registry-based",
+        "get_parser_registry()",
+        "get_embedding_provider_registry()"
+      ],
+      "rationale": "extension contract must remain documented"
+    }
+  ]
+}

@@ -1,0 +1,77 @@
+{
+	"version": "release-readiness-scorecard-v1",
+	"candidate_version": "1.0.0",
+	"evaluated_at_unix_ms": 1779909000000,
+	"review_cadence_days": 30,
+	"owner": "Release Engineering",
+	"approvers": [
+		"Security Director",
+		"Platform Lead"
+	],
+	"signed_off_by": "Release Engineering",
+	"decision": "go",
+	"minimum_weighted_score": 85,
+	"go_decision_requires_all_domains_meet_minimum": true,
+	"domains": [
+		{
+			"name": "security",
+			"weight": 25,
+			"score": 92,
+			"min_score": 85,
+			"status": "pass",
+			"reviewer": "Security Director",
+			"evidence_paths": [
+				"./docs/threat-modeling-review-cadence.md",
+				"./docs/penetration-testing-remediation-workflow.md"
+			]
+		},
+		{
+			"name": "reliability",
+			"weight": 20,
+			"score": 90,
+			"min_score": 85,
+			"status": "pass",
+			"reviewer": "SRE Lead",
+			"evidence_paths": [
+				"./docs/incident-response-tabletop-workflow.md",
+				"./docs/chaos-fault-injection-scenarios.md"
+			]
+		},
+		{
+			"name": "quality",
+			"weight": 20,
+			"score": 91,
+			"min_score": 85,
+			"status": "pass",
+			"reviewer": "QA Lead",
+			"evidence_paths": [
+				"./docs/release-process.md",
+				"./docs/openapi-contract-sdk.md"
+			]
+		},
+		{
+			"name": "scalability",
+			"weight": 20,
+			"score": 88,
+			"min_score": 82,
+			"status": "pass",
+			"reviewer": "Platform Lead",
+			"evidence_paths": [
+				"./docs/performance-cost-budget-gates.md",
+				"./docs/large-corpus-benchmarks.md"
+			]
+		},
+		{
+			"name": "compliance",
+			"weight": 15,
+			"score": 89,
+			"min_score": 82,
+			"status": "pass",
+			"reviewer": "Compliance Lead",
+			"evidence_paths": [
+				"./docs/compliance-control-mapping.md",
+				"./docs/compliance-evidence-review-workflow.md"
+			]
+		}
+	]
+}

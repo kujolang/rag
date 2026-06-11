@@ -1,0 +1,75 @@
+from src.common import dict_get_or, num_or, str_or, bool_or
+from src.tests_helpers import assert_true
+from src.config import load_config
+from src.ingestion import ingest_documents
+from src.parsers import parse_file
+
+matrix_cfg := load_config({
+	"ingest_extensions": ["md", "txt", "json", "csv", "html", "xml", "yaml", "log"],
+	"parser_timeout_ms": 30000,
+	"parser_sandbox_max_bytes": 5000000
+})
+
+matrix := ingest_documents("./examples/parser_matrix_corpus", matrix_cfg, true)
+assert_true(to_bool(dict_get_or(matrix, "aborted", true) == false))
+assert_true(to_bool(num_or(dict_get_or(dict_get_or(matrix, "stats", {}), "docs_loaded", 0), 0) >= 8))
+assert_true(to_bool(num_or(dict_get_or(dict_get_or(matrix, "stats", {}), "errors", 0), 0) == 0))
+
+parser_by_file := {}
+for doc in dict_get_or(matrix, "documents", []) {
+	path := dict_get_or(doc, "path", "")
+	meta := dict_get_or(doc, "meta", {})
+	parser_by_file[basename(path)] := str_or(dict_get_or(meta, "parser", ""), "")
+}
+
+assert_true(to_bool(dict_get_or(parser_by_file, "sample.md", "") == "markdown"))
+assert_true(to_bool(dict_get_or(parser_by_file, "sample.txt", "") == "plain_text"))
+assert_true(to_bool(dict_get_or(parser_by_file, "sample.json", "") == "structured_json"))
+assert_true(to_bool(dict_get_or(parser_by_file, "sample.csv", "") == "structured_csv"))
+assert_true(to_bool(dict_get_or(parser_by_file, "sample.html", "") == "html_text"))
+assert_true(to_bool(dict_get_or(parser_by_file, "sample.xml", "") == "xml_text"))
+assert_true(to_bool(dict_get_or(parser_by_file, "sample.yaml", "") == "yaml_text"))
+assert_true(to_bool(dict_get_or(parser_by_file, "sample.log", "") == "log_text"))
+
+malformed := ingest_documents("./examples/malformed_parser_corpus", matrix_cfg, true)
+assert_true(to_bool(dict_get_or(malformed, "aborted", true) == false))
+assert_true(to_bool(num_or(dict_get_or(dict_get_or(malformed, "stats", {}), "docs_loaded", 0), 0) >= 3))
+assert_true(to_bool(num_or(dict_get_or(dict_get_or(malformed, "stats", {}), "errors", 0), 0) == 0))
+
+fallback_json_doc := parse_file("./examples/malformed_parser_corpus/broken.json", matrix_cfg)
+fallback_json_meta := dict_get_or(fallback_json_doc, "meta", {})
+assert_true(to_bool(str_or(dict_get_or(fallback_json_meta, "parser", ""), "") == "structured_json"))
+assert_true(to_bool(bool_or(dict_get_or(fallback_json_meta, "fallback", false), false) == true))
+assert_true(to_bool(str_or(dict_get_or(fallback_json_meta, "error_code", ""), "") == "malformed_json"))
+
+fallback_csv_doc := parse_file("./examples/malformed_parser_corpus/empty.csv", matrix_cfg)
+fallback_csv_meta := dict_get_or(fallback_csv_doc, "meta", {})
+assert_true(to_bool(str_or(dict_get_or(fallback_csv_meta, "parser", ""), "") == "structured_csv"))
+assert_true(to_bool(bool_or(dict_get_or(fallback_csv_meta, "fallback", false), false) == true))
+assert_true(to_bool(str_or(dict_get_or(fallback_csv_meta, "error_code", ""), "") == "malformed_csv"))
+
+sandbox_suffix := to_string(current_timestamp())
+sandbox_path := "/tmp/kujo_rag_parser_sandbox_" + sandbox_suffix + ".txt"
+large_payload := ""
+i := 0
+while i < 4096 {
+	large_payload = large_payload + "X"
+	i = i + 1
+}
+write_file(sandbox_path, large_payload)
+
+sandbox_cfg := load_config({
+	"parser_sandbox_max_bytes": 512,
+	"ingest_extensions": ["txt"]
+})
+sandbox_doc := parse_file(sandbox_path, sandbox_cfg)
+sandbox_meta := dict_get_or(sandbox_doc, "meta", {})
+assert_true(to_bool(str_or(dict_get_or(sandbox_meta, "parser", ""), "") == "sandbox_fallback"))
+assert_true(to_bool(bool_or(dict_get_or(sandbox_meta, "fallback", false), false) == true))
+assert_true(to_bool(str_or(dict_get_or(sandbox_meta, "error_code", ""), "") == "parser_input_too_large"))
+
+if file_exists(sandbox_path) {
+	delete_file(sandbox_path)
+}
+
+print("test_parser_matrix_resilience: ok")

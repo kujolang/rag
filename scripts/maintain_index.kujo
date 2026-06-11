@@ -1,0 +1,484 @@
+from src.common import dict_get_or, num_or, read_json_file_or, write_json_file
+from src.config import load_config
+from src.rag_engine import query_rag
+from src.vector_backend import load_index_with_backend, save_index_with_backend
+from src.vector_store import index_summary
+
+func ensure_dir(path_value) {
+	if path_value == "" || path_value == "." {
+		return true
+	}
+	if path_exists(path_value) == false {
+		create_dir(path_value)
+	}
+	return true
+}
+
+func ensure_parent_dir(path_value) {
+	dir := dirname(path_value)
+	if dir == "" || dir == "." {
+		return true
+	}
+	if starts_with(dir, "./results/") {
+		_ = ensure_dir("./results")
+	}
+	return ensure_dir(dir)
+}
+
+func parse_int_or(value, fallback) {
+	err := null
+	parsed := fallback
+	try {
+		parsed := parse_int(to_string(value))
+	} except e {
+		err := e
+	}
+	if type(err) != "null" {
+		return fallback
+	}
+	return parsed
+}
+
+func normalize_mode(raw_mode) {
+	mode := to_lower(trim(to_string(raw_mode)))
+	if mode == "apply" {
+		return "apply"
+	}
+	return "report"
+}
+
+func parse_allowed_hour_ranges(raw_value) {
+	allowed := {}
+	tokens := split(to_string(raw_value), ",")
+	i := 0
+	while i < len(tokens) {
+		token := trim(tokens[i])
+		if token != "" {
+			if contains(token, "-") == 1 {
+				parts := split(token, "-")
+				if len(parts) == 2 {
+					start_hour := parse_int_or(trim(parts[0]), -1)
+					end_hour := parse_int_or(trim(parts[1]), -1)
+					if start_hour >= 0 && start_hour <= 23 && end_hour >= 0 && end_hour <= 23 {
+						h := start_hour
+						while h <= end_hour {
+							allowed[to_string(h)] := true
+							h = h + 1
+						}
+					}
+				}
+			} else {
+				hour := parse_int_or(token, -1)
+				if hour >= 0 && hour <= 23 {
+					allowed[to_string(hour)] := true
+				}
+			}
+		}
+		i = i + 1
+	}
+	return allowed
+}
+
+func utc_hour_now() {
+	res := execute_status("date -u +%H", {"timeout_ms": 3000})
+	if type(res) == "struct" {
+		if res.success {
+			return parse_int_or(trim(to_string(res.stdout)), 0)
+		}
+	}
+	return 0
+}
+
+func should_run_in_window(allowed_hours_raw, ignore_window) {
+	hour := utc_hour_now()
+	if ignore_window {
+		return {
+			"match": true,
+			"hour_utc": hour,
+			"allowed": true,
+			"allowed_hours": allowed_hours_raw
+		}
+	}
+	allowed := parse_allowed_hour_ranges(allowed_hours_raw)
+	window_match := to_bool(has_key(allowed, to_string(hour)))
+	return {
+		"match": window_match,
+		"hour_utc": hour,
+		"allowed": window_match,
+		"allowed_hours": allowed_hours_raw
+	}
+}
+
+func load_probe_queries(path_value, limit) {
+	queries := []
+	payload := read_json_file_or(path_value, {})
+	raw := dict_get_or(payload, "queries", [])
+	if type(raw) == "array" {
+		i := 0
+		while i < len(raw) {
+			item := raw[i]
+			candidate := ""
+			if type(item) == "dict" {
+				candidate = trim(to_string(dict_get_or(item, "query", "")))
+			}
+			if candidate != "" {
+				queries = push(queries, candidate)
+			}
+			if len(queries) >= limit {
+				break
+			}
+			i = i + 1
+		}
+	}
+
+	if len(queries) == 0 {
+		queries = [
+			"How does Kujo handle module imports?",
+			"What endpoints are in the sample API reference?",
+			"What makes Kujo performant?"
+		]
+		if len(queries) > limit {
+			queries = slice(queries, 0, limit)
+		}
+	}
+	return queries
+}
+
+func run_query_probe(index, cfg, queries) {
+	results := []
+	latencies := []
+	i := 0
+	while i < len(queries) {
+		query_text := queries[i]
+		started := current_timestamp()
+		error_text := ""
+		payload := {}
+		try {
+			payload := query_rag(index, query_text, cfg, null, null)
+		} except e {
+			error_text = to_string(e)
+		}
+		elapsed_ms := current_timestamp() - started
+		if elapsed_ms < 0 {
+			elapsed_ms = 0
+		}
+		latencies = push(latencies, elapsed_ms)
+
+		citations := dict_get_or(payload, "citations", [])
+		top_path := ""
+		citation_count := 0
+		if type(citations) == "array" {
+			citation_count = len(citations)
+			if len(citations) > 0 {
+				top_path = to_string(dict_get_or(citations[0], "path", ""))
+			}
+		}
+
+		results = push(results, {
+			"query": query_text,
+			"latency_ms": elapsed_ms,
+			"error": error_text,
+			"citation_count": citation_count,
+			"top_path": top_path
+		})
+		i = i + 1
+	}
+
+	total := 0.0
+	i = 0
+	while i < len(latencies) {
+		total = total + num_or(latencies[i], 0.0)
+		i = i + 1
+	}
+	avg_latency := 0.0
+	if len(latencies) > 0 {
+		avg_latency = total / to_float(len(latencies))
+	}
+
+	return {
+		"results": results,
+		"avg_latency_ms": avg_latency
+	}
+}
+
+func compare_probes(before_probe, after_probe, max_ratio) {
+	before_results := dict_get_or(before_probe, "results", [])
+	after_results := dict_get_or(after_probe, "results", [])
+	correctness_ok := true
+	comparison := []
+	i := 0
+	while i < len(before_results) {
+		before_item := before_results[i]
+		after_item := {}
+		if i < len(after_results) {
+			after_item = after_results[i]
+		}
+
+		before_error := trim(to_string(dict_get_or(before_item, "error", "")))
+		after_error := trim(to_string(dict_get_or(after_item, "error", "")))
+		before_count := num_or(dict_get_or(before_item, "citation_count", 0), 0)
+		after_count := num_or(dict_get_or(after_item, "citation_count", 0), 0)
+		before_path := to_string(dict_get_or(before_item, "top_path", ""))
+		after_path := to_string(dict_get_or(after_item, "top_path", ""))
+
+		item_ok := true
+		if before_error != "" || after_error != "" {
+			item_ok = false
+		}
+		if before_count > 0 && after_count == 0 {
+			item_ok = false
+		}
+		if item_ok == false {
+			correctness_ok = false
+		}
+
+		comparison = push(comparison, {
+			"query": to_string(dict_get_or(before_item, "query", "")),
+			"ok": item_ok,
+			"before_top_path": before_path,
+			"after_top_path": after_path,
+			"before_citation_count": before_count,
+			"after_citation_count": after_count,
+			"before_error": before_error,
+			"after_error": after_error
+		})
+		i = i + 1
+	}
+
+	before_avg := num_or(dict_get_or(before_probe, "avg_latency_ms", 0.0), 0.0)
+	after_avg := num_or(dict_get_or(after_probe, "avg_latency_ms", 0.0), 0.0)
+	performance_ok := true
+	threshold_ms := before_avg * max_ratio
+	if before_avg > 0.0 {
+		performance_ok = after_avg <= threshold_ms
+	}
+	overall_probe_ok := correctness_ok && performance_ok
+
+	return {
+		"overall": overall_probe_ok,
+		"correctness_ok": correctness_ok,
+		"performance_ok": performance_ok,
+		"before_avg_latency_ms": before_avg,
+		"after_avg_latency_ms": after_avg,
+		"max_latency_regression_ratio": max_ratio,
+		"max_allowed_after_latency_ms": threshold_ms,
+		"comparisons": comparison
+	}
+}
+
+func compact_index(index) {
+	chunks_in := dict_get_or(index, "chunks", [])
+	vectors_in := dict_get_or(index, "vectors", [])
+	lexical_in := dict_get_or(index, "lexical", [])
+
+	chunks_out := []
+	vectors_out := []
+	lexical_out := []
+	valid_chunk_ids := {}
+	seen_chunk_ids := {}
+	seen_vector_ids := {}
+	seen_lexical_ids := {}
+	doc_ids := {}
+
+	duplicate_chunks := 0
+	duplicate_vectors := 0
+	duplicate_lexical := 0
+	orphan_vectors := 0
+	orphan_lexical := 0
+
+	i := 0
+	while i < len(chunks_in) {
+		chunk := chunks_in[i]
+		chunk_id := to_string(dict_get_or(chunk, "chunk_id", ""))
+		if chunk_id == "" || has_key(seen_chunk_ids, chunk_id) == 1 {
+			duplicate_chunks = duplicate_chunks + 1
+			i = i + 1
+			continue
+		}
+		seen_chunk_ids[chunk_id] := true
+		valid_chunk_ids[chunk_id] := true
+		chunks_out = push(chunks_out, chunk)
+		doc_id := to_string(dict_get_or(chunk, "doc_id", ""))
+		if doc_id != "" {
+			doc_ids[doc_id] := true
+		}
+		i = i + 1
+	}
+
+	i = 0
+	while i < len(vectors_in) {
+		entry := vectors_in[i]
+		chunk_id := to_string(dict_get_or(entry, "chunk_id", ""))
+		if chunk_id == "" || has_key(valid_chunk_ids, chunk_id) == 0 {
+			orphan_vectors = orphan_vectors + 1
+			i = i + 1
+			continue
+		}
+		if has_key(seen_vector_ids, chunk_id) == 1 {
+			duplicate_vectors = duplicate_vectors + 1
+			i = i + 1
+			continue
+		}
+		seen_vector_ids[chunk_id] := true
+		vectors_out = push(vectors_out, entry)
+		i = i + 1
+	}
+
+	i = 0
+	while i < len(lexical_in) {
+		entry := lexical_in[i]
+		chunk_id := to_string(dict_get_or(entry, "chunk_id", ""))
+		if chunk_id == "" || has_key(valid_chunk_ids, chunk_id) == 0 {
+			orphan_lexical = orphan_lexical + 1
+			i = i + 1
+			continue
+		}
+		if has_key(seen_lexical_ids, chunk_id) == 1 {
+			duplicate_lexical = duplicate_lexical + 1
+			i = i + 1
+			continue
+		}
+		seen_lexical_ids[chunk_id] := true
+		lexical_out = push(lexical_out, entry)
+		i = i + 1
+	}
+
+	compacted := {}
+	for key in keys(index) {
+		compacted[key] := index[key]
+	}
+	compacted["chunks"] := chunks_out
+	compacted["vectors"] := vectors_out
+	compacted["lexical"] := lexical_out
+	compacted["updated_at"] := current_timestamp()
+	meta := dict_get_or(compacted, "meta", {})
+	meta["documents"] := len(keys(doc_ids))
+	meta["chunks"] := len(chunks_out)
+	meta["maintenance_last_compacted_at"] := current_timestamp()
+	meta["maintenance_compaction_stats"] := {
+		"duplicate_chunks_removed": duplicate_chunks,
+		"duplicate_vectors_removed": duplicate_vectors,
+		"duplicate_lexical_removed": duplicate_lexical,
+		"orphan_vectors_removed": orphan_vectors,
+		"orphan_lexical_removed": orphan_lexical
+	}
+	compacted["meta"] := meta
+
+	size_before_bytes := len(to_json(index))
+	size_after_bytes := len(to_json(compacted))
+
+	return {
+		"index": compacted,
+		"size_before_bytes": size_before_bytes,
+		"size_after_bytes": size_after_bytes,
+		"size_reduced_or_equal": size_after_bytes <= size_before_bytes,
+		"stats": {
+			"duplicate_chunks_removed": duplicate_chunks,
+			"duplicate_vectors_removed": duplicate_vectors,
+			"duplicate_lexical_removed": duplicate_lexical,
+			"orphan_vectors_removed": orphan_vectors,
+			"orphan_lexical_removed": orphan_lexical,
+			"chunks_before": len(chunks_in),
+			"chunks_after": len(chunks_out),
+			"vectors_before": len(vectors_in),
+			"vectors_after": len(vectors_out),
+			"lexical_before": len(lexical_in),
+			"lexical_after": len(lexical_out)
+		}
+	}
+}
+
+mode := normalize_mode(env_or("KUJO_RAG_INDEX_MAINTENANCE_MODE", "report"))
+report_path := env_or("KUJO_RAG_INDEX_MAINTENANCE_REPORT_PATH", "./results/index_maintenance_report.json")
+allowed_hours := env_or("KUJO_RAG_INDEX_MAINTENANCE_ALLOWED_UTC_HOURS", "0-23")
+ignore_window := to_lower(env_or("KUJO_RAG_INDEX_MAINTENANCE_IGNORE_WINDOW", "false")) == "true"
+probe_queries_path := env_or("KUJO_RAG_INDEX_MAINTENANCE_PROBE_QUERIES_PATH", "./config/release_eval_golden_queries.json")
+probe_limit := parse_int_or(env_or("KUJO_RAG_INDEX_MAINTENANCE_PROBE_LIMIT", "3"), 3)
+if probe_limit < 1 {
+	probe_limit = 1
+}
+max_latency_regression_ratio := num_or(parse_int_or(env_or("KUJO_RAG_INDEX_MAINTENANCE_MAX_LATENCY_REGRESSION_RATIO", "2"), 2), 2)
+if max_latency_regression_ratio < 1 {
+	max_latency_regression_ratio = 1
+}
+
+_ = ensure_dir("./results")
+_ = ensure_parent_dir(report_path)
+
+cfg := load_config({})
+window := should_run_in_window(allowed_hours, ignore_window)
+
+if dict_get_or(window, "match", false) == false {
+	result := {
+		"ok": true,
+		"skipped": true,
+		"reason": "outside_maintenance_window",
+		"mode": mode,
+		"index_path": dict_get_or(cfg, "index_path", "./data/rag_index.json"),
+		"window": window,
+		"generated_at_unix_ms": current_timestamp()
+	}
+	write_json_file(report_path, result)
+	print(to_json(result))
+	exit(0)
+}
+
+index_before := load_index_with_backend(cfg)
+compaction := compact_index(index_before)
+index_after := dict_get_or(compaction, "index", index_before)
+queries := load_probe_queries(probe_queries_path, probe_limit)
+probe_before := run_query_probe(index_before, cfg, queries)
+probe_after := run_query_probe(index_after, cfg, queries)
+comparison := compare_probes(probe_before, probe_after, max_latency_regression_ratio)
+
+quality_ok := dict_get_or(comparison, "overall", false)
+size_reduced := dict_get_or(compaction, "size_reduced_or_equal", false)
+apply_requested := mode == "apply"
+applied := false
+save_ok := true
+
+if apply_requested {
+	if quality_ok && size_reduced {
+		save_ok = save_index_with_backend(cfg, index_after)
+		applied = save_ok
+	} else {
+		save_ok = false
+	}
+}
+
+overall_ok := quality_ok && size_reduced && save_ok
+if apply_requested == false {
+	overall_ok = quality_ok
+}
+
+result := {
+	"ok": overall_ok,
+	"skipped": false,
+	"mode": mode,
+	"apply_requested": apply_requested,
+	"applied": applied,
+	"index_path": dict_get_or(cfg, "index_path", "./data/rag_index.json"),
+	"window": window,
+	"compaction": {
+		"size_before_bytes": dict_get_or(compaction, "size_before_bytes", 0),
+		"size_after_bytes": dict_get_or(compaction, "size_after_bytes", 0),
+		"size_reduced_or_equal": size_reduced,
+		"stats": dict_get_or(compaction, "stats", {})
+	},
+	"probes": {
+		"queries": queries,
+		"before": probe_before,
+		"after": probe_after,
+		"comparison": comparison
+	},
+	"index_summary_before": index_summary(index_before),
+	"index_summary_after": index_summary(index_after),
+	"generated_at_unix_ms": current_timestamp()
+}
+
+write_json_file(report_path, result)
+print(to_json(result))
+
+if overall_ok == false {
+	exit(1)
+}

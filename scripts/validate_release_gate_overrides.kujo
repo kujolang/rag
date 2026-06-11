@@ -1,0 +1,149 @@
+from src.common import dict_get_or, read_json_file_or, write_json_file, num_or, str_or, bool_or
+
+func ensure_dir(path_value) {
+	if path_value == "" || path_value == "." {
+		return true
+	}
+	if path_exists(path_value) {
+		return true
+	}
+	parent := dirname(path_value)
+	if parent != "" && parent != "." && parent != path_value {
+		_ = ensure_dir(parent)
+	}
+	create_dir(path_value)
+	return true
+}
+
+func ensure_parent_dir(path_value) {
+	dir := dirname(path_value)
+	if dir == "" || dir == "." {
+		return true
+	}
+	return ensure_dir(dir)
+}
+
+func normalize_approvers(raw_approvers) {
+	approvers := []
+	if type(raw_approvers) != "array" {
+		return approvers
+	}
+	i := 0
+	while i < len(raw_approvers) {
+		value := trim(str_or(raw_approvers[i], ""))
+		if value != "" {
+			approvers = push(approvers, value)
+		}
+		i = i + 1
+	}
+	return approvers
+}
+
+func normalize_gates(raw_gates) {
+	gates := []
+	if type(raw_gates) != "array" {
+		return gates
+	}
+	i := 0
+	while i < len(raw_gates) {
+		value := trim(str_or(raw_gates[i], ""))
+		if value != "" {
+			gates = push(gates, value)
+		}
+		i = i + 1
+	}
+	return gates
+}
+
+func append_invalid(invalid_overrides, override_id, reason) {
+	return push(invalid_overrides, {
+		"id": override_id,
+		"reason": reason
+	})
+}
+
+overrides_path := env_or("KUJO_RAG_RELEASE_GATE_OVERRIDES_PATH", "./config/release_gate_overrides.json")
+report_path := env_or("KUJO_RAG_RELEASE_GATE_OVERRIDE_REPORT_PATH", "./results/release_gate_override_review.json")
+
+payload := read_json_file_or(overrides_path, {
+	"version": "1.0",
+	"overrides": []
+})
+
+overrides := dict_get_or(payload, "overrides", [])
+if type(overrides) != "array" {
+	overrides = []
+}
+
+invalid_overrides := []
+reviewed_exceptions := []
+active_overrides := 0
+now_ms := current_timestamp()
+
+i := 0
+while i < len(overrides) {
+	entry := overrides[i]
+	if type(entry) == "dict" {
+		override_id := trim(str_or(dict_get_or(entry, "id", "override_" + to_string(i + 1)), "override_" + to_string(i + 1)))
+		active := bool_or(dict_get_or(entry, "active", false), false)
+		approvers := normalize_approvers(dict_get_or(entry, "approvers", []))
+		gates := normalize_gates(dict_get_or(entry, "gates", []))
+		rationale := trim(str_or(dict_get_or(entry, "rationale", ""), ""))
+		ticket := trim(str_or(dict_get_or(entry, "ticket", ""), ""))
+		expires_at_unix_ms := num_or(dict_get_or(entry, "expires_at_unix_ms", 0), 0)
+		reviewed_by := trim(str_or(dict_get_or(entry, "reviewed_by", ""), ""))
+
+		if active == true {
+			active_overrides = active_overrides + 1
+			if len(approvers) < 2 {
+				invalid_overrides = append_invalid(invalid_overrides, override_id, "active override requires at least two approvers")
+			}
+			if len(gates) == 0 {
+				invalid_overrides = append_invalid(invalid_overrides, override_id, "active override must target at least one gate")
+			}
+			if rationale == "" {
+				invalid_overrides = append_invalid(invalid_overrides, override_id, "active override requires non-empty rationale")
+			}
+			if ticket == "" {
+				invalid_overrides = append_invalid(invalid_overrides, override_id, "active override requires linked ticket")
+			}
+			if reviewed_by == "" {
+				invalid_overrides = append_invalid(invalid_overrides, override_id, "active override requires reviewed_by owner")
+			}
+			if expires_at_unix_ms <= now_ms {
+				invalid_overrides = append_invalid(invalid_overrides, override_id, "active override is expired or missing expires_at_unix_ms")
+			}
+		}
+
+		reviewed_exceptions = push(reviewed_exceptions, {
+			"id": override_id,
+			"active": active,
+			"approver_count": len(approvers),
+			"gate_count": len(gates),
+			"ticket": ticket,
+			"reviewed_by": reviewed_by,
+			"expires_at_unix_ms": expires_at_unix_ms
+		})
+	}
+	i = i + 1
+}
+
+result := {
+	"ok": len(invalid_overrides) == 0,
+	"generated_at_unix_ms": now_ms,
+	"overrides_path": overrides_path,
+	"report_path": report_path,
+	"total_overrides": len(overrides),
+	"active_overrides": active_overrides,
+	"invalid_override_count": len(invalid_overrides),
+	"invalid_overrides": invalid_overrides,
+	"reviewed_exceptions": reviewed_exceptions
+}
+
+_ = ensure_parent_dir(report_path)
+write_json_file(report_path, result)
+print(to_json(result))
+
+if dict_get_or(result, "ok", false) == false {
+	exit(1)
+}

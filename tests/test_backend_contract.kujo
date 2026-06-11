@@ -1,0 +1,107 @@
+from src.config import load_config, ensure_runtime_dirs
+from src.vector_backend import get_vector_backend_registry, load_index_with_backend, save_index_with_backend
+
+func require_true(condition, label) {
+	if to_bool(condition) == false {
+		print("test_backend_contract failed: " + label)
+		exit(1)
+	}
+}
+
+func meta_documents(index) {
+	if has_key(index, "meta") == 1 {
+		meta := index["meta"]
+		if type(meta) == "dict" && has_key(meta, "documents") == 1 {
+			return meta["documents"]
+		}
+	}
+	return 0
+}
+
+func meta_backend_name(index) {
+	if has_key(index, "meta") == 1 {
+		meta := index["meta"]
+		if type(meta) == "dict" && has_key(meta, "backend") == 1 {
+			return to_string(meta["backend"])
+		}
+	}
+	return ""
+}
+
+registry := get_vector_backend_registry()
+require_true(has_key(registry, "local_json") == 1, "registry includes local_json")
+require_true(has_key(registry, "memory") == 1, "registry includes memory")
+require_true(has_key(registry, "qdrant_http") == 1, "registry includes qdrant_http")
+
+local_index_path := "./results/test_backend_contract_local.json"
+if file_exists(local_index_path) {
+	delete_file(local_index_path)
+}
+
+local_cfg := load_config({
+	"vector_backend": "local_json",
+	"index_path": local_index_path
+})
+_ = ensure_runtime_dirs(local_cfg)
+
+local_index := load_index_with_backend(local_cfg)
+local_meta := local_index["meta"]
+local_meta["documents"] := 2
+local_index["meta"] := local_meta
+_ = save_index_with_backend(local_cfg, local_index)
+
+local_reloaded := load_index_with_backend(local_cfg)
+require_true(meta_documents(local_reloaded) == 2, "local backend reload preserves documents")
+
+memory_key_suffix := to_string(current_timestamp())
+
+memory_cfg := load_config({
+	"vector_backend": "memory",
+	"vector_backend_memory_key": "backend-contract-memory-" + memory_key_suffix
+})
+memory_index := load_index_with_backend(memory_cfg)
+memory_meta := memory_index["meta"]
+memory_meta["documents"] := 4
+memory_index["meta"] := memory_meta
+_ = save_index_with_backend(memory_cfg, memory_index)
+
+memory_reloaded := load_index_with_backend(memory_cfg)
+require_true(meta_documents(memory_reloaded) == 4, "memory backend reload preserves documents")
+
+memory_other_cfg := load_config({
+	"vector_backend": "memory",
+	"vector_backend_memory_key": "backend-contract-memory-other-" + memory_key_suffix
+})
+memory_other_index := load_index_with_backend(memory_other_cfg)
+require_true(meta_documents(memory_other_index) != 4, "memory backend keys are isolated")
+
+qdrant_suffix := to_string(current_timestamp())
+qdrant_mirror_path := "./results/test_backend_contract_qdrant_" + qdrant_suffix + ".json"
+
+qdrant_cfg := load_config({
+	"vector_backend": "qdrant_http",
+	"vector_backend_qdrant_collection": "backend_contract_" + qdrant_suffix,
+	"vector_backend_qdrant_sync_enabled": false,
+	"vector_backend_qdrant_mirror_path": qdrant_mirror_path
+})
+_ = ensure_runtime_dirs(qdrant_cfg)
+
+qdrant_index := load_index_with_backend(qdrant_cfg)
+qdrant_meta := qdrant_index["meta"]
+qdrant_meta["documents"] := 6
+qdrant_index["meta"] := qdrant_meta
+_ = save_index_with_backend(qdrant_cfg, qdrant_index)
+
+qdrant_reloaded := load_index_with_backend(qdrant_cfg)
+require_true(meta_documents(qdrant_reloaded) == 6, "qdrant backend reload preserves documents")
+require_true(meta_backend_name(qdrant_reloaded) == "qdrant_http", "qdrant backend metadata is set")
+
+if file_exists(local_index_path) {
+	delete_file(local_index_path)
+}
+
+if file_exists(qdrant_mirror_path) {
+	delete_file(qdrant_mirror_path)
+}
+
+print("test_backend_contract: ok")

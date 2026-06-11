@@ -1,0 +1,17 @@
+{
+  "default_tier": "standard",
+  "tiers": [
+    {
+      "tier": "standard",
+      "rto_minutes": 60,
+      "rpo_minutes": 15,
+      "runbook": "docs/runbooks/disaster-recovery-drill-runbook.md"
+    },
+    {
+      "tier": "critical",
+      "rto_minutes": 30,
+      "rpo_minutes": 5,
+      "runbook": "docs/runbooks/disaster-recovery-drill-runbook.md"
+    }
+  ]
+}

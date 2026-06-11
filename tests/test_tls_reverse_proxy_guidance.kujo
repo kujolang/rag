@@ -1,0 +1,14 @@
+from src.tests_helpers import assert_true
+
+path := "./docs/tls-reverse-proxy-hardening.md"
+content := read_file(path)
+
+assert_true(to_bool(contains(content, "Nginx Sample") == 1))
+assert_true(to_bool(contains(content, "Caddy Sample") == 1))
+assert_true(to_bool(contains(content, "Strict-Transport-Security") == 1))
+assert_true(to_bool(contains(content, "X-Forwarded-Proto") == 1))
+assert_true(to_bool(contains(content, "X-Content-Type-Options") == 1))
+assert_true(to_bool(contains(content, "Deployment Checklist (Validation)") == 1))
+assert_true(to_bool(contains(content, "curl -I https://<host>/health") == 1))
+
+print("test_tls_reverse_proxy_guidance: ok")

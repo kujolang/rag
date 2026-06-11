@@ -1,0 +1,27 @@
+{
+	"source_corpus_path": "./examples/kujo_docs",
+	"datasets": [
+		{
+			"name": "small",
+			"copies_per_source": 6,
+			"query_iterations": 2
+		},
+		{
+			"name": "medium",
+			"copies_per_source": 20,
+			"query_iterations": 2
+		},
+		{
+			"name": "large",
+			"copies_per_source": 60,
+			"query_iterations": 3
+		}
+	],
+	"queries": [
+		"How does Kujo handle module imports?",
+		"What endpoints are in the sample API reference?",
+		"What makes Kujo performant?",
+		"What typing model does Kujo support?"
+	],
+	"profiles_note": "UPR-030 baseline corpus multipliers for small/medium/large benchmark tiers"
+}

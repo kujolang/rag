@@ -1,0 +1,43 @@
+{
+  "policy_version": "1.0.0",
+  "history_limit": 180,
+  "cost_model": {
+    "cpu_utilization_factor": 0.85,
+    "usd_per_cpu_second": 0.00012,
+    "base_memory_mb": 256.0,
+    "memory_mb_per_materialized_doc": 0.05,
+    "usd_per_mb_hour": 0.000002
+  },
+  "regression_thresholds": {
+    "max_latency_regression_ratio": 1.5,
+    "min_throughput_retention_ratio": 0.7,
+    "max_cost_regression_ratio": 1.5
+  },
+  "workload_classes": {
+    "small": {
+      "min_ingest_docs_per_sec": 1.0,
+      "max_avg_query_latency_ms": 8000,
+      "max_p95_query_latency_ms": 12000,
+      "max_estimated_cpu_ms_per_query": 9000,
+      "max_estimated_memory_mb": 12000,
+      "max_estimated_cost_per_1k_queries_usd": 35.0
+    },
+    "medium": {
+      "min_ingest_docs_per_sec": 1.0,
+      "max_avg_query_latency_ms": 10000,
+      "max_p95_query_latency_ms": 14000,
+      "max_estimated_cpu_ms_per_query": 11000,
+      "max_estimated_memory_mb": 18000,
+      "max_estimated_cost_per_1k_queries_usd": 45.0
+    },
+    "large": {
+      "min_ingest_docs_per_sec": 1.0,
+      "max_avg_query_latency_ms": 13000,
+      "max_p95_query_latency_ms": 18000,
+      "max_estimated_cpu_ms_per_query": 15000,
+      "max_estimated_memory_mb": 26000,
+      "max_estimated_cost_per_1k_queries_usd": 65.0
+    }
+  },
+  "policy_note": "UPR-086 budget policy for workload-class performance, resource, and estimated cost guardrails with trend regression thresholds"
+}

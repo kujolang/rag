@@ -1,0 +1,95 @@
+from src.common import dict_get_or, num_or, str_or
+from src.tests_helpers import assert_true
+from src.config import load_config
+from src.rag_engine import build_rag_index, query_rag
+
+suffix := to_string(current_timestamp())
+root := "/tmp/kujo_rag_structured_ingest_" + suffix
+index_path := "/tmp/kujo_rag_structured_index_" + suffix + ".json"
+
+_ = execute_status("rm -rf '" + root + "'", {"timeout_ms": 120000})
+create_dir(root)
+
+incidents_path := root + "/incidents.json"
+tickets_path := root + "/tickets.csv"
+
+write_file(incidents_path, to_json([
+	{
+		"id": "INC-100",
+		"owner": "payments",
+		"priority": "high",
+		"summary": "Payment retries failing after deploy"
+	},
+	{
+		"id": "INC-101",
+		"owner": "identity",
+		"priority": "medium",
+		"summary": "SSO redirect mismatch"
+	}
+]))
+
+write_file(tickets_path, "ticket_id,team,severity,status\nOPS-200,platform,high,open\nOPS-201,support,low,closed\n")
+
+cfg := load_config({
+	"index_path": index_path,
+	"embedding_provider": "hash",
+	"embedding_dims": 64,
+	"chunk_strategy": "line",
+	"chunk_size": 320,
+	"chunk_overlap": 60,
+	"top_k": 6,
+	"query_expansion": false,
+	"ingest_extensions": ["json", "csv"]
+})
+
+build := build_rag_index(root, cfg, true)
+ingest := dict_get_or(build, "ingest", {})
+assert_true(to_bool(dict_get_or(ingest, "aborted", true) == false))
+assert_true(to_bool(num_or(dict_get_or(dict_get_or(ingest, "stats", {}), "docs_loaded", 0), 0) >= 2))
+assert_true(to_bool(num_or(dict_get_or(dict_get_or(ingest, "stats", {}), "errors", 0), 0) == 0))
+
+index := dict_get_or(build, "index", {})
+assert_true(to_bool(type(index) == "dict"))
+
+schema_filtered := query_rag(index, "high priority payments incident", cfg, {
+	"structured_schema": "incidents"
+}, [])
+assert_true(to_bool(num_or(dict_get_or(schema_filtered, "count", 0), 0) >= 1))
+schema_citations := dict_get_or(schema_filtered, "citations", [])
+assert_true(to_bool(len(schema_citations) >= 1))
+assert_true(to_bool(str_or(dict_get_or(schema_citations[0], "structured_schema", ""), "") == "incidents"))
+
+field_filtered := query_rag(index, "payments owner high", cfg, {
+	"structured_fields": ["owner"]
+}, [])
+assert_true(to_bool(num_or(dict_get_or(field_filtered, "count", 0), 0) >= 1))
+field_citations := dict_get_or(field_filtered, "citations", [])
+assert_true(to_bool(len(field_citations) >= 1))
+first_fields := dict_get_or(field_citations[0], "structured_fields", [])
+assert_true(to_bool(type(first_fields) == "array"))
+owner_found := false
+for entry in first_fields {
+	if to_lower(to_string(entry)) == "owner" {
+		owner_found = true
+		break
+	}
+}
+assert_true(to_bool(owner_found == true))
+assert_true(to_bool(contains(to_lower(str_or(dict_get_or(field_citations[0], "snippet", ""), "")), "owner:") == 1))
+
+csv_filtered := query_rag(index, "open platform ticket severity high", cfg, {
+	"structured_schema": "tickets",
+	"structured_fields": ["severity"]
+}, [])
+assert_true(to_bool(num_or(dict_get_or(csv_filtered, "count", 0), 0) >= 1))
+csv_citations := dict_get_or(csv_filtered, "citations", [])
+assert_true(to_bool(len(csv_citations) >= 1))
+assert_true(to_bool(str_or(dict_get_or(csv_citations[0], "structured_schema", ""), "") == "tickets"))
+assert_true(to_bool(contains(to_lower(str_or(dict_get_or(csv_citations[0], "snippet", ""), "")), "severity:") == 1))
+
+if file_exists(index_path) {
+	delete_file(index_path)
+}
+_ = execute_status("rm -rf '" + root + "'", {"timeout_ms": 120000})
+
+print("test_structured_ingestion_retrieval: ok")

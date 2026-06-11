@@ -1,0 +1,100 @@
+from src.common import dict_get_or
+from src.tests_helpers import assert_true
+
+kujo_bin := env_or("KUJO_BIN", "/path/to/kujo/target/release/kujo")
+
+func parse_json_safe(text) {
+	payload := {}
+	err := null
+	try {
+		payload := parse_json(text)
+	} except e {
+		err := e
+	}
+	if type(err) != "null" {
+		return {
+			"ok": false,
+			"data": {},
+			"error": to_string(err)
+		}
+	}
+	return {
+		"ok": true,
+		"data": payload,
+		"error": ""
+	}
+}
+
+suffix := to_string(current_timestamp())
+profiles_path := "/tmp/kujo_rag_benchmark_profiles_" + suffix + ".json"
+budgets_pass_path := "/tmp/kujo_rag_benchmark_budgets_pass_" + suffix + ".json"
+budgets_fail_path := "/tmp/kujo_rag_benchmark_budgets_fail_" + suffix + ".json"
+output_path := "/tmp/kujo_rag_benchmark_report_" + suffix + ".json"
+trend_path := "/tmp/kujo_rag_benchmark_trend_" + suffix + ".json"
+dataset_root := "/tmp/kujo_rag_benchmark_ds_" + suffix
+index_root := "/tmp/kujo_rag_benchmark_idx_" + suffix
+
+write_file(profiles_path, to_json({
+	"source_corpus_path": "./examples/kujo_docs",
+	"datasets": [
+		{"name": "small", "copies_per_source": 1, "query_iterations": 1}
+	],
+	"queries": [
+		"How does Kujo handle module imports?"
+	]
+}))
+
+write_file(budgets_pass_path, to_json({
+	"trend_history_limit": 5,
+	"datasets": {
+		"small": {"min_ingest_docs_per_sec": 0.0, "max_avg_query_latency_ms": 999999, "max_p95_query_latency_ms": 999999}
+	}
+}))
+
+write_file(budgets_fail_path, to_json({
+	"trend_history_limit": 5,
+	"datasets": {
+		"small": {"min_ingest_docs_per_sec": 1000000.0, "max_avg_query_latency_ms": 0, "max_p95_query_latency_ms": 0}
+	}
+}))
+
+cmd_pass := "KUJO_RAG_BENCHMARK_PROFILES_PATH=" + profiles_path + " KUJO_RAG_BENCHMARK_BUDGETS_PATH=" + budgets_pass_path + " KUJO_RAG_BENCHMARK_OUTPUT_PATH=" + output_path + " KUJO_RAG_BENCHMARK_TREND_PATH=" + trend_path + " KUJO_RAG_BENCHMARK_DATASET_ROOT=" + dataset_root + " KUJO_RAG_BENCHMARK_INDEX_ROOT=" + index_root + " " + kujo_bin + " run scripts/run_large_corpus_benchmarks.kujo --interpreter"
+pass_res := execute_status(cmd_pass, {"timeout_ms": 600000})
+assert_true(to_bool(type(pass_res) == "struct"))
+assert_true(to_bool(pass_res.success == true))
+
+pass_parsed := parse_json_safe(to_string(pass_res.stdout))
+assert_true(to_bool(dict_get_or(pass_parsed, "ok", false) == true))
+pass_payload := dict_get_or(pass_parsed, "data", {})
+assert_true(to_bool(dict_get_or(pass_payload, "ok", false) == true))
+assert_true(to_bool(len(dict_get_or(pass_payload, "profiles", [])) == 1))
+assert_true(to_bool(dict_get_or(pass_payload, "trend_history_count", 0) >= 1))
+
+cmd_fail := "KUJO_RAG_BENCHMARK_PROFILES_PATH=" + profiles_path + " KUJO_RAG_BENCHMARK_BUDGETS_PATH=" + budgets_fail_path + " KUJO_RAG_BENCHMARK_OUTPUT_PATH=" + output_path + " KUJO_RAG_BENCHMARK_TREND_PATH=" + trend_path + " KUJO_RAG_BENCHMARK_DATASET_ROOT=" + dataset_root + " KUJO_RAG_BENCHMARK_INDEX_ROOT=" + index_root + " " + kujo_bin + " run scripts/run_large_corpus_benchmarks.kujo --interpreter"
+fail_res := execute_status(cmd_fail, {"timeout_ms": 600000})
+assert_true(to_bool(type(fail_res) == "struct"))
+assert_true(to_bool(fail_res.success == false))
+
+fail_parsed := parse_json_safe(to_string(fail_res.stdout))
+assert_true(to_bool(dict_get_or(fail_parsed, "ok", false) == true))
+fail_payload := dict_get_or(fail_parsed, "data", {})
+assert_true(to_bool(dict_get_or(fail_payload, "ok", true) == false))
+
+if file_exists(profiles_path) {
+	delete_file(profiles_path)
+}
+if file_exists(budgets_pass_path) {
+	delete_file(budgets_pass_path)
+}
+if file_exists(budgets_fail_path) {
+	delete_file(budgets_fail_path)
+}
+if file_exists(output_path) {
+	delete_file(output_path)
+}
+if file_exists(trend_path) {
+	delete_file(trend_path)
+}
+_ := execute_status("rm -rf " + dataset_root + " " + index_root, {"timeout_ms": 120000})
+
+print("test_large_corpus_benchmark_suite: ok")

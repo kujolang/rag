@@ -1,0 +1,458 @@
+from src.common import dict_get_or, read_json_file_or, write_json_file, str_or, num_or
+
+func ensure_dir(path_value) {
+	if path_value == "" || path_value == "." {
+		return true
+	}
+	if path_exists(path_value) {
+		return true
+	}
+	parent := dirname(path_value)
+	if parent != "" && parent != "." && parent != path_value {
+		_ = ensure_dir(parent)
+	}
+	create_dir(path_value)
+	return true
+}
+
+func ensure_parent_dir(path_value) {
+	dir := dirname(path_value)
+	if dir == "" || dir == "." {
+		return true
+	}
+	return ensure_dir(dir)
+}
+
+func normalize_text(value) {
+	return trim(str_or(value, ""))
+}
+
+func normalize_text_array(raw_items) {
+	items := []
+	if type(raw_items) != "array" {
+		return items
+	}
+	item_index := 0
+	while item_index < len(raw_items) {
+		value := normalize_text(raw_items[item_index])
+		if value != "" {
+			items = push(items, value)
+		}
+		item_index = item_index + 1
+	}
+	return items
+}
+
+func count_occurrences(text, token) {
+	if type(text) != "string" || type(token) != "string" {
+		return 0
+	}
+	if token == "" {
+		return 0
+	}
+	parts := split(text, token)
+	if len(parts) == 0 {
+		return 0
+	}
+	return len(parts) - 1
+}
+
+func text_has_token(text, token) {
+	return count_occurrences(text, token) > 0
+}
+
+func paths_exist(paths) {
+	ok := true
+	missing := []
+	path_index := 0
+	while path_index < len(paths) {
+		path_value := normalize_text(paths[path_index])
+		if path_value != "" && path_exists(path_value) == false {
+			ok = false
+			missing = push(missing, path_value)
+		}
+		path_index = path_index + 1
+	}
+	return {
+		"ok": ok,
+		"missing": missing
+	}
+}
+
+func is_valid_severity(severity_value) {
+	severity := to_lower(normalize_text(severity_value))
+	return severity == "critical" || severity == "high" || severity == "medium" || severity == "low"
+}
+
+func is_valid_status(status_value) {
+	status := to_lower(normalize_text(status_value))
+	return status == "open" || status == "in_progress" || status == "resolved" || status == "accepted_exception"
+}
+
+func normalize_finding(raw_finding) {
+	return {
+		"id": normalize_text(dict_get_or(raw_finding, "id", "")),
+		"title": normalize_text(dict_get_or(raw_finding, "title", "")),
+		"severity": to_lower(normalize_text(dict_get_or(raw_finding, "severity", ""))),
+		"status": to_lower(normalize_text(dict_get_or(raw_finding, "status", ""))),
+		"backlog_ticket": normalize_text(dict_get_or(raw_finding, "backlog_ticket", "")),
+		"reported_at_unix_ms": num_or(dict_get_or(raw_finding, "reported_at_unix_ms", 0), 0),
+		"sla_due_at_unix_ms": num_or(dict_get_or(raw_finding, "sla_due_at_unix_ms", 0), 0),
+		"resolved_at_unix_ms": num_or(dict_get_or(raw_finding, "resolved_at_unix_ms", 0), 0),
+		"exception_id": normalize_text(dict_get_or(raw_finding, "exception_id", "")),
+		"exception_approved_by": normalize_text(dict_get_or(raw_finding, "exception_approved_by", "")),
+		"exception_expires_at_unix_ms": num_or(dict_get_or(raw_finding, "exception_expires_at_unix_ms", 0), 0),
+		"evidence_paths": normalize_text_array(dict_get_or(raw_finding, "evidence_paths", []))
+	}
+}
+
+func normalize_backlog_item(raw_item) {
+	return {
+		"ticket_id": normalize_text(dict_get_or(raw_item, "ticket_id", "")),
+		"finding_id": normalize_text(dict_get_or(raw_item, "finding_id", "")),
+		"status": to_lower(normalize_text(dict_get_or(raw_item, "status", ""))),
+		"evidence_paths": normalize_text_array(dict_get_or(raw_item, "evidence_paths", []))
+	}
+}
+
+func find_backlog_item(backlog_items, ticket_id) {
+	if ticket_id == "" {
+		return {}
+	}
+	item_index := 0
+	while item_index < len(backlog_items) {
+		item := backlog_items[item_index]
+		if normalize_text(dict_get_or(item, "ticket_id", "")) == ticket_id {
+			return item
+		}
+		item_index = item_index + 1
+	}
+	return {}
+}
+
+func severity_slas_defined(sla_map) {
+	if type(sla_map) != "dict" {
+		return false
+	}
+	required := ["critical", "high", "medium", "low"]
+	required_index := 0
+	while required_index < len(required) {
+		severity_key := required[required_index]
+		if num_or(dict_get_or(sla_map, severity_key, 0), 0) < 1 {
+			return false
+		}
+		required_index = required_index + 1
+	}
+	return true
+}
+
+func finding_sla_due_at(finding, severity_sla_days) {
+	explicit_due := num_or(dict_get_or(finding, "sla_due_at_unix_ms", 0), 0)
+	if explicit_due > 0 {
+		return explicit_due
+	}
+	reported_at := num_or(dict_get_or(finding, "reported_at_unix_ms", 0), 0)
+	severity := normalize_text(dict_get_or(finding, "severity", ""))
+	sla_days := num_or(dict_get_or(severity_sla_days, severity, 0), 0)
+	if reported_at < 1 || sla_days < 1 {
+		return 0
+	}
+	return reported_at + (sla_days * 86400000)
+}
+
+func finding_has_active_exception(finding, now_unix_ms) {
+	status := normalize_text(dict_get_or(finding, "status", ""))
+	if status != "accepted_exception" {
+		return false
+	}
+	exception_id := normalize_text(dict_get_or(finding, "exception_id", ""))
+	approved_by := normalize_text(dict_get_or(finding, "exception_approved_by", ""))
+	expires_at := num_or(dict_get_or(finding, "exception_expires_at_unix_ms", 0), 0)
+	return exception_id != "" && approved_by != "" && expires_at > now_unix_ms
+}
+
+plan_path := env_or("KUJO_RAG_PEN_TEST_PLAN_PATH", "./config/penetration_test_review_plan.json")
+output_path := env_or("KUJO_RAG_PEN_TEST_REVIEW_OUTPUT_PATH", "./results/security/penetration_test_remediation_status.json")
+workflow_doc_path := env_or("KUJO_RAG_PEN_TEST_WORKFLOW_DOC_PATH", "./docs/penetration-testing-remediation-workflow.md")
+release_process_doc_path := env_or("KUJO_RAG_RELEASE_PROCESS_DOC_PATH", "./docs/release-process.md")
+workflow_path := env_or("KUJO_RAG_PEN_TEST_WORKFLOW_PATH", "./.github/workflows/penetration-test-remediation.yml")
+
+_ = ensure_parent_dir(output_path)
+
+raw_plan := read_json_file_or(plan_path, {})
+plan_available := type(raw_plan) == "dict" && len(keys(raw_plan)) > 0
+
+version := normalize_text(dict_get_or(raw_plan, "version", ""))
+last_tested_at_unix_ms := num_or(dict_get_or(raw_plan, "last_tested_at_unix_ms", 0), 0)
+review_cadence_days := num_or(dict_get_or(raw_plan, "review_cadence_days", 30), 30)
+if review_cadence_days < 1 {
+	review_cadence_days = 1
+}
+owner := normalize_text(dict_get_or(raw_plan, "owner", ""))
+
+scope := dict_get_or(raw_plan, "scope", {})
+in_scope := normalize_text_array(dict_get_or(scope, "in_scope", []))
+out_of_scope := normalize_text_array(dict_get_or(scope, "out_of_scope", []))
+methodology := normalize_text_array(dict_get_or(scope, "methodology", []))
+scope_defined := len(in_scope) > 0 && len(methodology) > 0
+
+severity_sla_days := dict_get_or(raw_plan, "severity_sla_days", {})
+severity_slas_gate := severity_slas_defined(severity_sla_days)
+
+report_artifact_path := normalize_text(dict_get_or(raw_plan, "report_artifact_path", ""))
+report_artifact_present := report_artifact_path != "" && path_exists(report_artifact_path)
+
+remediation_evidence_paths := normalize_text_array(dict_get_or(raw_plan, "remediation_evidence_paths", []))
+remediation_evidence_check := paths_exist(remediation_evidence_paths)
+remediation_evidence_present := len(remediation_evidence_paths) > 0 && dict_get_or(remediation_evidence_check, "ok", false)
+
+backlog_path := normalize_text(dict_get_or(raw_plan, "backlog_path", ""))
+backlog_exists := backlog_path != "" && path_exists(backlog_path)
+raw_backlog := {}
+if backlog_exists {
+	raw_backlog = read_json_file_or(backlog_path, {})
+}
+raw_backlog_items := dict_get_or(raw_backlog, "items", [])
+backlog_items := []
+if type(raw_backlog_items) == "array" {
+	backlog_source_index := 0
+	while backlog_source_index < len(raw_backlog_items) {
+		backlog_items = push(backlog_items, normalize_backlog_item(raw_backlog_items[backlog_source_index]))
+		backlog_source_index = backlog_source_index + 1
+	}
+}
+backlog_available := backlog_exists && len(backlog_items) > 0
+
+raw_findings := dict_get_or(raw_plan, "findings", [])
+findings := []
+if type(raw_findings) == "array" {
+	finding_source_index := 0
+	while finding_source_index < len(raw_findings) {
+		finding := normalize_finding(raw_findings[finding_source_index])
+		if dict_get_or(finding, "id", "") != "" {
+			findings = push(findings, finding)
+		}
+		finding_source_index = finding_source_index + 1
+	}
+}
+
+findings_tracked := len(findings) > 0
+findings_valid := true
+backlog_integrated := backlog_available
+high_severity_gate := true
+sla_compliant := true
+unresolved_high_findings := []
+overdue_findings := []
+finding_checks := []
+
+now_unix_ms := current_timestamp()
+
+finding_index := 0
+while finding_index < len(findings) {
+	finding := findings[finding_index]
+	finding_id := normalize_text(dict_get_or(finding, "id", ""))
+	finding_title := normalize_text(dict_get_or(finding, "title", ""))
+	severity := normalize_text(dict_get_or(finding, "severity", ""))
+	status := normalize_text(dict_get_or(finding, "status", ""))
+	backlog_ticket := normalize_text(dict_get_or(finding, "backlog_ticket", ""))
+	reported_at_unix_ms := num_or(dict_get_or(finding, "reported_at_unix_ms", 0), 0)
+	resolved_at_unix_ms := num_or(dict_get_or(finding, "resolved_at_unix_ms", 0), 0)
+	evidence_paths := normalize_text_array(dict_get_or(finding, "evidence_paths", []))
+	evidence_check := paths_exist(evidence_paths)
+	evidence_present := len(evidence_paths) > 0 && dict_get_or(evidence_check, "ok", false)
+
+	severity_valid := is_valid_severity(severity)
+	status_valid := is_valid_status(status)
+	finding_valid := finding_id != "" && finding_title != "" && severity_valid && status_valid && backlog_ticket != "" && reported_at_unix_ms > 0
+	if status == "resolved" && resolved_at_unix_ms < 1 {
+		finding_valid = false
+	}
+	if status == "accepted_exception" && finding_has_active_exception(finding, now_unix_ms) == false {
+		finding_valid = false
+	}
+	if finding_valid == false {
+		findings_valid = false
+	}
+
+	if evidence_present == false {
+		remediation_evidence_present = false
+	}
+
+	backlog_item := find_backlog_item(backlog_items, backlog_ticket)
+	backlog_item_found := type(backlog_item) == "dict" && len(keys(backlog_item)) > 0
+	backlog_finding_id := normalize_text(dict_get_or(backlog_item, "finding_id", ""))
+	backlog_match := backlog_item_found && backlog_finding_id == finding_id
+	if backlog_match == false {
+		backlog_integrated = false
+	}
+
+	due_at_unix_ms := finding_sla_due_at(finding, severity_sla_days)
+	overdue := false
+	if (status == "open" || status == "in_progress") && due_at_unix_ms > 0 && now_unix_ms > due_at_unix_ms {
+		overdue = true
+		sla_compliant = false
+		overdue_findings = push(overdue_findings, {
+			"id": finding_id,
+			"severity": severity,
+			"status": status,
+			"sla_due_at_unix_ms": due_at_unix_ms
+		})
+	}
+
+	active_exception := finding_has_active_exception(finding, now_unix_ms)
+	blocking := false
+	if severity == "critical" || severity == "high" {
+		if status != "resolved" && active_exception == false {
+			blocking = true
+			high_severity_gate = false
+			unresolved_high_findings = push(unresolved_high_findings, {
+				"id": finding_id,
+				"severity": severity,
+				"status": status,
+				"backlog_ticket": backlog_ticket,
+				"exception_id": normalize_text(dict_get_or(finding, "exception_id", "")),
+				"exception_expires_at_unix_ms": num_or(dict_get_or(finding, "exception_expires_at_unix_ms", 0), 0)
+			})
+		}
+	}
+
+	finding_checks = push(finding_checks, {
+		"id": finding_id,
+		"severity": severity,
+		"status": status,
+		"backlog_ticket": backlog_ticket,
+		"severity_valid": severity_valid,
+		"status_valid": status_valid,
+		"finding_valid": finding_valid,
+		"backlog_match": backlog_match,
+		"sla_due_at_unix_ms": due_at_unix_ms,
+		"overdue": overdue,
+		"active_exception": active_exception,
+		"evidence_present": evidence_present,
+		"missing_evidence_paths": dict_get_or(evidence_check, "missing", []),
+		"blocking_high_severity": blocking
+	})
+
+	finding_index = finding_index + 1
+}
+
+review_due_at_unix_ms := 0
+review_overdue := false
+if last_tested_at_unix_ms > 0 {
+	review_due_at_unix_ms = last_tested_at_unix_ms + (review_cadence_days * 86400000)
+	review_overdue = now_unix_ms > review_due_at_unix_ms
+}
+
+workflow_doc_exists := path_exists(workflow_doc_path)
+release_process_doc_exists := path_exists(release_process_doc_path)
+workflow_exists := path_exists(workflow_path)
+
+workflow_doc_text := ""
+if workflow_doc_exists {
+	workflow_doc_text = read_file(workflow_doc_path)
+}
+release_process_doc_text := ""
+if release_process_doc_exists {
+	release_process_doc_text = read_file(release_process_doc_path)
+}
+release_process_doc_text_lower := to_lower(release_process_doc_text)
+workflow_text := ""
+if workflow_exists {
+	workflow_text = read_file(workflow_path)
+}
+
+workflow_doc_defined := workflow_doc_exists && text_has_token(workflow_doc_text, "Penetration Testing and Remediation Workflow") && text_has_token(workflow_doc_text, "High severity findings block production promotion until resolved or approved exception") && text_has_token(workflow_doc_text, "scripts/run_penetration_test_remediation_review.kujo")
+workflow_doc_name := basename(workflow_doc_path)
+release_process_linked := release_process_doc_exists && text_has_token(release_process_doc_text, "run_penetration_test_remediation_review.kujo") && (text_has_token(release_process_doc_text, workflow_doc_path) || text_has_token(release_process_doc_text, workflow_doc_name)) && text_has_token(release_process_doc_text_lower, "resolved or approved exception")
+workflow_defined := workflow_exists && text_has_token(workflow_text, "run_penetration_test_remediation_review.kujo") && text_has_token(workflow_text, "schedule:")
+
+gates := {
+	"plan_available": plan_available,
+	"version_defined": version != "",
+	"owner_defined": owner != "",
+	"cadence_defined": review_cadence_days > 0,
+	"last_test_defined": last_tested_at_unix_ms > 0,
+	"review_not_overdue": review_overdue == false,
+	"scope_defined": scope_defined,
+	"severity_slas_defined": severity_slas_gate,
+	"findings_tracked": findings_tracked,
+	"findings_valid": findings_valid,
+	"backlog_integrated": backlog_integrated,
+	"report_artifact_present": report_artifact_present,
+	"remediation_evidence_present": remediation_evidence_present,
+	"sla_compliant": sla_compliant,
+	"high_severity_gate": high_severity_gate,
+	"workflow_doc_defined": workflow_doc_defined,
+	"release_process_linked": release_process_linked,
+	"workflow_defined": workflow_defined
+}
+
+ok := true
+gate_names := [
+	"plan_available",
+	"version_defined",
+	"owner_defined",
+	"cadence_defined",
+	"last_test_defined",
+	"review_not_overdue",
+	"scope_defined",
+	"severity_slas_defined",
+	"findings_tracked",
+	"findings_valid",
+	"backlog_integrated",
+	"report_artifact_present",
+	"remediation_evidence_present",
+	"sla_compliant",
+	"high_severity_gate",
+	"workflow_doc_defined",
+	"release_process_linked",
+	"workflow_defined"
+]
+
+gate_index := 0
+while gate_index < len(gate_names) {
+	gate_name := gate_names[gate_index]
+	if dict_get_or(gates, gate_name, false) == false {
+		ok = false
+	}
+	gate_index = gate_index + 1
+}
+
+result := {
+	"ok": ok,
+	"generated_at_unix_ms": now_unix_ms,
+	"plan_path": plan_path,
+	"output_path": output_path,
+	"workflow_doc_path": workflow_doc_path,
+	"release_process_doc_path": release_process_doc_path,
+	"workflow_path": workflow_path,
+	"backlog_path": backlog_path,
+	"version": version,
+	"owner": owner,
+	"last_tested_at_unix_ms": last_tested_at_unix_ms,
+	"review_cadence_days": review_cadence_days,
+	"review_due_at_unix_ms": review_due_at_unix_ms,
+	"review_overdue": review_overdue,
+	"scope": {
+		"in_scope": in_scope,
+		"out_of_scope": out_of_scope,
+		"methodology": methodology
+	},
+	"severity_sla_days": severity_sla_days,
+	"report_artifact_path": report_artifact_path,
+	"remediation_evidence_paths": remediation_evidence_paths,
+	"finding_count": len(findings),
+	"overdue_finding_count": len(overdue_findings),
+	"unresolved_high_finding_count": len(unresolved_high_findings),
+	"unresolved_high_findings": unresolved_high_findings,
+	"overdue_findings": overdue_findings,
+	"finding_checks": finding_checks,
+	"gates": gates
+}
+
+write_json_file(output_path, result)
+print(to_json(result))
+
+if ok == false {
+	exit(1)
+}

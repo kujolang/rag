@@ -1,0 +1,47 @@
+from src.common import dict_get_or
+from src.tests_helpers import assert_true
+
+kujo_bin := env_or("KUJO_BIN", "kujo")
+namespace := "noninterp_bridge_" + to_string(current_timestamp())
+
+ingest_cmd := kujo_bin + " run scripts/run_main_auto.kujo --interpreter ingest --path ./examples/kujo_docs --recursive true --namespace " + namespace
+ingest_res := execute_status(ingest_cmd, {
+	"timeout_ms": 180000
+})
+
+ingest_ok := false
+ingest_stdout := "{}"
+if type(ingest_res) == "struct" {
+	ingest_ok = ingest_res.success
+	ingest_stdout = ingest_res.stdout
+}
+assert_true(to_bool(ingest_ok == true))
+
+ingest_payload := parse_json(ingest_stdout)
+assert_true(to_bool(dict_get_or(ingest_payload, "ok", false) == true))
+ingest_mode := dict_get_or(ingest_payload, "mode", "")
+assert_true(to_bool(ingest_mode == "native" || ingest_mode == "interpreter"))
+
+query_cmd := kujo_bin + " run scripts/run_main_auto.kujo --interpreter query --question \"What is Kujo optimized for?\" --namespace " + namespace
+query_res := execute_status(query_cmd, {
+	"timeout_ms": 180000
+})
+
+query_ok := false
+query_stdout := "{}"
+if type(query_res) == "struct" {
+	query_ok = query_res.success
+	query_stdout = query_res.stdout
+}
+assert_true(to_bool(query_ok == true))
+
+query_payload := parse_json(query_stdout)
+assert_true(to_bool(dict_get_or(query_payload, "ok", false) == true))
+query_mode := dict_get_or(query_payload, "mode", "")
+assert_true(to_bool(query_mode == "native" || query_mode == "interpreter"))
+
+query_result := dict_get_or(query_payload, "result", {})
+query_json := parse_json(dict_get_or(query_result, "stdout", "{}"))
+assert_true(to_bool(dict_get_or(query_json, "count", 0) >= 1))
+
+print("test_non_interpreter_bridge: ok")

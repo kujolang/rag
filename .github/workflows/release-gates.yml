@@ -1,0 +1,325 @@
+name: release-gates
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  runtime-support-matrix:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        mode:
+          - interpreter
+          - bridge
+          - native
+    env:
+      KUJO_RUNTIME_REF: "7819d1475e909ec88f510c9927445791ea928836"
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Build Kujo runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          git init /tmp/kujo-runtime
+          git -C /tmp/kujo-runtime remote add origin https://github.com/kujolang/kujo.git
+          git -C /tmp/kujo-runtime fetch --depth 1 origin "$KUJO_RUNTIME_REF"
+          git -C /tmp/kujo-runtime checkout --detach "$KUJO_RUNTIME_REF"
+          cargo build --release --locked --manifest-path /tmp/kujo-runtime/Cargo.toml
+          echo "/tmp/kujo-runtime/target/release" >> "$GITHUB_PATH"
+
+      - name: Verify Kujo runtime
+        run: kujo --version
+
+      - name: Validate interpreter supported mode
+        if: matrix.mode == 'interpreter'
+        shell: bash
+        run: |
+          set -euo pipefail
+          kujo run scripts/run_tests.kujo --interpreter > runtime-mode-interpreter.json
+          cat runtime-mode-interpreter.json
+
+      - name: Validate bridge supported mode
+        if: matrix.mode == 'bridge'
+        shell: bash
+        run: |
+          set -euo pipefail
+          kujo run scripts/run_main_auto.kujo --interpreter query --question "What is Kujo optimized for?" --namespace ci_runtime_matrix > runtime-mode-bridge.json
+          cat runtime-mode-bridge.json
+
+      - name: Validate native supported mode
+        if: matrix.mode == 'native'
+        shell: bash
+        run: |
+          set -euo pipefail
+          kujo run tests/test_native_mode_parity.kujo --interpreter > runtime-mode-native.json
+          cat runtime-mode-native.json
+
+      - name: Upload runtime-mode artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: runtime-mode-${{ matrix.mode }}
+          path: |
+            runtime-mode-interpreter.json
+            runtime-mode-bridge.json
+            runtime-mode-native.json
+
+  supply-chain-scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      KUJO_RUNTIME_REF: "7819d1475e909ec88f510c9927445791ea928836"
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Build Kujo runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          git init /tmp/kujo-runtime
+          git -C /tmp/kujo-runtime remote add origin https://github.com/kujolang/kujo.git
+          git -C /tmp/kujo-runtime fetch --depth 1 origin "$KUJO_RUNTIME_REF"
+          git -C /tmp/kujo-runtime checkout --detach "$KUJO_RUNTIME_REF"
+          cargo build --release --locked --manifest-path /tmp/kujo-runtime/Cargo.toml
+          echo "/tmp/kujo-runtime/target/release" >> "$GITHUB_PATH"
+
+      - name: Verify Kujo runtime
+        run: kujo --version
+
+      - name: Run supply-chain scan gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          kujo run scripts/run_supply_chain_scan.kujo --interpreter --root .github/workflows/release-gates.yml --output ./results/supply-chain-scan-release-gates.json
+          kujo run scripts/run_supply_chain_scan.kujo --interpreter --root .github/workflows/release-artifacts.yml --output ./results/supply-chain-scan-release-artifacts.json
+          kujo run scripts/run_supply_chain_scan.kujo --interpreter --root .env.example --output ./results/supply-chain-scan-env-surface.json
+          cat ./results/supply-chain-scan-release-gates.json
+          cat ./results/supply-chain-scan-release-artifacts.json
+          cat ./results/supply-chain-scan-env-surface.json
+
+      - name: Upload supply-chain scan artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: supply-chain-scan-results
+          path: |
+            ./results/supply-chain-scan-release-gates.json
+            ./results/supply-chain-scan-release-artifacts.json
+            ./results/supply-chain-scan-env-surface.json
+
+  release-gates:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    env:
+      KUJO_RUNTIME_REF: "7819d1475e909ec88f510c9927445791ea928836"
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Build Kujo runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          git init /tmp/kujo-runtime
+          git -C /tmp/kujo-runtime remote add origin https://github.com/kujolang/kujo.git
+          git -C /tmp/kujo-runtime fetch --depth 1 origin "$KUJO_RUNTIME_REF"
+          git -C /tmp/kujo-runtime checkout --detach "$KUJO_RUNTIME_REF"
+          cargo build --release --locked --manifest-path /tmp/kujo-runtime/Cargo.toml
+          echo "/tmp/kujo-runtime/target/release" >> "$GITHUB_PATH"
+
+      - name: Verify Kujo runtime
+        run: kujo --version
+
+      - name: Run aggregate release gate suite
+        shell: bash
+        run: |
+          set -euo pipefail
+          kujo run scripts/run_tests.kujo --interpreter > release-gates-run-tests.json
+          cat release-gates-run-tests.json
+
+      - name: Run standalone production evaluation gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          kujo run scripts/run_release_evaluation.kujo --interpreter > release-eval.json
+          cat release-eval.json
+
+      - name: Run canary release replay gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          kujo run scripts/run_canary_release_replay.kujo --interpreter > canary-release-replay.json
+          cat canary-release-replay.json
+
+      - name: Run AI provider/model drift gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          kujo run scripts/run_ai_provider_model_drift_check.kujo --interpreter > ai-provider-model-drift.json
+          cat ai-provider-model-drift.json
+
+      - name: Run multilingual release evaluation gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          kujo run scripts/run_multilingual_release_evaluation.kujo --interpreter > multilingual-release-eval.json
+          cat multilingual-release-eval.json
+
+      - name: Run chunking preset A/B evaluation gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          kujo run scripts/run_chunking_preset_ab_evaluation.kujo --interpreter > chunking-preset-ab-eval.json
+          cat chunking-preset-ab-eval.json
+
+      - name: Run threat-model cadence gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          kujo run scripts/run_threat_model_review_cadence.kujo --interpreter > threat-model-cadence.json
+          cat threat-model-cadence.json
+
+      - name: Run penetration-test remediation gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          kujo run scripts/run_penetration_test_remediation_review.kujo --interpreter > penetration-test-remediation.json
+          cat penetration-test-remediation.json
+
+      - name: Run incident-response tabletop readiness gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          kujo run scripts/run_incident_response_tabletop_review.kujo --interpreter > incident-response-tabletop.json
+          cat incident-response-tabletop.json
+
+      - name: Run OpenAPI contract and SDK gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          kujo run scripts/run_openapi_contract_review.kujo --interpreter > openapi-contract-sdk.json
+          cat openapi-contract-sdk.json
+
+      - name: Run API/config versioning policy gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          kujo run scripts/run_api_config_versioning_review.kujo --interpreter > api-config-versioning.json
+          cat api-config-versioning.json
+
+      - name: Run config schema review gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          kujo run scripts/run_config_schema_review.kujo --interpreter > config-schema-review.json
+          cat config-schema-review.json
+
+      - name: Run containerized dev environment gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          kujo run scripts/run_containerized_dev_environment_review.kujo --interpreter > containerized-dev-environment.json
+          cat containerized-dev-environment.json
+
+      - name: Run chaos fault-injection gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          kujo run scripts/run_chaos_fault_injection_review.kujo --interpreter > chaos-fault-injection.json
+          cat chaos-fault-injection.json
+
+      - name: Run architecture fitness gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          kujo run scripts/run_architecture_fitness_review.kujo --interpreter > architecture-fitness.json
+          cat architecture-fitness.json
+
+      - name: Validate release-gate override ledger
+        shell: bash
+        run: |
+          set -euo pipefail
+          kujo run scripts/validate_release_gate_overrides.kujo --interpreter > release-gate-overrides.json
+          cat release-gate-overrides.json
+
+      - name: Run large-corpus benchmark budget gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          kujo run scripts/run_large_corpus_benchmarks.kujo --interpreter > large-corpus-benchmarks.json
+          cat large-corpus-benchmarks.json
+
+      - name: Run performance and cost budget gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          kujo run scripts/run_performance_cost_budget_review.kujo --interpreter > performance-cost-budget.json
+          cat performance-cost-budget.json
+
+      - name: Run release readiness scorecard gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          kujo run scripts/run_release_readiness_scorecard_review.kujo --interpreter > release-readiness-scorecard.json
+          cat release-readiness-scorecard.json
+
+      - name: Upload release gate artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-gate-results
+          path: |
+            release-gates-run-tests.json
+            release-eval.json
+            canary-release-replay.json
+            ai-provider-model-drift.json
+            multilingual-release-eval.json
+            chunking-preset-ab-eval.json
+            threat-model-cadence.json
+            penetration-test-remediation.json
+            incident-response-tabletop.json
+            openapi-contract-sdk.json
+            api-config-versioning.json
+            config-schema-review.json
+            containerized-dev-environment.json
+            chaos-fault-injection.json
+            architecture-fitness.json
+            release-gate-overrides.json
+            large-corpus-benchmarks.json
+            performance-cost-budget.json
+            release-readiness-scorecard.json
+            results/large_corpus_benchmark_report.json
+            results/large_corpus_benchmark_trend.json
+            results/performance/performance_cost_budget_status.json
+            results/performance/performance_cost_budget_trend.json
+            results/release/release_readiness_scorecard_status.json
+            results/canary_release_replay_report.json
+            results/ai_provider_model_drift_report.json
+            results/multilingual_release_eval_report.json
+            results/chunking_preset_ab_report.json
+            results/security/threat_model_review_status.json
+            results/security/penetration_test_remediation_status.json
+            results/security/incident_response_tabletop_status.json
+            results/api/openapi_contract_status.json
+            results/api/api_config_versioning_status.json
+            results/config/config_schema_review_status.json
+            results/environment/containerized_dev_environment_status.json
+            results/reliability/chaos_fault_injection_status.json
+            results/architecture/architecture_fitness_status.json
+            results/release_gate_override_review.json

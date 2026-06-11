@@ -1,0 +1,51 @@
+{
+  "dataset_version": "chunking-preset-eval-v1",
+  "dataset_domains": ["operations"],
+  "dataset_languages": ["english"],
+  "queries": [
+    {
+      "id": "json_incident_code",
+      "domain": "operations",
+      "language": "english",
+      "query": "Which record contains incident code inc_a8?",
+      "expected_path_contains": "ops_records.json",
+      "required_answer_terms_any": ["inc_a8"],
+      "min_citations": 1,
+      "min_confidence": 0.05,
+      "min_grounding_score": 0.05
+    },
+    {
+      "id": "json_summary_signal",
+      "domain": "operations",
+      "language": "english",
+      "query": "Which row mentions critical_orchid_outage?",
+      "expected_path_contains": "ops_records.json",
+      "required_answer_terms_any": ["critical_orchid_outage"],
+      "min_citations": 1,
+      "min_confidence": 0.05,
+      "min_grounding_score": 0.05
+    },
+    {
+      "id": "csv_ticket_id",
+      "domain": "operations",
+      "language": "english",
+      "query": "What ticket row includes TKT-708?",
+      "expected_path_contains": "ops_tickets.csv",
+      "required_answer_terms_any": ["tkt-708"],
+      "min_citations": 1,
+      "min_confidence": 0.05,
+      "min_grounding_score": 0.05
+    },
+    {
+      "id": "csv_issue_signal",
+      "domain": "operations",
+      "language": "english",
+      "query": "Which row includes sev1_kernel_panic?",
+      "expected_path_contains": "ops_tickets.csv",
+      "required_answer_terms_any": ["sev1_kernel_panic"],
+      "min_citations": 1,
+      "min_confidence": 0.05,
+      "min_grounding_score": 0.05
+    }
+  ]
+}

@@ -1,0 +1,86 @@
+from src.common import dict_get_or
+from src.tests_helpers import assert_true
+
+kujo_bin := env_or("KUJO_BIN", "/path/to/kujo/target/release/kujo")
+
+func parse_json_safe(text) {
+	obj := {}
+	err := null
+	try {
+		obj := parse_json(text)
+	} except e {
+		err = e
+	}
+	if type(err) != "null" {
+		return {
+			"ok": false,
+			"error": to_string(err),
+			"data": {}
+		}
+	}
+	return {
+		"ok": true,
+		"data": obj
+	}
+}
+
+if path_exists("results") == false {
+	create_dir("results")
+}
+
+pass_path := "results/test_dr_drill_pass.json"
+fail_path := "results/test_dr_drill_fail.json"
+
+if file_exists(pass_path) {
+	delete_file(pass_path)
+}
+if file_exists(fail_path) {
+	delete_file(fail_path)
+}
+
+write_file(pass_path, to_json({
+	"tier": "critical",
+	"actual_restore_minutes": 25,
+	"actual_data_loss_minutes": 3,
+	"recovery_completed": true
+}))
+
+write_file(fail_path, to_json({
+	"tier": "standard",
+	"actual_restore_minutes": 90,
+	"actual_data_loss_minutes": 20,
+	"recovery_completed": false
+}))
+
+pass_cmd := "DR_TARGETS_PATH=config/dr_tiers.json DR_DRILL_PATH=" + pass_path + " " + kujo_bin + " run scripts/simulate_dr_drill.kujo --interpreter"
+pass_res := execute_status(pass_cmd, {"timeout_ms": 120000})
+assert_true(to_bool(type(pass_res) == "struct"))
+assert_true(to_bool(pass_res.success == true))
+pass_parsed := parse_json_safe(to_string(pass_res.stdout))
+assert_true(to_bool(dict_get_or(pass_parsed, "ok", false) == true))
+pass_payload := dict_get_or(pass_parsed, "data", {})
+assert_true(to_bool(dict_get_or(pass_payload, "ok", false) == true))
+assert_true(to_bool(dict_get_or(pass_payload, "status", "") == "pass"))
+assert_true(to_bool(dict_get_or(pass_payload, "rto_ok", false) == true))
+assert_true(to_bool(dict_get_or(pass_payload, "rpo_ok", false) == true))
+
+fail_cmd := "DR_TARGETS_PATH=config/dr_tiers.json DR_DRILL_PATH=" + fail_path + " " + kujo_bin + " run scripts/simulate_dr_drill.kujo --interpreter"
+fail_res := execute_status(fail_cmd, {"timeout_ms": 120000})
+assert_true(to_bool(type(fail_res) == "struct"))
+assert_true(to_bool(fail_res.success == true))
+fail_parsed := parse_json_safe(to_string(fail_res.stdout))
+assert_true(to_bool(dict_get_or(fail_parsed, "ok", false) == true))
+fail_payload := dict_get_or(fail_parsed, "data", {})
+assert_true(to_bool(dict_get_or(fail_payload, "ok", false) == true))
+assert_true(to_bool(dict_get_or(fail_payload, "status", "") == "fail"))
+assert_true(to_bool(len(dict_get_or(fail_payload, "issues", [])) >= 2))
+assert_true(to_bool(trim(to_string(dict_get_or(fail_payload, "runbook", ""))) != ""))
+
+if file_exists(pass_path) {
+	delete_file(pass_path)
+}
+if file_exists(fail_path) {
+	delete_file(fail_path)
+}
+
+print("test_disaster_recovery_drills: ok")

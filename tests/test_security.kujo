@@ -1,0 +1,70 @@
+from src.common import dict_get_or
+from src.tests_helpers import assert_true
+from src.query_api import validate_api_ingest_path, validate_api_auth, parse_api_json_body
+from src.parsers import parse_file
+
+# API ingest path restriction regressions
+scope_cfg := {
+	"project_root": "/workspace/repo",
+	"api_ingest_allowed_roots": ["./examples"]
+}
+
+allowed_ingest := validate_api_ingest_path("./examples/docs", scope_cfg)
+assert_true(to_bool(dict_get_or(allowed_ingest, "ok", false) == true))
+
+blocked_ingest := validate_api_ingest_path("../secrets", scope_cfg)
+assert_true(to_bool(dict_get_or(blocked_ingest, "ok", true) == false))
+assert_true(to_bool(dict_get_or(blocked_ingest, "error", "") == "ingest_path_forbidden"))
+
+# API auth regressions
+auth_disabled := validate_api_auth({"headers": {}}, {"api_bearer_token": ""})
+assert_true(to_bool(dict_get_or(auth_disabled, "ok", false) == true))
+
+missing_auth := validate_api_auth({"headers": {}}, {"api_bearer_token": "secret"})
+assert_true(to_bool(dict_get_or(missing_auth, "ok", true) == false))
+assert_true(to_bool(dict_get_or(missing_auth, "status", 0) == 401))
+
+invalid_auth_header := validate_api_auth({"headers": {"Authorization": "Basic abc"}}, {"api_bearer_token": "secret"})
+assert_true(to_bool(dict_get_or(invalid_auth_header, "ok", true) == false))
+assert_true(to_bool(dict_get_or(invalid_auth_header, "error", "") == "invalid_auth_header"))
+
+bad_token := validate_api_auth({"headers": {"Authorization": "Bearer wrong"}}, {"api_bearer_token": "secret"})
+assert_true(to_bool(dict_get_or(bad_token, "ok", true) == false))
+assert_true(to_bool(dict_get_or(bad_token, "status", 0) == 403))
+
+# API body type regression
+invalid_body := parse_api_json_body({"body": {"query": "x"}}, {"api_max_body_bytes": 100})
+assert_true(to_bool(dict_get_or(invalid_body, "ok", true) == false))
+assert_true(to_bool(dict_get_or(invalid_body, "error", "") == "invalid_body_type"))
+
+# PDF extractor validation regression
+if path_exists("results") == false {
+	create_dir("results")
+}
+
+pdf_path := "results/security_test.pdf"
+if file_exists(pdf_path) {
+	delete_file(pdf_path)
+}
+write_file(pdf_path, "fake")
+
+extractor_payload_file := "results/security_payload.txt"
+if file_exists(extractor_payload_file) {
+	delete_file(extractor_payload_file)
+}
+
+pdf_doc := parse_file(pdf_path, {
+	"pdf_extractor_command": "echo;touch results/security_payload.txt"
+})
+assert_true(to_bool(dict_get_or(dict_get_or(pdf_doc, "meta", {}), "parser", "") == "pdf_fallback"))
+assert_true(to_bool(dict_get_or(dict_get_or(pdf_doc, "meta", {}), "error_code", "") == "invalid_pdf_extractor"))
+assert_true(to_bool(file_exists(extractor_payload_file) == false))
+
+if file_exists(pdf_path) {
+	delete_file(pdf_path)
+}
+if file_exists(extractor_payload_file) {
+	delete_file(extractor_payload_file)
+}
+
+print("test_security: ok")

@@ -1,0 +1,79 @@
+from src.common import dict_get_or
+from src.tests_helpers import assert_true
+from src.config import ensure_runtime_dirs, load_config
+from src.vector_backend import load_index_with_backend, save_index_with_backend
+
+index_path := "./results/test_at_rest_encryption_index.json"
+key_file_path := "./results/test_at_rest_encryption.key"
+
+if file_exists(index_path) {
+	delete_file(index_path)
+}
+if file_exists(key_file_path) {
+	delete_file(key_file_path)
+}
+
+base_cfg := load_config({
+	"vector_backend": "local_json",
+	"index_path": index_path,
+	"at_rest_encryption_enabled": true,
+	"at_rest_encryption_key": "unit-key-1"
+})
+_ = ensure_runtime_dirs(base_cfg)
+
+index := load_index_with_backend(base_cfg)
+meta := dict_get_or(index, "meta", {})
+meta["documents"] := 3
+meta["chunks"] := 9
+index["meta"] := meta
+saved := save_index_with_backend(base_cfg, index)
+assert_true(to_bool(saved == true))
+
+raw := read_file(index_path)
+assert_true(to_bool(contains(raw, "\"format\":\"kujo_rag_encrypted_index_v1\"") == 1))
+assert_true(to_bool(contains(raw, "\"chunks\"") == 0))
+assert_true(to_bool(contains(raw, "\"vectors\"") == 0))
+
+reloaded := load_index_with_backend(base_cfg)
+reloaded_meta := dict_get_or(reloaded, "meta", {})
+assert_true(to_bool(dict_get_or(reloaded_meta, "documents", 0) == 3))
+assert_true(to_bool(dict_get_or(reloaded_meta, "chunks", 0) == 9))
+
+wrong_key_cfg := load_config({
+	"vector_backend": "local_json",
+	"index_path": index_path,
+	"at_rest_encryption_enabled": true,
+	"at_rest_encryption_key": "unit-key-wrong"
+})
+wrong_key_loaded := load_index_with_backend(wrong_key_cfg)
+wrong_key_error := dict_get_or(dict_get_or(wrong_key_loaded, "meta", {}), "load_error", {})
+assert_true(to_bool(dict_get_or(wrong_key_error, "code", "") == "encrypted_index_decrypt_failed"))
+
+write_file(key_file_path, "unit-key-2")
+key_file_cfg := load_config({
+	"vector_backend": "local_json",
+	"index_path": index_path,
+	"at_rest_encryption_enabled": true,
+	"at_rest_encryption_key": "",
+	"at_rest_encryption_key_file": key_file_path
+})
+
+key_file_index := load_index_with_backend(key_file_cfg)
+key_file_meta := dict_get_or(key_file_index, "meta", {})
+key_file_meta["documents"] := 5
+key_file_index["meta"] := key_file_meta
+assert_true(to_bool(save_index_with_backend(key_file_cfg, key_file_index) == true))
+
+key_file_reloaded := load_index_with_backend(key_file_cfg)
+assert_true(to_bool(dict_get_or(dict_get_or(key_file_reloaded, "meta", {}), "documents", 0) == 5))
+
+delete_file(key_file_path)
+missing_key_loaded := load_index_with_backend(key_file_cfg)
+missing_key_error := dict_get_or(dict_get_or(missing_key_loaded, "meta", {}), "load_error", {})
+assert_true(to_bool(dict_get_or(missing_key_error, "code", "") == "encrypted_index_key_file_missing"))
+
+if file_exists(index_path) {
+	delete_file(index_path)
+}
+
+print("test_at_rest_encryption: ok")

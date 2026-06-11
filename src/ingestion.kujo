@@ -1,0 +1,201 @@
+from src.common import dict_get_or, str_or
+from src.parsers import parse_file
+
+func should_skip_name(name) {
+	if starts_with(name, ".") {
+		return true
+	}
+	if ends_with(name, "~") {
+		return true
+	}
+	return false
+}
+
+func should_include_file(path, cfg) {
+	ext := to_lower(path_extension(path))
+	allowed := dict_get_or(cfg, "ingest_extensions", [])
+	if type(allowed) != "array" {
+		return false
+	}
+	for item in allowed {
+		norm := to_lower(to_string(item))
+		if starts_with(norm, ".") {
+			norm := substring(norm, 1, len(norm))
+		}
+		if norm == ext {
+			return true
+		}
+	}
+	return false
+}
+
+export discover_files := func(root_path, cfg, recursive) {
+	files := []
+	stack := [root_path]
+
+	while len(stack) > 0 {
+		current := stack[len(stack) - 1]
+		stack := slice(stack, 0, len(stack) - 1)
+
+		if path_is_dir(current) {
+			entries := []
+			err := null
+			try {
+				entries := list_dir(current)
+			} except e {
+				err := e
+			}
+
+			if type(err) == "null" {
+				for name in entries {
+					if should_skip_name(name) == false {
+						child := path_join(current, name)
+						if path_is_file(child) {
+							if should_include_file(child, cfg) {
+								files := push(files, child)
+							}
+						}
+						if recursive == true {
+							if path_is_dir(child) {
+								stack := push(stack, child)
+							}
+						}
+					}
+				}
+			}
+		}
+		if path_is_file(current) {
+			if should_include_file(current, cfg) {
+				files := push(files, current)
+			}
+		}
+	}
+
+	return files
+}
+
+export ingest_documents := func(root_path, cfg, recursive) {
+	files := discover_files(root_path, cfg, recursive)
+	documents := []
+	errors := []
+	max_bytes := dict_get_or(cfg, "max_file_bytes", 5000000)
+	max_files := dict_get_or(cfg, "api_guardrail_ingest_max_files", 5000)
+	if max_files < 1 {
+		max_files = 1
+	}
+	max_total_bytes := dict_get_or(cfg, "api_guardrail_ingest_max_total_bytes", 50000000)
+	if max_total_bytes < 1024 {
+		max_total_bytes = 1024
+	}
+	total_bytes := 0
+
+	if len(files) > max_files {
+		guardrail := {
+			"status": 413,
+			"error": "ingest_guardrail_files_exceeded",
+			"message": "Ingest request exceeds configured file-count guardrail",
+			"details": {
+				"max_files": max_files,
+				"actual_files": len(files)
+			}
+		}
+		errors := push(errors, {
+			"path": root_path,
+			"error": dict_get_or(guardrail, "error", "ingest_guardrail_files_exceeded")
+		})
+		return {
+			"documents": documents,
+			"errors": errors,
+			"aborted": true,
+			"guardrail": guardrail,
+			"stats": {
+				"files_seen": len(files),
+				"docs_loaded": len(documents),
+				"errors": len(errors),
+				"total_bytes_estimate": total_bytes
+			}
+		}
+	}
+
+	for path in files {
+		size_ok := true
+		err := null
+		size := 0
+		try {
+			size := file_size(path)
+		} except e {
+			err := e
+		}
+		if type(err) != "null" {
+			size_ok := false
+		}
+		if size > max_bytes {
+			size_ok := false
+			errors := push(errors, {
+				"path": path,
+				"error": "file exceeds max_file_bytes"
+			})
+		}
+
+		if size_ok {
+			total_bytes = total_bytes + size
+			if total_bytes > max_total_bytes {
+				guardrail := {
+					"status": 413,
+					"error": "ingest_guardrail_bytes_exceeded",
+					"message": "Ingest request exceeds configured total-byte guardrail",
+					"details": {
+						"max_total_bytes": max_total_bytes,
+						"actual_total_bytes": total_bytes,
+						"path": path
+					}
+				}
+				errors := push(errors, {
+					"path": path,
+					"error": dict_get_or(guardrail, "error", "ingest_guardrail_bytes_exceeded")
+				})
+				return {
+					"documents": documents,
+					"errors": errors,
+					"aborted": true,
+					"guardrail": guardrail,
+					"stats": {
+						"files_seen": len(files),
+						"docs_loaded": len(documents),
+						"errors": len(errors),
+						"total_bytes_estimate": total_bytes
+					}
+				}
+			}
+
+			parse_error := null
+			doc := null
+			try {
+				doc := parse_file(path, cfg)
+			} except e {
+				parse_error := e
+			}
+			if type(parse_error) == "null" {
+				documents := push(documents, doc)
+			} else {
+				errors := push(errors, {
+					"path": path,
+					"error": to_string(parse_error)
+				})
+			}
+		}
+	}
+
+	return {
+		"documents": documents,
+		"errors": errors,
+		"aborted": false,
+		"guardrail": {},
+		"stats": {
+			"files_seen": len(files),
+			"docs_loaded": len(documents),
+			"errors": len(errors),
+			"total_bytes_estimate": total_bytes
+		}
+	}
+}

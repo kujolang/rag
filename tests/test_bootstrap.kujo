@@ -1,0 +1,48 @@
+from src.bootstrap import bootstrap_repository
+from src.tests_helpers import assert_true
+from src.common import dict_get_or
+
+kujo_bin := env_or("KUJO_BIN", "kujo")
+
+target := "./results/bootstrap_repo_" + to_string(current_timestamp())
+boot := bootstrap_repository(target)
+assert_true(to_bool(dict_get_or(boot, "ok", false) == true))
+
+created := dict_get_or(boot, "created", [])
+assert_true(to_bool(len(created) >= 4))
+assert_true(to_bool(file_exists(target + "/.env.example")))
+assert_true(to_bool(file_exists(target + "/README.md")))
+assert_true(to_bool(file_exists(target + "/knowledge/bootstrap.md")))
+
+ingest_cmd := kujo_bin + " run main.kujo --interpreter ingest --path " + target + "/knowledge --recursive true --namespace bootstrap_smoke"
+ingest_res := execute_status(ingest_cmd, {
+	"timeout_ms": 120000
+})
+ingest_ok := false
+ingest_stdout := "{}"
+if type(ingest_res) == "struct" {
+	ingest_ok = ingest_res.success
+	ingest_stdout = ingest_res.stdout
+}
+assert_true(to_bool(ingest_ok == true))
+
+ingest_out := parse_json(ingest_stdout)
+assert_true(to_bool(dict_get_or(ingest_out, "ok", false) == true))
+
+query_cmd := kujo_bin + " run main.kujo --interpreter query --question \"What does this template provide?\" --namespace bootstrap_smoke"
+query_res := execute_status(query_cmd, {
+	"timeout_ms": 120000
+})
+query_ok := false
+query_stdout := "{}"
+if type(query_res) == "struct" {
+	query_ok = query_res.success
+	query_stdout = query_res.stdout
+}
+assert_true(to_bool(query_ok == true))
+
+query_out := parse_json(query_stdout)
+assert_true(to_bool(dict_get_or(query_out, "count", 0) >= 1))
+assert_true(to_bool(len(trim(dict_get_or(query_out, "answer", ""))) > 0))
+
+print("test_bootstrap: ok")

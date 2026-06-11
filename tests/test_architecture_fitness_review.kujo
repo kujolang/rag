@@ -1,0 +1,144 @@
+from src.common import dict_get_or, read_json_file_or
+from src.tests_helpers import assert_true
+
+kujo_bin := env_or("KUJO_BIN", "/path/to/kujo/target/debug/kujo")
+suffix := to_string(current_timestamp())
+
+func write_text(path, text) {
+	if file_exists(path) {
+		delete_file(path)
+	}
+	write_file(path, text)
+}
+
+root_dir := "/tmp/kujo_rag_arch_fitness_" + suffix
+src_dir := root_dir + "/src"
+docs_dir := root_dir + "/docs"
+
+if path_exists(root_dir) == false {
+	create_dir(root_dir)
+}
+if path_exists(src_dir) == false {
+	create_dir(src_dir)
+}
+if path_exists(docs_dir) == false {
+	create_dir(docs_dir)
+}
+
+retrieval_path := src_dir + "/retrieval.kujo"
+ingestion_path := src_dir + "/ingestion.kujo"
+vector_store_path := src_dir + "/vector_store.kujo"
+parsers_path := src_dir + "/parsers.kujo"
+embeddings_path := src_dir + "/embeddings.kujo"
+extension_doc_path := docs_dir + "/extension-guide.md"
+rules_path := root_dir + "/architecture_fitness_rules.json"
+doc_path := root_dir + "/architecture-fitness-functions.md"
+release_doc_path := root_dir + "/release-process.md"
+workflow_path := root_dir + "/architecture-fitness-review.yml"
+output_valid_path := root_dir + "/architecture_fitness_status_valid.json"
+output_invalid_path := root_dir + "/architecture_fitness_status_invalid.json"
+
+write_text(retrieval_path, "from src.common import dict_get_or\n")
+write_text(ingestion_path, "from src.common import normalize_text\n")
+write_text(vector_store_path, "from src.common import write_json_file\n")
+write_text(parsers_path, "export get_parser_registry := func() { return {} }\n")
+write_text(embeddings_path, "export get_embedding_provider_registry := func() { return {} }\n")
+write_text(extension_doc_path, "# Extension Guide\n\nUse registry contracts to add a new parser/provider.\n")
+
+valid_rules := {
+	"forbidden_dependencies": [
+		{
+			"source_path": retrieval_path,
+			"forbidden_tokens": ["from src.query_api import"]
+		},
+		{
+			"source_path": ingestion_path,
+			"forbidden_tokens": ["from src.query_api import"]
+		},
+		{
+			"source_path": vector_store_path,
+			"forbidden_tokens": ["from src.query_api import"]
+		}
+	],
+	"required_extension_points": [
+		{
+			"path": parsers_path,
+			"required_tokens": ["get_parser_registry"]
+		},
+		{
+			"path": embeddings_path,
+			"required_tokens": ["get_embedding_provider_registry"]
+		},
+		{
+			"path": extension_doc_path,
+			"required_tokens": ["registry", "add a new parser/provider"]
+		}
+	]
+}
+write_text(rules_path, to_json(valid_rules))
+
+write_text(doc_path, "# Architecture Fitness Functions and Guardrails\n\nThis gate validates forbidden dependencies and extension points.\n\nkujo run scripts/run_architecture_fitness_review.kujo --interpreter\n")
+write_text(release_doc_path, "# Release Process\n\nrun_architecture_fitness_review.kujo\ndocs/architecture-fitness-functions.md\n")
+write_text(workflow_path, "name: architecture-fitness-review\non:\n  schedule:\n    - cron: '0 13 * * 2'\njobs:\n  review:\n    steps:\n      - run: kujo run scripts/run_architecture_fitness_review.kujo --interpreter\n")
+
+valid_cmd := "KUJO_RAG_ARCH_FITNESS_RULES_PATH=" + rules_path + " KUJO_RAG_ARCH_FITNESS_DOC_PATH=" + doc_path + " KUJO_RAG_ARCH_FITNESS_RELEASE_PROCESS_DOC_PATH=" + release_doc_path + " KUJO_RAG_ARCH_FITNESS_WORKFLOW_PATH=" + workflow_path + " KUJO_RAG_ARCH_FITNESS_OUTPUT_PATH=" + output_valid_path + " " + kujo_bin + " run scripts/run_architecture_fitness_review.kujo --interpreter"
+valid_res := execute_status(valid_cmd, {"timeout_ms": 240000})
+assert_true(to_bool(type(valid_res) == "struct"))
+assert_true(to_bool(valid_res.success == true))
+
+valid_payload := read_json_file_or(output_valid_path, {})
+assert_true(to_bool(dict_get_or(valid_payload, "ok", false) == true))
+valid_gates := dict_get_or(valid_payload, "gates", {})
+assert_true(to_bool(dict_get_or(valid_gates, "forbidden_dependencies_enforced", false) == true))
+assert_true(to_bool(dict_get_or(valid_gates, "required_extension_points_enforced", false) == true))
+
+write_text(retrieval_path, "from src.query_api import handle_query\n")
+
+invalid_cmd := "KUJO_RAG_ARCH_FITNESS_RULES_PATH=" + rules_path + " KUJO_RAG_ARCH_FITNESS_DOC_PATH=" + doc_path + " KUJO_RAG_ARCH_FITNESS_RELEASE_PROCESS_DOC_PATH=" + release_doc_path + " KUJO_RAG_ARCH_FITNESS_WORKFLOW_PATH=" + workflow_path + " KUJO_RAG_ARCH_FITNESS_OUTPUT_PATH=" + output_invalid_path + " " + kujo_bin + " run scripts/run_architecture_fitness_review.kujo --interpreter"
+invalid_res := execute_status(invalid_cmd, {"timeout_ms": 240000})
+assert_true(to_bool(type(invalid_res) == "struct"))
+assert_true(to_bool(invalid_res.success == false))
+
+invalid_payload := read_json_file_or(output_invalid_path, {})
+assert_true(to_bool(dict_get_or(invalid_payload, "ok", true) == false))
+invalid_gates := dict_get_or(invalid_payload, "gates", {})
+assert_true(to_bool(dict_get_or(invalid_gates, "forbidden_dependencies_enforced", true) == false))
+
+if file_exists(retrieval_path) {
+	delete_file(retrieval_path)
+}
+if file_exists(ingestion_path) {
+	delete_file(ingestion_path)
+}
+if file_exists(vector_store_path) {
+	delete_file(vector_store_path)
+}
+if file_exists(parsers_path) {
+	delete_file(parsers_path)
+}
+if file_exists(embeddings_path) {
+	delete_file(embeddings_path)
+}
+if file_exists(extension_doc_path) {
+	delete_file(extension_doc_path)
+}
+if file_exists(rules_path) {
+	delete_file(rules_path)
+}
+if file_exists(doc_path) {
+	delete_file(doc_path)
+}
+if file_exists(release_doc_path) {
+	delete_file(release_doc_path)
+}
+if file_exists(workflow_path) {
+	delete_file(workflow_path)
+}
+if file_exists(output_valid_path) {
+	delete_file(output_valid_path)
+}
+if file_exists(output_invalid_path) {
+	delete_file(output_invalid_path)
+}
+
+print("test_architecture_fitness_review: ok")

@@ -1,0 +1,9 @@
+ticket_id,team,priority,issue
+TKT-701,platform,p3,worker_restarts_observed
+TKT-702,identity,p3,issuer_cache_flush_required
+TKT-703,supply,p2,inventory_backfill_job_delayed
+TKT-704,fulfillment,p2,shipment_eta_monitor_stale
+TKT-705,finance,p2,billing_rollup_drift_detected
+TKT-706,relevance,p2,query_profile_mismatch_found
+TKT-707,analytics,p1,pipeline_checkpoint_regression
+TKT-708,sre,p1,sev1_kernel_panic

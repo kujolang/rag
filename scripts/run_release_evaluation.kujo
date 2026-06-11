@@ -1,0 +1,324 @@
+from src.release_eval import run_release_evaluation
+from src.common import dict_get_or, read_json_file_or, write_json_file, num_or, str_or
+
+func ensure_dir(path_value) {
+	if path_value == "" || path_value == "." {
+		return true
+	}
+	if path_exists(path_value) {
+		return true
+	}
+	parent := dirname(path_value)
+	if parent != "" && parent != "." && parent != path_value {
+		_ = ensure_dir(parent)
+	}
+	create_dir(path_value)
+	return true
+}
+
+func ensure_parent_dir(path_value) {
+	dir := dirname(path_value)
+	if dir == "" || dir == "." {
+		return true
+	}
+	return ensure_dir(dir)
+}
+
+func build_runtime_profile(result) {
+	build_summary := dict_get_or(result, "build_summary", {})
+	embedding_provider := to_lower(trim(str_or(dict_get_or(build_summary, "provider", env_or("KUJO_RAG_RELEASE_EVAL_EMBEDDING_PROVIDER", env_or("KUJO_RAG_EMBEDDING_PROVIDER", "hash"))), "hash")))
+	if embedding_provider == "" {
+		embedding_provider = "hash"
+	}
+	ai_embed_endpoint := trim(str_or(env_or("KUJO_RAG_AI_EMBED_ENDPOINT", ""), ""))
+	ai_embed_model := trim(str_or(env_or("KUJO_RAG_AI_EMBED_MODEL", ""), ""))
+	chat_endpoint := trim(str_or(env_or("KUJO_RAG_CHAT_ENDPOINT", ""), ""))
+	chat_model := trim(str_or(env_or("KUJO_RAG_CHAT_MODEL", ""), ""))
+	ai_mode_enabled := embedding_provider != "hash"
+	if ai_embed_model != "" || chat_model != "" {
+		ai_mode_enabled = true
+	}
+
+	return {
+		"embedding_provider": embedding_provider,
+		"ai_embed_endpoint": ai_embed_endpoint,
+		"ai_embed_model": ai_embed_model,
+		"chat_endpoint": chat_endpoint,
+		"chat_model": chat_model,
+		"ai_mode_enabled": ai_mode_enabled
+	}
+}
+
+func build_snapshot(result) {
+	metrics := dict_get_or(result, "metrics", {})
+	return {
+		"generated_at_unix_ms": current_timestamp(),
+		"ok": dict_get_or(result, "ok", false),
+		"dataset_version": str_or(dict_get_or(result, "dataset_version", "unversioned"), "unversioned"),
+		"dataset_languages": dict_get_or(result, "dataset_languages", []),
+		"total_cases": num_or(dict_get_or(metrics, "total_cases", 0), 0),
+		"passed_cases": num_or(dict_get_or(metrics, "passed_cases", 0), 0),
+		"error_count": num_or(dict_get_or(metrics, "error_count", 0), 0),
+		"quality_pass_rate": num_or(dict_get_or(metrics, "quality_pass_rate", 0.0), 0.0),
+		"error_rate": num_or(dict_get_or(metrics, "error_rate", 0.0), 0.0),
+		"avg_latency_ms": num_or(dict_get_or(metrics, "avg_latency_ms", 0.0), 0.0),
+		"p95_latency_ms": num_or(dict_get_or(metrics, "p95_latency_ms", 0.0), 0.0),
+		"avg_confidence": num_or(dict_get_or(metrics, "avg_confidence", 0.0), 0.0),
+		"avg_grounding": num_or(dict_get_or(metrics, "avg_grounding", 0.0), 0.0),
+		"domain_summary": dict_get_or(metrics, "domain_summary", []),
+		"language_summary": dict_get_or(metrics, "language_summary", []),
+		"runtime_profile": build_runtime_profile(result)
+	}
+}
+
+func append_runtime_profile_regression(regressions, previous_profile, current_profile, field_name) {
+	previous_value := str_or(dict_get_or(previous_profile, field_name, ""), "")
+	current_value := str_or(dict_get_or(current_profile, field_name, ""), "")
+	if previous_value == current_value {
+		return regressions
+	}
+	return push(regressions, {
+		"category": "provider_model",
+		"metric": field_name,
+		"previous": previous_value,
+		"current": current_value,
+		"delta": "changed"
+	})
+}
+
+func quality_summary_map(raw_summary, label_key) {
+	mapped := {}
+	if type(raw_summary) != "array" {
+		return mapped
+	}
+
+	i := 0
+	while i < len(raw_summary) {
+		item := raw_summary[i]
+		if type(item) == "dict" {
+			label_value := trim(str_or(dict_get_or(item, label_key, ""), ""))
+			if label_value != "" {
+				mapped[label_value] = {
+					"quality_pass_rate": num_or(dict_get_or(item, "quality_pass_rate", 0.0), 0.0),
+					"avg_confidence": num_or(dict_get_or(item, "avg_confidence", 0.0), 0.0),
+					"avg_grounding": num_or(dict_get_or(item, "avg_grounding", 0.0), 0.0),
+					"total_cases": num_or(dict_get_or(item, "total_cases", 0), 0)
+				}
+			}
+		}
+		i = i + 1
+	}
+
+	return mapped
+}
+
+func append_metric_regression(regressions, category, metric, previous_value, current_value) {
+	if current_value == previous_value {
+		return regressions
+	}
+	return push(regressions, {
+		"category": category,
+		"metric": metric,
+		"previous": previous_value,
+		"current": current_value,
+		"delta": current_value - previous_value
+	})
+}
+
+func build_regression_highlights(previous_snapshot, current_snapshot) {
+	regressions := []
+	if type(previous_snapshot) != "dict" {
+		return regressions
+	}
+
+	prev_quality := num_or(dict_get_or(previous_snapshot, "quality_pass_rate", 0.0), 0.0)
+	curr_quality := num_or(dict_get_or(current_snapshot, "quality_pass_rate", 0.0), 0.0)
+	if curr_quality < prev_quality {
+		regressions = append_metric_regression(regressions, "quality", "quality_pass_rate", prev_quality, curr_quality)
+	}
+
+	prev_confidence := num_or(dict_get_or(previous_snapshot, "avg_confidence", 0.0), 0.0)
+	curr_confidence := num_or(dict_get_or(current_snapshot, "avg_confidence", 0.0), 0.0)
+	if curr_confidence < prev_confidence {
+		regressions = append_metric_regression(regressions, "quality", "avg_confidence", prev_confidence, curr_confidence)
+	}
+
+	prev_grounding := num_or(dict_get_or(previous_snapshot, "avg_grounding", 0.0), 0.0)
+	curr_grounding := num_or(dict_get_or(current_snapshot, "avg_grounding", 0.0), 0.0)
+	if curr_grounding < prev_grounding {
+		regressions = append_metric_regression(regressions, "grounding", "avg_grounding", prev_grounding, curr_grounding)
+	}
+
+	prev_error_rate := num_or(dict_get_or(previous_snapshot, "error_rate", 0.0), 0.0)
+	curr_error_rate := num_or(dict_get_or(current_snapshot, "error_rate", 0.0), 0.0)
+	if curr_error_rate > prev_error_rate {
+		regressions = append_metric_regression(regressions, "reliability", "error_rate", prev_error_rate, curr_error_rate)
+	}
+
+	prev_avg_latency := num_or(dict_get_or(previous_snapshot, "avg_latency_ms", 0.0), 0.0)
+	curr_avg_latency := num_or(dict_get_or(current_snapshot, "avg_latency_ms", 0.0), 0.0)
+	if curr_avg_latency > prev_avg_latency {
+		regressions = append_metric_regression(regressions, "latency", "avg_latency_ms", prev_avg_latency, curr_avg_latency)
+	}
+
+	prev_p95_latency := num_or(dict_get_or(previous_snapshot, "p95_latency_ms", 0.0), 0.0)
+	curr_p95_latency := num_or(dict_get_or(current_snapshot, "p95_latency_ms", 0.0), 0.0)
+	if curr_p95_latency > prev_p95_latency {
+		regressions = append_metric_regression(regressions, "latency", "p95_latency_ms", prev_p95_latency, curr_p95_latency)
+	}
+
+	prev_domains := quality_summary_map(dict_get_or(previous_snapshot, "domain_summary", []), "domain")
+	curr_domains := quality_summary_map(dict_get_or(current_snapshot, "domain_summary", []), "domain")
+	for domain in keys(curr_domains) {
+		if has_key(prev_domains, domain) == 1 {
+			prev_domain := dict_get_or(prev_domains, domain, {})
+			curr_domain := dict_get_or(curr_domains, domain, {})
+
+			prev_domain_quality := num_or(dict_get_or(prev_domain, "quality_pass_rate", 0.0), 0.0)
+			curr_domain_quality := num_or(dict_get_or(curr_domain, "quality_pass_rate", 0.0), 0.0)
+			if curr_domain_quality < prev_domain_quality {
+				regressions = push(regressions, {
+					"category": "domain",
+					"metric": "domain_quality_pass_rate",
+					"domain": domain,
+					"previous": prev_domain_quality,
+					"current": curr_domain_quality,
+					"delta": curr_domain_quality - prev_domain_quality
+				})
+			}
+
+			prev_domain_grounding := num_or(dict_get_or(prev_domain, "avg_grounding", 0.0), 0.0)
+			curr_domain_grounding := num_or(dict_get_or(curr_domain, "avg_grounding", 0.0), 0.0)
+			if curr_domain_grounding < prev_domain_grounding {
+				regressions = push(regressions, {
+					"category": "domain",
+					"metric": "domain_avg_grounding",
+					"domain": domain,
+					"previous": prev_domain_grounding,
+					"current": curr_domain_grounding,
+					"delta": curr_domain_grounding - prev_domain_grounding
+				})
+			}
+		}
+	}
+
+	prev_languages := quality_summary_map(dict_get_or(previous_snapshot, "language_summary", []), "language")
+	curr_languages := quality_summary_map(dict_get_or(current_snapshot, "language_summary", []), "language")
+	for language in keys(curr_languages) {
+		if has_key(prev_languages, language) == 1 {
+			prev_language := dict_get_or(prev_languages, language, {})
+			curr_language := dict_get_or(curr_languages, language, {})
+
+			prev_language_quality := num_or(dict_get_or(prev_language, "quality_pass_rate", 0.0), 0.0)
+			curr_language_quality := num_or(dict_get_or(curr_language, "quality_pass_rate", 0.0), 0.0)
+			if curr_language_quality < prev_language_quality {
+				regressions = push(regressions, {
+					"category": "language",
+					"metric": "language_quality_pass_rate",
+					"language": language,
+					"previous": prev_language_quality,
+					"current": curr_language_quality,
+					"delta": curr_language_quality - prev_language_quality
+				})
+			}
+
+			prev_language_grounding := num_or(dict_get_or(prev_language, "avg_grounding", 0.0), 0.0)
+			curr_language_grounding := num_or(dict_get_or(curr_language, "avg_grounding", 0.0), 0.0)
+			if curr_language_grounding < prev_language_grounding {
+				regressions = push(regressions, {
+					"category": "language",
+					"metric": "language_avg_grounding",
+					"language": language,
+					"previous": prev_language_grounding,
+					"current": curr_language_grounding,
+					"delta": curr_language_grounding - prev_language_grounding
+				})
+			}
+		}
+	}
+
+	previous_runtime_profile := dict_get_or(previous_snapshot, "runtime_profile", {})
+	current_runtime_profile := dict_get_or(current_snapshot, "runtime_profile", {})
+	if type(previous_runtime_profile) == "dict" && type(current_runtime_profile) == "dict" {
+		regressions = append_runtime_profile_regression(regressions, previous_runtime_profile, current_runtime_profile, "embedding_provider")
+		regressions = append_runtime_profile_regression(regressions, previous_runtime_profile, current_runtime_profile, "ai_embed_endpoint")
+		regressions = append_runtime_profile_regression(regressions, previous_runtime_profile, current_runtime_profile, "ai_embed_model")
+		regressions = append_runtime_profile_regression(regressions, previous_runtime_profile, current_runtime_profile, "chat_endpoint")
+		regressions = append_runtime_profile_regression(regressions, previous_runtime_profile, current_runtime_profile, "chat_model")
+	}
+
+	return regressions
+}
+
+func append_trend(trend_path, trend_history_limit, snapshot) {
+	trend_payload := read_json_file_or(trend_path, {
+		"history": []
+	})
+	history := dict_get_or(trend_payload, "history", [])
+	if type(history) != "array" {
+		history = []
+	}
+
+	previous := {}
+	if len(history) > 0 {
+		previous = history[len(history) - 1]
+	}
+
+	history = push(history, snapshot)
+	if len(history) > trend_history_limit {
+		history = slice(history, len(history) - trend_history_limit, len(history))
+	}
+
+	write_json_file(trend_path, {
+		"updated_at_unix_ms": current_timestamp(),
+		"limit": trend_history_limit,
+		"history": history
+	})
+
+	return {
+		"history_count": len(history),
+		"previous": previous
+	}
+}
+
+eval_cfg := {
+	"golden_queries_path": env_or("KUJO_RAG_RELEASE_EVAL_GOLDEN_PATH", "./config/release_eval_golden_queries.json"),
+	"thresholds_path": env_or("KUJO_RAG_RELEASE_EVAL_THRESHOLDS_PATH", "./config/release_eval_thresholds.json"),
+	"corpus_path": env_or("KUJO_RAG_RELEASE_EVAL_CORPUS_PATH", "./examples/release_eval_corpus"),
+	"index_path": env_or("KUJO_RAG_RELEASE_EVAL_INDEX_PATH", "./results/release_eval_index.json"),
+	"recursive": true
+}
+
+output_path := env_or("KUJO_RAG_RELEASE_EVAL_OUTPUT_PATH", "./results/release_eval_report.json")
+trend_path := env_or("KUJO_RAG_RELEASE_EVAL_TREND_PATH", "./results/release_eval_trend.json")
+trend_history_limit := num_or(env_or("KUJO_RAG_RELEASE_EVAL_TREND_HISTORY_LIMIT", "120"), 120)
+if trend_history_limit < 1 {
+	trend_history_limit = 1
+}
+
+_ = ensure_parent_dir(output_path)
+_ = ensure_parent_dir(trend_path)
+
+result := run_release_evaluation(eval_cfg)
+snapshot := build_snapshot(result)
+trend_state := append_trend(trend_path, trend_history_limit, snapshot)
+previous_snapshot := dict_get_or(trend_state, "previous", {})
+regressions := build_regression_highlights(previous_snapshot, snapshot)
+
+result["report_path"] = output_path
+result["trend_path"] = trend_path
+result["trend_history_count"] = num_or(dict_get_or(trend_state, "history_count", 0), 0)
+result["trend_report"] = {
+	"generated_at_unix_ms": current_timestamp(),
+	"current": snapshot,
+	"previous": previous_snapshot,
+	"regressions": regressions,
+	"drift_detected": len(regressions) > 0
+}
+
+write_json_file(output_path, result)
+print(to_json(result))
+
+if dict_get_or(result, "ok", false) == false {
+	exit(1)
+}

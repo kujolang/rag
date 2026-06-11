@@ -1,0 +1,106 @@
+name: release-artifacts
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Release version (for example 1.2.3 or v1.2.3)'
+        required: true
+        type: string
+      notes_path:
+        description: 'Optional release notes path override'
+        required: false
+        default: ''
+        type: string
+
+jobs:
+  build-release-artifacts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      KUJO_RUNTIME_REF: "7819d1475e909ec88f510c9927445791ea928836"
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Build Kujo runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          git init /tmp/kujo-runtime
+          git -C /tmp/kujo-runtime remote add origin https://github.com/kujolang/kujo.git
+          git -C /tmp/kujo-runtime fetch --depth 1 origin "$KUJO_RUNTIME_REF"
+          git -C /tmp/kujo-runtime checkout --detach "$KUJO_RUNTIME_REF"
+          cargo build --release --locked --manifest-path /tmp/kujo-runtime/Cargo.toml
+          echo "/tmp/kujo-runtime/target/release" >> "$GITHUB_PATH"
+
+      - name: Resolve release version and notes path
+        id: release_meta
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            version_input="${{ inputs.version }}"
+            notes_input="${{ inputs.notes_path }}"
+          else
+            version_input="${GITHUB_REF_NAME}"
+            notes_input=""
+          fi
+
+          normalized="v${version_input#v}"
+          notes_path="${notes_input}"
+          if [[ -z "${notes_path}" ]]; then
+            notes_path="./docs/releases/${normalized}.md"
+          fi
+
+          echo "version_input=${version_input}" >> "$GITHUB_OUTPUT"
+          echo "normalized_tag=${normalized}" >> "$GITHUB_OUTPUT"
+          echo "notes_path=${notes_path}" >> "$GITHUB_OUTPUT"
+
+      - name: Build release artifacts and checksums
+        shell: bash
+        run: |
+          set -euo pipefail
+          kujo run scripts/build_release_artifacts.kujo --interpreter \
+            --version "${{ steps.release_meta.outputs.version_input }}" \
+            --notes "${{ steps.release_meta.outputs.notes_path }}" \
+            --output-dir ./results/releases > release-artifacts.json
+          cat release-artifacts.json
+
+      - name: Verify SBOM artifact is present
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f "results/releases/${{ steps.release_meta.outputs.normalized_tag }}/sbom.cyclonedx.json"
+
+      - name: Run supply-chain scan gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          kujo run scripts/run_supply_chain_scan.kujo --interpreter \
+            --root .github/workflows/release-gates.yml \
+            --output "results/releases/${{ steps.release_meta.outputs.normalized_tag }}/supply-chain-scan-release-gates.json"
+          kujo run scripts/run_supply_chain_scan.kujo --interpreter \
+            --root .github/workflows/release-artifacts.yml \
+            --output "results/releases/${{ steps.release_meta.outputs.normalized_tag }}/supply-chain-scan-release-artifacts.json"
+          kujo run scripts/run_supply_chain_scan.kujo --interpreter \
+            --root .env.example \
+            --output "results/releases/${{ steps.release_meta.outputs.normalized_tag }}/supply-chain-scan-env-surface.json"
+          cat "results/releases/${{ steps.release_meta.outputs.normalized_tag }}/supply-chain-scan-release-gates.json"
+          cat "results/releases/${{ steps.release_meta.outputs.normalized_tag }}/supply-chain-scan-release-artifacts.json"
+          cat "results/releases/${{ steps.release_meta.outputs.normalized_tag }}/supply-chain-scan-env-surface.json"
+
+      - name: Upload release artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ steps.release_meta.outputs.normalized_tag }}
+          path: |
+            release-artifacts.json
+            results/releases/${{ steps.release_meta.outputs.normalized_tag }}

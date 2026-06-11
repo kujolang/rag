@@ -1,0 +1,122 @@
+from src.common import dict_get_or
+from src.tests_helpers import assert_true
+
+kujo_bin := env_or("KUJO_BIN", "/path/to/kujo/target/release/kujo")
+
+func run_cmd(command) {
+	res := execute_status(command, {"timeout_ms": 120000})
+	if type(res) == "struct" {
+		return {
+			"ok": res.success,
+			"exit_code": res.exitcode,
+			"stdout": to_string(res.stdout),
+			"stderr": to_string(res.stderr)
+		}
+	}
+	return {
+		"ok": false,
+		"exit_code": -1,
+		"stdout": "",
+		"stderr": "invalid execute_status result"
+	}
+}
+
+func parse_json_safe(text) {
+	obj := {}
+	err := null
+	try {
+		obj := parse_json(text)
+	} except e {
+		err := e
+	}
+	if type(err) != "null" {
+		return {
+			"ok": false,
+			"error": to_string(err),
+			"data": {}
+		}
+	}
+	return {
+		"ok": true,
+		"data": obj
+	}
+}
+
+func start_server(port, env_prefix, log_file) {
+	cmd := "env " + env_prefix + " " + kujo_bin + " run main.kujo --interpreter serve --host 127.0.0.1 --port " + to_string(port) + " > " + log_file + " 2>&1 & echo $!"
+	res := run_cmd(cmd)
+	pid := trim(dict_get_or(res, "stdout", ""))
+	return pid
+}
+
+func stop_server(pid) {
+	if pid == "" {
+		return true
+	}
+	_ := run_cmd("kill " + pid + " >/dev/null 2>&1 || true")
+	_ := run_cmd("wait " + pid + " >/dev/null 2>&1 || true")
+	return true
+}
+
+func wait_for_live(port) {
+	attempt := 0
+	while attempt < 5000 {
+		res := run_cmd("curl -s http://127.0.0.1:" + to_string(port) + "/live")
+		body := trim(dict_get_or(res, "stdout", ""))
+		if body != "" {
+			parsed := parse_json_safe(body)
+			if dict_get_or(parsed, "ok", false) == true {
+				payload := dict_get_or(parsed, "data", {})
+				if dict_get_or(payload, "ok", false) == true {
+					return true
+				}
+			}
+		}
+		attempt = attempt + 1
+	}
+	return false
+}
+
+port := 41000 + (current_timestamp() % 10000)
+env_prefix := "KUJO_RAG_ENV=development KUJO_RAG_API_AUTH_PROVIDER=none KUJO_RAG_API_STARTUP_GRACE_MS=0 KUJO_RAG_API_DRAIN_REJECT_MUTATIONS=true"
+pid := start_server(port, env_prefix, "/tmp/kujo_rag_graceful_shutdown.log")
+assert_true(to_bool(pid != ""))
+assert_true(to_bool(wait_for_live(port) == true))
+
+ready_before := parse_json_safe(dict_get_or(run_cmd("curl -s http://127.0.0.1:" + to_string(port) + "/ready"), "stdout", ""))
+assert_true(to_bool(dict_get_or(ready_before, "ok", false) == true))
+assert_true(to_bool(dict_get_or(dict_get_or(ready_before, "data", {}), "ok", false) == true))
+
+query_before := parse_json_safe(dict_get_or(run_cmd("curl -s -X POST http://127.0.0.1:" + to_string(port) + "/query -H \"Content-Type: application/json\" -d '{\"query\":\"pre-drain\"}'"), "stdout", ""))
+assert_true(to_bool(dict_get_or(query_before, "ok", false) == true))
+assert_true(to_bool(dict_get_or(dict_get_or(query_before, "data", {}), "ok", false) == true))
+
+start_drain := parse_json_safe(dict_get_or(run_cmd("curl -s -X POST http://127.0.0.1:" + to_string(port) + "/drain/start -H \"Content-Type: application/json\" -d '{\"reason\":\"rolling_deploy\"}'"), "stdout", ""))
+assert_true(to_bool(dict_get_or(start_drain, "ok", false) == true))
+start_payload := dict_get_or(start_drain, "data", {})
+assert_true(to_bool(dict_get_or(start_payload, "ok", false) == true))
+assert_true(to_bool(dict_get_or(dict_get_or(start_payload, "data", {}), "enabled", false) == true))
+
+ready_drain := parse_json_safe(dict_get_or(run_cmd("curl -s http://127.0.0.1:" + to_string(port) + "/ready"), "stdout", ""))
+assert_true(to_bool(dict_get_or(ready_drain, "ok", false) == true))
+assert_true(to_bool(dict_get_or(dict_get_or(dict_get_or(ready_drain, "data", {}), "error", {}), "code", "") == "service_not_ready"))
+
+query_drain := parse_json_safe(dict_get_or(run_cmd("curl -s -X POST http://127.0.0.1:" + to_string(port) + "/query -H \"Content-Type: application/json\" -d '{\"query\":\"during-drain\"}'"), "stdout", ""))
+assert_true(to_bool(dict_get_or(query_drain, "ok", false) == true))
+assert_true(to_bool(dict_get_or(dict_get_or(dict_get_or(query_drain, "data", {}), "error", {}), "code", "") == "service_draining"))
+
+drain_status := parse_json_safe(dict_get_or(run_cmd("curl -s http://127.0.0.1:" + to_string(port) + "/drain"), "stdout", ""))
+assert_true(to_bool(dict_get_or(drain_status, "ok", false) == true))
+assert_true(to_bool(dict_get_or(dict_get_or(dict_get_or(drain_status, "data", {}), "data", {}), "enabled", false) == true))
+
+stop_drain := parse_json_safe(dict_get_or(run_cmd("curl -s -X POST http://127.0.0.1:" + to_string(port) + "/drain/stop -H \"Content-Type: application/json\" -d '{}'"), "stdout", ""))
+assert_true(to_bool(dict_get_or(stop_drain, "ok", false) == true))
+assert_true(to_bool(dict_get_or(dict_get_or(dict_get_or(stop_drain, "data", {}), "data", {}), "enabled", true) == false))
+
+query_after := parse_json_safe(dict_get_or(run_cmd("curl -s -X POST http://127.0.0.1:" + to_string(port) + "/query -H \"Content-Type: application/json\" -d '{\"query\":\"post-drain\"}'"), "stdout", ""))
+assert_true(to_bool(dict_get_or(query_after, "ok", false) == true))
+assert_true(to_bool(dict_get_or(dict_get_or(query_after, "data", {}), "ok", false) == true))
+
+_ := stop_server(pid)
+
+print("test_graceful_shutdown_safeguards: ok")

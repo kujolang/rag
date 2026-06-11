@@ -1,0 +1,122 @@
+from src.common import dict_get_or
+from src.tests_helpers import assert_true
+
+kujo_bin := env_or("KUJO_BIN", "/path/to/kujo/target/release/kujo")
+
+func run_cmd(command) {
+	res := execute_status(command, {"timeout_ms": 120000})
+	if type(res) == "struct" {
+		return {
+			"ok": res.success,
+			"exit_code": res.exitcode,
+			"stdout": to_string(res.stdout),
+			"stderr": to_string(res.stderr)
+		}
+	}
+	return {
+		"ok": false,
+		"exit_code": -1,
+		"stdout": "",
+		"stderr": "invalid execute_status result"
+	}
+}
+
+func parse_json_safe(text) {
+	obj := {}
+	err := null
+	try {
+		obj := parse_json(text)
+	} except e {
+		err := e
+	}
+	if type(err) != "null" {
+		return {
+			"ok": false,
+			"error": to_string(err),
+			"data": {}
+		}
+	}
+	return {
+		"ok": true,
+		"data": obj
+	}
+}
+
+func start_server(port, env_prefix, log_file) {
+	cmd := "env " + env_prefix + " " + kujo_bin + " run main.kujo --interpreter serve --host 127.0.0.1 --port " + to_string(port) + " > " + log_file + " 2>&1 & echo $!"
+	res := run_cmd(cmd)
+	pid := trim(dict_get_or(res, "stdout", ""))
+	return pid
+}
+
+func stop_server(pid) {
+	if pid == "" {
+		return true
+	}
+	_ := run_cmd("kill " + pid + " >/dev/null 2>&1 || true")
+	_ := run_cmd("wait " + pid + " >/dev/null 2>&1 || true")
+	return true
+}
+
+func wait_for_health(port) {
+	attempt := 0
+	while attempt < 5000 {
+		res := run_cmd("curl -s http://127.0.0.1:" + to_string(port) + "/health")
+		body := trim(dict_get_or(res, "stdout", ""))
+		if body != "" {
+			parsed := parse_json_safe(body)
+			if dict_get_or(parsed, "ok", false) == true {
+				payload := dict_get_or(parsed, "data", {})
+				if dict_get_or(payload, "ok", false) == true {
+					return true
+				}
+			}
+		}
+		attempt = attempt + 1
+	}
+	return false
+}
+
+func post_ingest_job(port, idempotency_key) {
+	cmd := "curl -s -X POST http://127.0.0.1:" + to_string(port) + "/ingest/jobs -H \"Content-Type: application/json\" -H \"X-Idempotency-Key: " + idempotency_key + "\" -d '{\"path\":\"./examples/kujo_docs\",\"recursive\":true}'"
+	return run_cmd(cmd)
+}
+
+port := 42000 + (current_timestamp() % 10000)
+env_prefix := "KUJO_RAG_ENV=development KUJO_RAG_API_AUTH_PROVIDER=none KUJO_RAG_API_STARTUP_GRACE_MS=0 KUJO_RAG_API_INGEST_IDEMPOTENCY_ENABLED=true KUJO_RAG_API_INGEST_IDEMPOTENCY_WINDOW_SEC=3600"
+pid := start_server(port, env_prefix, "/tmp/kujo_rag_ingest_idempotency.log")
+assert_true(to_bool(pid != ""))
+assert_true(to_bool(wait_for_health(port) == true))
+
+first_res := post_ingest_job(port, "idem-001")
+first_parsed := parse_json_safe(dict_get_or(first_res, "stdout", ""))
+assert_true(to_bool(dict_get_or(first_parsed, "ok", false) == true))
+first_payload := dict_get_or(first_parsed, "data", {})
+assert_true(to_bool(dict_get_or(first_payload, "ok", false) == true))
+first_data := dict_get_or(first_payload, "data", {})
+first_job_id := trim(to_string(dict_get_or(first_data, "job_id", "")))
+assert_true(to_bool(first_job_id != ""))
+first_idem := dict_get_or(first_data, "idempotency", {})
+assert_true(to_bool(dict_get_or(first_idem, "enabled", false) == true))
+assert_true(to_bool(dict_get_or(first_idem, "deduplicated", true) == false))
+
+second_res := post_ingest_job(port, "idem-001")
+second_parsed := parse_json_safe(dict_get_or(second_res, "stdout", ""))
+assert_true(to_bool(dict_get_or(second_parsed, "ok", false) == true))
+second_payload := dict_get_or(second_parsed, "data", {})
+assert_true(to_bool(dict_get_or(second_payload, "ok", false) == true))
+second_data := dict_get_or(second_payload, "data", {})
+second_job_id := trim(to_string(dict_get_or(second_data, "job_id", "")))
+assert_true(to_bool(second_job_id == first_job_id))
+second_idem := dict_get_or(second_data, "idempotency", {})
+assert_true(to_bool(dict_get_or(second_idem, "deduplicated", false) == true))
+assert_true(to_bool(dict_get_or(second_idem, "expires_at", 0) > 0))
+
+status_res := run_cmd("curl -s -X POST http://127.0.0.1:" + to_string(port) + "/ingest/jobs/status -H \"Content-Type: application/json\" -d '{\"job_id\":\"" + first_job_id + "\"}'")
+status_parsed := parse_json_safe(dict_get_or(status_res, "stdout", ""))
+assert_true(to_bool(dict_get_or(status_parsed, "ok", false) == true))
+assert_true(to_bool(dict_get_or(dict_get_or(status_parsed, "data", {}), "ok", false) == true))
+
+_ := stop_server(pid)
+
+print("test_ingest_idempotency: ok")

@@ -1,0 +1,191 @@
+from src.retention_policy import apply_retention_policy
+from src.common import dict_get_or
+
+kujo_bin := env_or("KUJO_BIN", "/path/to/kujo/target/release/kujo")
+
+func expect(condition, message) {
+	if to_bool(condition) == false {
+		print("test_retention_legal_hold_controls assertion failed: " + message)
+		exit(1)
+	}
+}
+
+func run_cmd(command) {
+	res := execute_status(command, {"timeout_ms": 120000})
+	if type(res) == "struct" {
+		return {
+			"ok": res.success,
+			"stdout": to_string(res.stdout),
+			"stderr": to_string(res.stderr)
+		}
+	}
+	return {
+		"ok": false,
+		"stdout": "",
+		"stderr": "invalid execute_status result"
+	}
+}
+
+func parse_json_safe(text) {
+	obj := {}
+	err := null
+	try {
+		obj := parse_json(text)
+	} except e {
+		err := e
+	}
+	if type(err) != "null" {
+		return {
+			"ok": false,
+			"data": {},
+			"error": to_string(err)
+		}
+	}
+	return {
+		"ok": true,
+		"data": obj
+	}
+}
+
+func post_json(port, path, payload) {
+	cmd := "curl -s -X POST http://127.0.0.1:" + to_string(port) + path + " -H \"Content-Type: application/json\" -d '" + payload + "'"
+	return run_cmd(cmd)
+}
+
+func start_server(port, env_prefix, log_file) {
+	cmd := "env " + env_prefix + " " + kujo_bin + " run main.kujo --interpreter serve --host 127.0.0.1 --port " + to_string(port) + " > " + log_file + " 2>&1 & echo $!"
+	res := run_cmd(cmd)
+	return trim(dict_get_or(res, "stdout", ""))
+}
+
+func stop_server(pid) {
+	if pid == "" {
+		return true
+	}
+	_ := run_cmd("kill " + pid + " >/dev/null 2>&1 || true")
+	_ = run_cmd("wait " + pid + " >/dev/null 2>&1 || true")
+	return true
+}
+
+func wait_for_health(port) {
+	attempt := 0
+	while attempt < 800 {
+		res := run_cmd("curl -s http://127.0.0.1:" + to_string(port) + "/health")
+		parsed := parse_json_safe(dict_get_or(res, "stdout", ""))
+		if dict_get_or(parsed, "ok", false) == true {
+			payload := dict_get_or(parsed, "data", {})
+			if dict_get_or(payload, "ok", false) == true {
+				return true
+			}
+		}
+		attempt = attempt + 1
+	}
+	return false
+}
+
+func sample_index(now_ms) {
+	day_ms := 86400000
+	old_ts := now_ms - (400 * day_ms)
+	new_ts := now_ms - (10 * day_ms)
+	return {
+		"chunks": [{
+			"chunk_id": "chunk_old",
+			"doc_id": "doc_old",
+			"path": "./old.md",
+			"line_start": 1,
+			"line_end": 1,
+			"text": "old data",
+			"meta": {
+				"ingested_at_ms": old_ts
+			}
+		}, {
+			"chunk_id": "chunk_new",
+			"doc_id": "doc_new",
+			"path": "./new.md",
+			"line_start": 1,
+			"line_end": 1,
+			"text": "new data",
+			"meta": {
+				"ingested_at_ms": new_ts
+			}
+		}],
+		"vectors": [{
+			"chunk_id": "chunk_old",
+			"embedding": [0.0, 0.0, 0.0, 0.0]
+		}, {
+			"chunk_id": "chunk_new",
+			"embedding": [0.0, 0.0, 0.0, 0.0]
+		}],
+		"lexical": [{
+			"chunk_id": "chunk_old",
+			"term_freq": {"old": 1},
+			"term_count": 1
+		}, {
+			"chunk_id": "chunk_new",
+			"term_freq": {"new": 1},
+			"term_count": 1
+		}],
+		"meta": {}
+	}
+}
+
+func test_retention_purge_logic() {
+	now_ms := 2000000000000
+	index := sample_index(now_ms)
+	result := apply_retention_policy(index, now_ms, 365, false)
+	expect(dict_get_or(result, "purged_chunks", 0) == 1, "retention purge should remove expired chunk")
+	expect(dict_get_or(result, "retained_chunks", 0) == 1, "retention purge should keep non-expired chunk")
+
+	held := apply_retention_policy(index, now_ms, 365, true)
+	expect(dict_get_or(held, "legal_hold_active", false) == true, "legal hold flag should be reflected in retention result")
+	expect(dict_get_or(held, "purged_chunks", -1) == 0, "legal hold should block chunk deletion")
+}
+
+func test_retention_api_legal_hold_flow() {
+	base_port := 22000 + (current_timestamp() % 1000)
+	port := base_port
+	env_prefix := "KUJO_RAG_API_AUTH_PROVIDER=none KUJO_RAG_RETENTION_POLICY_ENABLED=true KUJO_RAG_RETENTION_DEFAULT_TTL_DAYS=365 KUJO_RAG_RETENTION_LEGAL_HOLD_ENABLED=true"
+	pid := start_server(port, env_prefix, "/tmp/kujo_rag_retention_controls.log")
+	expect(pid != "", "server pid should be available")
+	expect(wait_for_health(port) == true, "server health should become ready")
+
+	policy_res := post_json(port, "/retention/policy", "{\"namespace\":\"default\",\"enabled\":true,\"ttl_days\":30}")
+	policy_parsed := parse_json_safe(dict_get_or(policy_res, "stdout", ""))
+	expect(dict_get_or(policy_parsed, "ok", false) == true, "policy response should parse")
+	policy_payload := dict_get_or(policy_parsed, "data", {})
+	expect(dict_get_or(policy_payload, "ok", false) == true, "policy update should succeed")
+
+	start_hold_res := post_json(port, "/retention/legal-hold/start", "{\"namespace\":\"default\",\"reason\":\"compliance_hold\"}")
+	start_hold_parsed := parse_json_safe(dict_get_or(start_hold_res, "stdout", ""))
+	expect(dict_get_or(start_hold_parsed, "ok", false) == true, "legal hold start response should parse")
+	expect(dict_get_or(dict_get_or(start_hold_parsed, "data", {}), "ok", false) == true, "legal hold start should succeed")
+
+	blocked_purge_res := post_json(port, "/retention/purge", "{\"namespace\":\"default\"}")
+	blocked_purge_parsed := parse_json_safe(dict_get_or(blocked_purge_res, "stdout", ""))
+	expect(dict_get_or(blocked_purge_parsed, "ok", false) == true, "blocked purge response should parse")
+	blocked_error := dict_get_or(dict_get_or(blocked_purge_parsed, "data", {}), "error", {})
+	expect(dict_get_or(blocked_error, "code", "") == "legal_hold_active", "purge should be blocked while legal hold is active")
+
+	stop_hold_res := post_json(port, "/retention/legal-hold/stop", "{\"namespace\":\"default\"}")
+	stop_hold_parsed := parse_json_safe(dict_get_or(stop_hold_res, "stdout", ""))
+	expect(dict_get_or(stop_hold_parsed, "ok", false) == true, "legal hold stop response should parse")
+	expect(dict_get_or(dict_get_or(stop_hold_parsed, "data", {}), "ok", false) == true, "legal hold stop should succeed")
+
+	purge_res := post_json(port, "/retention/purge", "{\"namespace\":\"default\"}")
+	purge_parsed := parse_json_safe(dict_get_or(purge_res, "stdout", ""))
+	expect(dict_get_or(purge_parsed, "ok", false) == true, "purge response should parse")
+	purge_payload := dict_get_or(purge_parsed, "data", {})
+	expect(dict_get_or(purge_payload, "ok", false) == true, "purge should succeed after legal hold is released")
+	purge_data := dict_get_or(purge_payload, "data", {})
+	expect(has_key(purge_data, "purge") == 1, "purge response should include purge summary")
+
+	_ := stop_server(pid)
+}
+
+func run_all() {
+	test_retention_purge_logic()
+	test_retention_api_legal_hold_flow()
+	print("test_retention_legal_hold_controls: ok")
+}
+
+run_all()

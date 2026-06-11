@@ -1,0 +1,5 @@
+{
+	"total_warning_count_max": 500,
+	"total_undefined_function_warning_count_max": 500,
+	"baseline_note": "Baseline refreshed from enterprise hardening validation on 2026-05-26 (observed total warnings: 464)"
+}

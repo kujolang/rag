@@ -1,0 +1,66 @@
+{
+	"dataset_version": "2026-05-25-canary-v1",
+	"dataset_domains": ["docs", "code", "policy", "operations", "incident"],
+	"queries": [
+		{
+			"id": "canary_overview_auth",
+			"domain": "docs",
+			"query": "What authentication model is used for service-to-service traffic?",
+			"expected_path_contains": "overview.md",
+			"required_answer_terms_any": ["mtls", "jwt"],
+			"min_citations": 1,
+			"min_confidence": 0.20,
+			"min_grounding_score": 0.5
+		},
+		{
+			"id": "canary_code_healthz",
+			"domain": "code",
+			"query": "In the Flask sample service code, which GET route does the healthz handler use?",
+			"expected_path_contains": "api_service.py",
+			"required_answer_terms_any": ["/healthz", "healthz"],
+			"min_citations": 1,
+			"min_confidence": 0.20,
+			"min_grounding_score": 0.5
+		},
+		{
+			"id": "canary_policy_retention",
+			"domain": "policy",
+			"query": "How long are bronze and gold logs retained?",
+			"expected_path_contains": "data_retention.md",
+			"required_answer_terms_any": ["14", "365", "days"],
+			"min_citations": 1,
+			"min_confidence": 0.20,
+			"min_grounding_score": 0.5
+		},
+		{
+			"id": "canary_ops_canary_step",
+			"domain": "operations",
+			"query": "What percentage of traffic is shifted during the first canary step?",
+			"expected_path_contains": "deployment_runbook.md",
+			"required_answer_terms_any": ["5", "percent", "canary"],
+			"min_citations": 1,
+			"min_confidence": 0.20,
+			"min_grounding_score": 0.5
+		},
+		{
+			"id": "canary_incident_trigger",
+			"domain": "incident",
+			"query": "What triggered the checkout latency incident?",
+			"expected_path_contains": "incident_postmortem.txt",
+			"required_answer_terms_any": ["cache", "saturation", "warmup"],
+			"min_citations": 1,
+			"min_confidence": 0.20,
+			"min_grounding_score": 0.5
+		},
+		{
+			"id": "canary_connectors_wave",
+			"domain": "docs",
+			"query": "Which connectors are included in wave 1 of the roadmap?",
+			"expected_path_contains": "connectors.md",
+			"required_answer_terms_any": ["jira", "sharepoint", "wave 1"],
+			"min_citations": 1,
+			"min_confidence": 0.20,
+			"min_grounding_score": 0.5
+		}
+	]
+}

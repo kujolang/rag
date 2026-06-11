@@ -1,0 +1,50 @@
+name: penetration-test-remediation
+
+on:
+  schedule:
+    - cron: "0 8 * * 2"
+  workflow_dispatch:
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      KUJO_RUNTIME_REF: "7819d1475e909ec88f510c9927445791ea928836"
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Build Kujo runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          git init /tmp/kujo-runtime
+          git -C /tmp/kujo-runtime remote add origin https://github.com/kujolang/kujo.git
+          git -C /tmp/kujo-runtime fetch --depth 1 origin "$KUJO_RUNTIME_REF"
+          git -C /tmp/kujo-runtime checkout --detach "$KUJO_RUNTIME_REF"
+          cargo build --release --locked --manifest-path /tmp/kujo-runtime/Cargo.toml
+          echo "/tmp/kujo-runtime/target/release" >> "$GITHUB_PATH"
+
+      - name: Verify Kujo runtime
+        run: kujo --version
+
+      - name: Run penetration-test remediation review
+        shell: bash
+        run: |
+          set -euo pipefail
+          kujo run scripts/run_penetration_test_remediation_review.kujo --interpreter > penetration-test-remediation.json
+          cat penetration-test-remediation.json
+
+      - name: Upload penetration-test remediation artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: penetration-test-remediation
+          path: |
+            penetration-test-remediation.json
+            results/security/penetration_test_remediation_status.json

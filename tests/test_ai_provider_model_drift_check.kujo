@@ -1,0 +1,191 @@
+from src.common import dict_get_or
+from src.tests_helpers import assert_true
+
+kujo_bin := env_or("KUJO_BIN", "/path/to/kujo/target/debug/kujo")
+
+func parse_json_safe(text) {
+	payload := {}
+	err := null
+	try {
+		payload := parse_json(text)
+	} except e {
+		err := e
+	}
+	if type(err) != "null" {
+		return {
+			"ok": false,
+			"data": {},
+			"error": to_string(err)
+		}
+	}
+	return {
+		"ok": true,
+		"data": payload,
+		"error": ""
+	}
+}
+
+suffix := to_string(current_timestamp())
+controls_pass_path := "/tmp/kujo_rag_ai_drift_controls_pass_" + suffix + ".json"
+controls_provider_fail_path := "/tmp/kujo_rag_ai_drift_controls_provider_fail_" + suffix + ".json"
+controls_output_fail_path := "/tmp/kujo_rag_ai_drift_controls_output_fail_" + suffix + ".json"
+release_report_path := "/tmp/kujo_rag_ai_drift_release_report_" + suffix + ".json"
+output_path := "/tmp/kujo_rag_ai_drift_report_" + suffix + ".json"
+
+write_file(release_report_path, to_json({
+	"ok": true,
+	"dataset_version": "drift-fixture-v1",
+	"build_summary": {
+		"provider": "hash"
+	},
+	"results": [
+		{
+			"id": "overview_auth_model",
+			"ok": true,
+			"policy_reason": "",
+			"citations_count": 4,
+			"confidence": 0.62
+		},
+		{
+			"id": "adversarial_prompt_injection_refusal",
+			"ok": true,
+			"policy_reason": "unsafe_or_unsupported_query",
+			"citations_count": 0,
+			"confidence": 0.0
+		}
+	]
+}))
+
+write_file(controls_pass_path, to_json({
+	"expected_dataset_version": "drift-fixture-v1",
+	"min_reference_cases": 2,
+	"expected_runtime": {
+		"embedding_provider": "hash",
+		"ai_embed_endpoint": "",
+		"ai_embed_model": "",
+		"chat_endpoint": "",
+		"chat_model": ""
+	},
+	"reference_cases": [
+		{
+			"id": "overview_auth_model",
+			"expected_ok": true,
+			"min_citations": 3,
+			"min_confidence": 0.6,
+			"expected_confidence_band": "medium"
+		},
+		{
+			"id": "adversarial_prompt_injection_refusal",
+			"expected_ok": true,
+			"expected_policy_reason": "unsafe_or_unsupported_query",
+			"min_citations": 0,
+			"min_confidence": 0.0,
+			"expected_confidence_band": "low"
+		}
+	]
+}))
+
+write_file(controls_provider_fail_path, to_json({
+	"expected_dataset_version": "drift-fixture-v1",
+	"min_reference_cases": 2,
+	"expected_runtime": {
+		"embedding_provider": "ai",
+		"ai_embed_endpoint": "",
+		"ai_embed_model": "",
+		"chat_endpoint": "",
+		"chat_model": ""
+	},
+	"reference_cases": [
+		{
+			"id": "overview_auth_model",
+			"expected_ok": true,
+			"min_citations": 3,
+			"min_confidence": 0.6
+		},
+		{
+			"id": "adversarial_prompt_injection_refusal",
+			"expected_ok": true,
+			"expected_policy_reason": "unsafe_or_unsupported_query",
+			"min_citations": 0,
+			"min_confidence": 0.0
+		}
+	]
+}))
+
+write_file(controls_output_fail_path, to_json({
+	"expected_dataset_version": "drift-fixture-v1",
+	"min_reference_cases": 2,
+	"expected_runtime": {
+		"embedding_provider": "hash",
+		"ai_embed_endpoint": "",
+		"ai_embed_model": "",
+		"chat_endpoint": "",
+		"chat_model": ""
+	},
+	"reference_cases": [
+		{
+			"id": "overview_auth_model",
+			"expected_ok": true,
+			"min_citations": 4,
+			"min_confidence": 0.9,
+			"expected_confidence_band": "high"
+		},
+		{
+			"id": "adversarial_prompt_injection_refusal",
+			"expected_ok": true,
+			"expected_policy_reason": "unsafe_or_unsupported_query",
+			"min_citations": 0,
+			"min_confidence": 0.0,
+			"expected_confidence_band": "low"
+		}
+	]
+}))
+
+cmd_pass := "KUJO_RAG_AI_DRIFT_CONTROLS_PATH=" + controls_pass_path + " KUJO_RAG_AI_DRIFT_RELEASE_REPORT_PATH=" + release_report_path + " KUJO_RAG_AI_DRIFT_REPORT_PATH=" + output_path + " " + kujo_bin + " run scripts/run_ai_provider_model_drift_check.kujo --interpreter"
+pass_res := execute_status(cmd_pass, {"timeout_ms": 240000})
+assert_true(to_bool(type(pass_res) == "struct"))
+assert_true(to_bool(pass_res.success == true))
+pass_parsed := parse_json_safe(to_string(pass_res.stdout))
+assert_true(to_bool(dict_get_or(pass_parsed, "ok", false) == true))
+pass_payload := dict_get_or(pass_parsed, "data", {})
+assert_true(to_bool(dict_get_or(pass_payload, "ok", false) == true))
+assert_true(to_bool(dict_get_or(dict_get_or(pass_payload, "gates", {}), "runtime_pinned", false) == true))
+assert_true(to_bool(dict_get_or(dict_get_or(pass_payload, "gates", {}), "reference_outputs", false) == true))
+
+cmd_provider_fail := "KUJO_RAG_AI_DRIFT_CONTROLS_PATH=" + controls_provider_fail_path + " KUJO_RAG_AI_DRIFT_RELEASE_REPORT_PATH=" + release_report_path + " KUJO_RAG_AI_DRIFT_REPORT_PATH=" + output_path + " " + kujo_bin + " run scripts/run_ai_provider_model_drift_check.kujo --interpreter"
+provider_fail_res := execute_status(cmd_provider_fail, {"timeout_ms": 240000})
+assert_true(to_bool(type(provider_fail_res) == "struct"))
+assert_true(to_bool(provider_fail_res.success == false))
+provider_fail_parsed := parse_json_safe(to_string(provider_fail_res.stdout))
+assert_true(to_bool(dict_get_or(provider_fail_parsed, "ok", false) == true))
+provider_fail_payload := dict_get_or(provider_fail_parsed, "data", {})
+assert_true(to_bool(dict_get_or(provider_fail_payload, "ok", true) == false))
+assert_true(to_bool(dict_get_or(dict_get_or(provider_fail_payload, "gates", {}), "runtime_pinned", true) == false))
+
+cmd_output_fail := "KUJO_RAG_AI_DRIFT_CONTROLS_PATH=" + controls_output_fail_path + " KUJO_RAG_AI_DRIFT_RELEASE_REPORT_PATH=" + release_report_path + " KUJO_RAG_AI_DRIFT_REPORT_PATH=" + output_path + " " + kujo_bin + " run scripts/run_ai_provider_model_drift_check.kujo --interpreter"
+output_fail_res := execute_status(cmd_output_fail, {"timeout_ms": 240000})
+assert_true(to_bool(type(output_fail_res) == "struct"))
+assert_true(to_bool(output_fail_res.success == false))
+output_fail_parsed := parse_json_safe(to_string(output_fail_res.stdout))
+assert_true(to_bool(dict_get_or(output_fail_parsed, "ok", false) == true))
+output_fail_payload := dict_get_or(output_fail_parsed, "data", {})
+assert_true(to_bool(dict_get_or(output_fail_payload, "ok", true) == false))
+assert_true(to_bool(dict_get_or(dict_get_or(output_fail_payload, "gates", {}), "reference_outputs", true) == false))
+
+if file_exists(controls_pass_path) {
+	delete_file(controls_pass_path)
+}
+if file_exists(controls_provider_fail_path) {
+	delete_file(controls_provider_fail_path)
+}
+if file_exists(controls_output_fail_path) {
+	delete_file(controls_output_fail_path)
+}
+if file_exists(release_report_path) {
+	delete_file(release_report_path)
+}
+if file_exists(output_path) {
+	delete_file(output_path)
+}
+
+print("test_ai_provider_model_drift_check: ok")

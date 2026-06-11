@@ -1,0 +1,157 @@
+from src.common import dict_get_or
+
+kujo_bin := env_or("KUJO_BIN", "/path/to/kujo/target/release/kujo")
+
+func expect(condition, message) {
+	if to_bool(condition) == false {
+		print("test_privacy_export_delete_workflows assertion failed: " + message)
+		exit(1)
+	}
+}
+
+func run_cmd(command) {
+	res := execute_status(command, {"timeout_ms": 120000})
+	if type(res) == "struct" {
+		return {
+			"ok": res.success,
+			"stdout": to_string(res.stdout),
+			"stderr": to_string(res.stderr)
+		}
+	}
+	return {
+		"ok": false,
+		"stdout": "",
+		"stderr": "invalid execute_status result"
+	}
+}
+
+func parse_json_safe(text) {
+	obj := {}
+	err := null
+	try {
+		obj := parse_json(text)
+	} except e {
+		err := e
+	}
+	if type(err) != "null" {
+		return {
+			"ok": false,
+			"data": {},
+			"error": to_string(err)
+		}
+	}
+	return {
+		"ok": true,
+		"data": obj
+	}
+}
+
+func post_json(port, path, payload) {
+	cmd := "curl -s -X POST http://127.0.0.1:" + to_string(port) + path + " -H \"Content-Type: application/json\" -d '" + payload + "'"
+	return run_cmd(cmd)
+}
+
+func start_server(port, env_prefix, log_file) {
+	cmd := "env " + env_prefix + " " + kujo_bin + " run main.kujo --interpreter serve --host 127.0.0.1 --port " + to_string(port) + " > " + log_file + " 2>&1 & echo $!"
+	res := run_cmd(cmd)
+	return trim(dict_get_or(res, "stdout", ""))
+}
+
+func stop_server(pid) {
+	if pid == "" {
+		return true
+	}
+	_ := run_cmd("kill " + pid + " >/dev/null 2>&1 || true")
+	_ = run_cmd("wait " + pid + " >/dev/null 2>&1 || true")
+	return true
+}
+
+func wait_for_health(port) {
+	attempt := 0
+	while attempt < 800 {
+		res := run_cmd("curl -s http://127.0.0.1:" + to_string(port) + "/health")
+		parsed := parse_json_safe(dict_get_or(res, "stdout", ""))
+		if dict_get_or(parsed, "ok", false) == true {
+			payload := dict_get_or(parsed, "data", {})
+			if dict_get_or(payload, "ok", false) == true {
+				return true
+			}
+		}
+		attempt = attempt + 1
+	}
+	return false
+}
+
+func test_privacy_export_delete_api_flow() {
+	base_port := 23000 + (current_timestamp() % 1000)
+	port := base_port
+	env_prefix := "KUJO_RAG_API_AUTH_PROVIDER=none KUJO_RAG_RETENTION_POLICY_ENABLED=true KUJO_RAG_RETENTION_LEGAL_HOLD_ENABLED=true"
+	pid := start_server(port, env_prefix, "/tmp/kujo_rag_privacy_workflows.log")
+	expect(pid != "", "server pid should be available")
+	expect(wait_for_health(port) == true, "server health should become ready")
+
+	namespace := "privacytenant"
+	ingest_payload := "{\"path\":\"./examples/kujo_docs\",\"recursive\":true,\"namespace\":\"" + namespace + "\"}"
+	ingest_res := post_json(port, "/ingest", ingest_payload)
+	ingest_parsed := parse_json_safe(dict_get_or(ingest_res, "stdout", ""))
+	expect(dict_get_or(ingest_parsed, "ok", false) == true, "ingest response should parse")
+	expect(dict_get_or(dict_get_or(ingest_parsed, "data", {}), "ok", false) == true, "ingest should succeed")
+
+	export_payload := "{\"namespace\":\"" + namespace + "\",\"export_type\":\"privacy_request\"}"
+	export_res := post_json(port, "/privacy/export", export_payload)
+	export_parsed := parse_json_safe(dict_get_or(export_res, "stdout", ""))
+	expect(dict_get_or(export_parsed, "ok", false) == true, "privacy export response should parse")
+	export_wrapper := dict_get_or(export_parsed, "data", {})
+	expect(dict_get_or(export_wrapper, "ok", false) == true, "privacy export should succeed")
+	export_data := dict_get_or(export_wrapper, "data", {})
+	export_summary := dict_get_or(export_data, "summary", {})
+	expect(dict_get_or(export_summary, "chunk_count", 0) > 0, "privacy export should report indexed chunks")
+	export_artifact := dict_get_or(export_data, "export", {})
+	export_path := to_string(dict_get_or(export_artifact, "path", ""))
+	expect(export_path != "", "privacy export should include artifact path")
+	expect(file_exists(export_path), "privacy export artifact should exist")
+
+	delete_payload := "{\"namespace\":\"" + namespace + "\",\"reason\":\"user_delete_request\"}"
+	delete_res := post_json(port, "/privacy/delete", delete_payload)
+	delete_parsed := parse_json_safe(dict_get_or(delete_res, "stdout", ""))
+	expect(dict_get_or(delete_parsed, "ok", false) == true, "privacy delete response should parse")
+	delete_wrapper := dict_get_or(delete_parsed, "data", {})
+	expect(dict_get_or(delete_wrapper, "ok", false) == true, "privacy delete should succeed")
+	delete_data := dict_get_or(delete_wrapper, "data", {})
+	expect(dict_get_or(delete_data, "deleted", false) == true, "privacy delete should confirm deleted=true")
+	summary_before := dict_get_or(delete_data, "summary_before", {})
+	summary_after := dict_get_or(delete_data, "summary_after", {})
+	expect(dict_get_or(summary_before, "chunk_count", 0) > 0, "privacy delete should report non-empty pre-delete summary")
+	expect(dict_get_or(summary_after, "chunk_count", -1) == 0, "privacy delete should report zero chunks after deletion")
+	delete_receipt := dict_get_or(delete_data, "deletion_receipt", {})
+	receipt_path := to_string(dict_get_or(delete_receipt, "path", ""))
+	expect(receipt_path != "", "privacy delete should include deletion receipt path")
+	expect(file_exists(receipt_path), "privacy delete receipt artifact should exist")
+
+	hold_namespace := "privacyhold"
+	hold_ingest_payload := "{\"path\":\"./examples/kujo_docs\",\"recursive\":true,\"namespace\":\"" + hold_namespace + "\"}"
+	hold_ingest_res := post_json(port, "/ingest", hold_ingest_payload)
+	hold_ingest_parsed := parse_json_safe(dict_get_or(hold_ingest_res, "stdout", ""))
+	expect(dict_get_or(hold_ingest_parsed, "ok", false) == true, "hold ingest response should parse")
+	expect(dict_get_or(dict_get_or(hold_ingest_parsed, "data", {}), "ok", false) == true, "hold ingest should succeed")
+
+	start_hold_res := post_json(port, "/retention/legal-hold/start", "{\"namespace\":\"" + hold_namespace + "\",\"reason\":\"privacy_hold\"}")
+	start_hold_parsed := parse_json_safe(dict_get_or(start_hold_res, "stdout", ""))
+	expect(dict_get_or(start_hold_parsed, "ok", false) == true, "hold start response should parse")
+	expect(dict_get_or(dict_get_or(start_hold_parsed, "data", {}), "ok", false) == true, "hold start should succeed")
+
+	blocked_delete_res := post_json(port, "/privacy/delete", "{\"namespace\":\"" + hold_namespace + "\"}")
+	blocked_delete_parsed := parse_json_safe(dict_get_or(blocked_delete_res, "stdout", ""))
+	expect(dict_get_or(blocked_delete_parsed, "ok", false) == true, "blocked delete response should parse")
+	blocked_error := dict_get_or(dict_get_or(blocked_delete_parsed, "data", {}), "error", {})
+	expect(dict_get_or(blocked_error, "code", "") == "legal_hold_active", "privacy delete should be blocked while legal hold is active")
+
+	_ := stop_server(pid)
+}
+
+func run_all() {
+	test_privacy_export_delete_api_flow()
+	print("test_privacy_export_delete_workflows: ok")
+}
+
+run_all()

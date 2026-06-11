@@ -1,0 +1,126 @@
+from src.common import dict_get_or, read_json_file_or, str_or, write_json_file
+
+func ensure_dir(path_value) {
+	if path_value == "" || path_value == "." {
+		return true
+	}
+	if path_exists(path_value) {
+		return true
+	}
+	parent := dirname(path_value)
+	if parent != "" && parent != "." && parent != path_value {
+		_ = ensure_dir(parent)
+	}
+	create_dir(path_value)
+	return true
+}
+
+func ensure_parent_dir(path_value) {
+	dir := dirname(path_value)
+	if dir == "" || dir == "." {
+		return true
+	}
+	return ensure_dir(dir)
+}
+
+func normalize_text(value) {
+	return trim(str_or(value, ""))
+}
+
+func count_occurrences(text, token) {
+	if type(text) != "string" || type(token) != "string" {
+		return 0
+	}
+	if token == "" {
+		return 0
+	}
+	parts := split(text, token)
+	if len(parts) == 0 {
+		return 0
+	}
+	return len(parts) - 1
+}
+
+func text_has_token(text, token) {
+	return count_occurrences(text, token) > 0
+}
+
+dockerfile_path := env_or("KUJO_RAG_DOCKERFILE_PATH", "./Dockerfile")
+compose_path := env_or("KUJO_RAG_DOCKER_COMPOSE_PATH", "./docker-compose.yml")
+devcontainer_path := env_or("KUJO_RAG_DEVCONTAINER_PATH", "./.devcontainer/devcontainer.json")
+doc_path := env_or("KUJO_RAG_CONTAINER_ENV_DOC_PATH", "./docs/containerized-dev-environment.md")
+release_process_doc_path := env_or("KUJO_RAG_CONTAINER_ENV_RELEASE_PROCESS_DOC_PATH", "./docs/release-process.md")
+workflow_path := env_or("KUJO_RAG_CONTAINER_ENV_WORKFLOW_PATH", "./.github/workflows/containerized-dev-environment-review.yml")
+output_path := env_or("KUJO_RAG_CONTAINER_ENV_OUTPUT_PATH", "./results/environment/containerized_dev_environment_status.json")
+
+_ = ensure_parent_dir(output_path)
+
+dockerfile_exists := file_exists(dockerfile_path)
+dockerfile_text := ""
+if dockerfile_exists {
+	dockerfile_text = read_file(dockerfile_path)
+}
+
+dockerfile_defined := dockerfile_exists && text_has_token(dockerfile_text, "cargo build --release --locked") && text_has_token(dockerfile_text, "CMD [\"kujo\", \"run\", \"main.kujo\", \"--interpreter\", \"serve\"]")
+
+compose_exists := file_exists(compose_path)
+compose_text := ""
+if compose_exists {
+	compose_text = read_file(compose_path)
+}
+compose_defined := compose_exists && text_has_token(compose_text, "services:") && text_has_token(compose_text, "kujo-rag:") && text_has_token(compose_text, "command: [\"kujo\", \"run\", \"main.kujo\", \"--interpreter\", \"serve\"]") && text_has_token(compose_text, "8787:8787")
+
+devcontainer_json := read_json_file_or(devcontainer_path, {})
+devcontainer_defined := type(devcontainer_json) == "dict" && normalize_text(dict_get_or(devcontainer_json, "name", "")) != "" && normalize_text(dict_get_or(devcontainer_json, "workspaceFolder", "")) == "/workspace" && text_has_token(normalize_text(dict_get_or(devcontainer_json, "postCreateCommand", "")), "kujo --version")
+
+doc_exists := file_exists(doc_path)
+doc_text := ""
+if doc_exists {
+	doc_text = read_file(doc_path)
+}
+doc_defined := doc_exists && text_has_token(doc_text, "One-Command Container Quick Start") && text_has_token(doc_text, "docker compose up --build") && text_has_token(doc_text, "Native Workflow Compatibility") && text_has_token(doc_text, "run_containerized_dev_environment_review.kujo")
+
+release_process_doc := ""
+release_process_exists := file_exists(release_process_doc_path)
+if release_process_exists {
+	release_process_doc = read_file(release_process_doc_path)
+}
+release_process_linked := release_process_exists && text_has_token(release_process_doc, "run_containerized_dev_environment_review.kujo") && text_has_token(release_process_doc, "docs/containerized-dev-environment.md")
+
+workflow_exists := file_exists(workflow_path)
+workflow_text := ""
+if workflow_exists {
+	workflow_text = read_file(workflow_path)
+}
+workflow_defined := workflow_exists && text_has_token(workflow_text, "containerized-dev-environment-review") && text_has_token(workflow_text, "run_containerized_dev_environment_review.kujo") && text_has_token(workflow_text, "schedule:")
+
+ok := dockerfile_defined && compose_defined && devcontainer_defined && doc_defined && release_process_linked && workflow_defined
+
+result := {
+	"ok": ok,
+	"generated_at_unix_ms": current_timestamp(),
+	"dockerfile_path": dockerfile_path,
+	"compose_path": compose_path,
+	"devcontainer_path": devcontainer_path,
+	"doc_path": doc_path,
+	"release_process_doc_path": release_process_doc_path,
+	"workflow_path": workflow_path,
+	"gates": {
+		"dockerfile_defined": dockerfile_defined,
+		"compose_defined": compose_defined,
+		"devcontainer_defined": devcontainer_defined,
+		"doc_defined": doc_defined,
+		"release_process_linked": release_process_linked,
+		"workflow_defined": workflow_defined
+	}
+}
+
+if file_exists(output_path) {
+	delete_file(output_path)
+}
+write_json_file(output_path, result)
+print(to_json(result))
+
+if !ok {
+	exit(1)
+}

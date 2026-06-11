@@ -1,0 +1,77 @@
+from src.tests_helpers import assert_true
+from src.common import dict_get_or
+from src.config import load_config, validate_config
+
+func has_error_code(diagnostics, code) {
+	errors := dict_get_or(diagnostics, "errors", [])
+	i := 0
+	while i < len(errors) {
+		entry := errors[i]
+		if dict_get_or(entry, "code", "") == code {
+			return true
+		}
+		i = i + 1
+	}
+	return false
+}
+
+valid_cfg := load_config({
+	"index_path": "./data/config_integrity_valid.json",
+	"api_host": "127.0.0.1",
+	"api_port": 8787,
+	"api_ingest_allowed_roots": ["./examples"],
+	"strict_config": false,
+	"runtime_environment": "development"
+})
+valid_diag := validate_config(valid_cfg)
+assert_true(to_bool(dict_get_or(valid_diag, "ok", false) == true))
+
+invalid_cfg := load_config({
+	"index_path": "",
+	"api_host": "",
+	"api_port": 70000,
+	"api_ingest_allowed_roots": []
+})
+invalid_diag := validate_config(invalid_cfg)
+assert_true(to_bool(dict_get_or(invalid_diag, "ok", true) == false))
+assert_true(to_bool(has_error_code(invalid_diag, "index_path_required") == true))
+assert_true(to_bool(has_error_code(invalid_diag, "api_host_required") == true))
+assert_true(to_bool(has_error_code(invalid_diag, "api_port_out_of_range") == true))
+assert_true(to_bool(has_error_code(invalid_diag, "ingest_allowed_roots_required") == true))
+
+strict_invalid_cfg := load_config({
+	"strict_config": true,
+	"runtime_environment": "production",
+	"api_bearer_token": "",
+	"at_rest_encryption_enabled": false,
+	"at_rest_encryption_key": "",
+	"namespace": "default",
+	"index_path": "./data/rag_index.json",
+	"api_ingest_allowed_roots": ["./examples"]
+})
+strict_invalid_diag := validate_config(strict_invalid_cfg)
+assert_true(to_bool(dict_get_or(strict_invalid_diag, "ok", true) == false))
+assert_true(to_bool(dict_get_or(strict_invalid_diag, "strict_mode", false) == true))
+assert_true(to_bool(has_error_code(strict_invalid_diag, "strict_requires_api_bearer_token") == true))
+assert_true(to_bool(has_error_code(strict_invalid_diag, "strict_requires_namespace_override") == true))
+assert_true(to_bool(has_error_code(strict_invalid_diag, "strict_requires_index_path_override") == true))
+assert_true(to_bool(has_error_code(strict_invalid_diag, "strict_requires_at_rest_encryption") == true))
+assert_true(to_bool(has_error_code(strict_invalid_diag, "strict_requires_encryption_key") == true))
+
+strict_valid_cfg := load_config({
+	"strict_config": true,
+	"runtime_environment": "production",
+	"api_bearer_token": "prod-token",
+	"at_rest_encryption_enabled": true,
+	"at_rest_encryption_key": "prod-encryption-key",
+	"namespace": "tenant_prod",
+	"index_path": "./data/tenant_prod_index.json",
+	"api_ingest_allowed_roots": ["./examples"],
+	"api_host": "0.0.0.0",
+	"api_port": 8787
+})
+strict_valid_diag := validate_config(strict_valid_cfg)
+assert_true(to_bool(dict_get_or(strict_valid_diag, "ok", false) == true))
+assert_true(to_bool(dict_get_or(strict_valid_diag, "strict_mode", false) == true))
+
+print("test_config_integrity: ok")

@@ -1,0 +1,122 @@
+from src.common import dict_get_or, num_or, str_or
+from src.tests_helpers import assert_true
+
+kujo_bin := env_or("KUJO_BIN", "/path/to/kujo/target/debug/kujo")
+
+func parse_json_safe(text) {
+	payload := {}
+	err := null
+	try {
+		payload := parse_json(text)
+	} except e {
+		err := e
+	}
+	if type(err) != "null" {
+		return {
+			"ok": false,
+			"data": {},
+			"error": to_string(err)
+		}
+	}
+	return {
+		"ok": true,
+		"data": payload,
+		"error": ""
+	}
+}
+
+suffix := to_string(current_timestamp())
+source_root := "/tmp/kujo_rag_connector_plugin_source_" + suffix
+source_docs := source_root + "/docs"
+
+pass_config_path := "/tmp/kujo_rag_connector_plugin_config_pass_" + suffix + ".json"
+fail_config_path := "/tmp/kujo_rag_connector_plugin_config_fail_" + suffix + ".json"
+
+staging_root := "/tmp/kujo_rag_connector_plugin_stage_" + suffix
+index_path := "/tmp/kujo_rag_connector_plugin_index_" + suffix + ".json"
+report_path := "/tmp/kujo_rag_connector_plugin_report_" + suffix + ".json"
+
+_ = execute_status("rm -rf '" + source_root + "' '" + staging_root + "'", {"timeout_ms": 120000})
+create_dir(source_root)
+create_dir(source_docs)
+write_file(source_docs + "/wiki.md", "# Wiki Export\n\nEnterprise connector stub validation fixture.\n")
+
+write_file(pass_config_path, to_json({
+	"connectors": [
+		{
+			"id": "enterprise_stub_pass",
+			"type": "plugin_script",
+			"runner_script": "./scripts/connectors/example_enterprise_connector_stub.kujo",
+			"payload": {
+				"source_path": source_docs,
+				"source_label": "wiki_confluence"
+			}
+		}
+	]
+}))
+
+write_file(fail_config_path, to_json({
+	"connectors": [
+		{
+			"id": "enterprise_stub_fail",
+			"type": "plugin_script",
+			"runner_script": "./scripts/connectors/example_enterprise_connector_stub.kujo",
+			"payload": {
+				"source_label": "wiki_confluence"
+			}
+		}
+	]
+}))
+
+cmd_pass := "KUJO_RAG_CONNECTOR_CONFIG_PATH=" + pass_config_path + " KUJO_RAG_CONNECTOR_STAGING_ROOT=" + staging_root + " KUJO_RAG_CONNECTOR_INDEX_PATH=" + index_path + " KUJO_RAG_CONNECTOR_REPORT_PATH=" + report_path + " " + kujo_bin + " run scripts/run_connector_ingest.kujo --interpreter"
+pass_res := execute_status(cmd_pass, {"timeout_ms": 240000})
+assert_true(to_bool(type(pass_res) == "struct"))
+assert_true(to_bool(pass_res.success == true))
+pass_parsed := parse_json_safe(to_string(pass_res.stdout))
+assert_true(to_bool(dict_get_or(pass_parsed, "ok", false) == true))
+pass_payload := dict_get_or(pass_parsed, "data", {})
+assert_true(to_bool(dict_get_or(pass_payload, "ok", false) == true))
+assert_true(to_bool(dict_get_or(dict_get_or(pass_payload, "gates", {}), "connector_pipeline_ok", false) == true))
+assert_true(to_bool(dict_get_or(dict_get_or(pass_payload, "gates", {}), "index_build_ok", false) == true))
+pass_results := dict_get_or(dict_get_or(pass_payload, "connector_pipeline", {}), "results", [])
+assert_true(to_bool(type(pass_results) == "array"))
+assert_true(to_bool(len(pass_results) >= 1))
+first_pass_result := pass_results[0]
+assert_true(to_bool(dict_get_or(first_pass_result, "ok", false) == true))
+pass_details := dict_get_or(first_pass_result, "details", {})
+pass_plugin_output := dict_get_or(pass_details, "plugin_output", {})
+pass_plugin_details := dict_get_or(pass_plugin_output, "details", {})
+assert_true(to_bool(str_or(dict_get_or(pass_plugin_details, "source_label", ""), "") == "wiki_confluence"))
+
+cmd_fail := "KUJO_RAG_CONNECTOR_CONFIG_PATH=" + fail_config_path + " KUJO_RAG_CONNECTOR_STAGING_ROOT=" + staging_root + " KUJO_RAG_CONNECTOR_INDEX_PATH=" + index_path + " KUJO_RAG_CONNECTOR_REPORT_PATH=" + report_path + " " + kujo_bin + " run scripts/run_connector_ingest.kujo --interpreter"
+fail_res := execute_status(cmd_fail, {"timeout_ms": 240000})
+assert_true(to_bool(type(fail_res) == "struct"))
+assert_true(to_bool(fail_res.success == false))
+fail_parsed := parse_json_safe(to_string(fail_res.stdout))
+assert_true(to_bool(dict_get_or(fail_parsed, "ok", false) == true))
+fail_payload := dict_get_or(fail_parsed, "data", {})
+assert_true(to_bool(dict_get_or(fail_payload, "ok", true) == false))
+assert_true(to_bool(num_or(dict_get_or(dict_get_or(fail_payload, "connector_pipeline", {}), "failed_count", 0), 0) >= 1))
+fail_results := dict_get_or(dict_get_or(fail_payload, "connector_pipeline", {}), "results", [])
+assert_true(to_bool(type(fail_results) == "array"))
+assert_true(to_bool(len(fail_results) >= 1))
+first_fail_result := fail_results[0]
+assert_true(to_bool(dict_get_or(first_fail_result, "ok", true) == false))
+fail_error := str_or(dict_get_or(first_fail_result, "error", ""), "")
+assert_true(to_bool(contains(fail_error, "plugin_") == 1))
+
+if file_exists(pass_config_path) {
+	delete_file(pass_config_path)
+}
+if file_exists(fail_config_path) {
+	delete_file(fail_config_path)
+}
+_ = execute_status("rm -rf '" + source_root + "' '" + staging_root + "'", {"timeout_ms": 120000})
+if file_exists(index_path) {
+	delete_file(index_path)
+}
+if file_exists(report_path) {
+	delete_file(report_path)
+}
+
+print("test_connector_plugin_stub: ok")

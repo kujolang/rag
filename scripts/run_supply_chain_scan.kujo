@@ -1,0 +1,360 @@
+from src.common import dict_get_or
+
+func parse_flags(raw_args) {
+	flags := {}
+	i := 0
+	while i < len(raw_args) {
+		token := raw_args[i]
+		if starts_with(token, "--") {
+			key := substring(token, 2, len(token))
+			value := "true"
+			if i + 1 < len(raw_args) {
+				next := raw_args[i + 1]
+				if starts_with(next, "--") == false {
+					value = next
+					i = i + 1
+				}
+			}
+			flags[key] := value
+		}
+		i = i + 1
+	}
+	return flags
+}
+
+func ensure_dir(path_value) {
+	if path_exists(path_value) == false {
+		create_dir(path_value)
+	}
+	return true
+}
+
+func write_replace_file(path_value, content) {
+	if file_exists(path_value) {
+		delete_file(path_value)
+	}
+	write_file(path_value, content)
+	return true
+}
+
+func normalize_path(path_value) {
+	value := to_string(path_value)
+	if starts_with(value, "./") {
+		return substring(value, 2, len(value))
+	}
+	return value
+}
+
+func contains_text(text, needle) {
+	return index_of(to_string(text), to_string(needle)) >= 0
+}
+
+func should_exclude(path_value, excluded_prefixes) {
+	path := normalize_path(path_value)
+	i := 0
+	while i < len(excluded_prefixes) {
+		prefix := normalize_path(excluded_prefixes[i])
+		if prefix != "" && (path == prefix || starts_with(path, prefix + "/")) {
+			return true
+		}
+		i = i + 1
+	}
+	return false
+}
+
+func discover_files(root_path, excluded_prefixes) {
+	if path_exists(root_path) == false {
+		return []
+	}
+	stack := [root_path]
+	collected := []
+
+	while len(stack) > 0 {
+		current := stack[len(stack) - 1]
+		stack = slice(stack, 0, len(stack) - 1)
+
+		if should_exclude(current, excluded_prefixes) {
+			continue
+		}
+
+		if path_is_file(current) {
+			collected = push(collected, current)
+			continue
+		}
+
+		if path_is_dir(current) {
+			entries := []
+			err := null
+			try {
+				entries := list_dir(current)
+			} except e {
+				err := e
+			}
+			if type(err) == "null" {
+				i := 0
+				while i < len(entries) {
+					child := path_join(current, entries[i])
+					if should_exclude(child, excluded_prefixes) == false {
+						stack = push(stack, child)
+					}
+					i = i + 1
+				}
+			}
+		}
+	}
+
+	return collected
+}
+
+func discover_scan_targets(scan_root, excluded_prefixes) {
+	normalized_root := normalize_path(scan_root)
+	if normalized_root != "." {
+		return discover_files(scan_root, excluded_prefixes)
+	}
+
+	bounded_targets := [
+		"main.kujo",
+		"README.md",
+		".env.example",
+		"scripts/build_release_artifacts.kujo",
+		"scripts/run_supply_chain_scan.kujo",
+		".github/workflows/release-gates.yml",
+		".github/workflows/release-artifacts.yml"
+	]
+
+	files := []
+	i := 0
+	while i < len(bounded_targets) {
+		candidate := bounded_targets[i]
+		if path_exists(candidate) && should_exclude(candidate, excluded_prefixes) == false {
+			files = push(files, candidate)
+		}
+		i = i + 1
+	}
+
+	return files
+}
+
+func clean_yaml_value(value) {
+	v := trim(value)
+	if starts_with(v, "\"") && ends_with(v, "\"") && len(v) >= 2 {
+		v = substring(v, 1, len(v) - 1)
+	}
+	if starts_with(v, "'") && ends_with(v, "'") && len(v) >= 2 {
+		v = substring(v, 1, len(v) - 1)
+	}
+	return trim(v)
+}
+
+func is_hex_sha(value) {
+	if len(value) != 40 {
+		return false
+	}
+	invalid := regex_replace(value, "[0-9a-fA-F]", "")
+	return invalid == ""
+}
+
+func looks_like_placeholder(line_lower) {
+	if contains_text(line_lower, "example") {
+		return true
+	}
+	if contains_text(line_lower, "placeholder") {
+		return true
+	}
+	if contains_text(line_lower, "sample") {
+		return true
+	}
+	if contains_text(line_lower, "dummy") {
+		return true
+	}
+	if contains_text(line_lower, "redacted") {
+		return true
+	}
+	return false
+}
+
+func add_finding(findings, severity, category, rule_id, path_value, line_number, message, evidence) {
+	return push(findings, {
+		"severity": severity,
+		"category": category,
+		"rule_id": rule_id,
+		"path": path_value,
+		"line": line_number,
+		"message": message,
+		"evidence": evidence
+	})
+}
+
+func scan_secrets(path_value, content, findings) {
+	lines := split(content, "\n")
+	i := 0
+	current_findings := findings
+	while i < len(lines) {
+		line := lines[i]
+		line_lower := to_lower(line)
+		line_number := i + 1
+
+		if contains_text(line, "-----BEGIN PRIVATE KEY-----") && looks_like_placeholder(line_lower) == false {
+			current_findings = add_finding(current_findings, "high", "secret", "private_key_material", path_value, line_number, "Potential private key material detected", trim(line))
+		}
+		if contains_text(line, "ghp_") && looks_like_placeholder(line_lower) == false {
+			current_findings = add_finding(current_findings, "high", "secret", "github_personal_access_token", path_value, line_number, "Potential GitHub personal access token detected", trim(line))
+		}
+		if contains_text(line, "github_pat_") && looks_like_placeholder(line_lower) == false {
+			current_findings = add_finding(current_findings, "high", "secret", "github_fine_grained_pat", path_value, line_number, "Potential GitHub fine-grained token detected", trim(line))
+		}
+		if contains_text(line, "xoxb-") && looks_like_placeholder(line_lower) == false {
+			current_findings = add_finding(current_findings, "high", "secret", "slack_bot_token", path_value, line_number, "Potential Slack bot token detected", trim(line))
+		}
+
+		i = i + 1
+	}
+	return current_findings
+}
+
+func scan_dependencies(path_value, content, findings) {
+	if contains_text(normalize_path(path_value), ".github/workflows/") == false {
+		return findings
+	}
+
+	lines := split(content, "\n")
+	i := 0
+	current_findings := findings
+	while i < len(lines) {
+		line := trim(lines[i])
+		line_lower := to_lower(line)
+		line_number := i + 1
+
+		if contains_text(line_lower, "uses:") {
+			uses_index := index_of(line_lower, "uses:")
+			if uses_index >= 0 {
+				spec := trim(substring(line, uses_index + 5, len(line)))
+				spec = clean_yaml_value(spec)
+				if spec != "" && starts_with(spec, "./") == false && contains_text(spec, "@") {
+					parts := split(spec, "@")
+					action := ""
+					ref := ""
+					if len(parts) >= 1 {
+						action = trim(parts[0])
+					}
+					if len(parts) >= 2 {
+						ref = trim(parts[1])
+					}
+					ref_lower := to_lower(ref)
+
+					if is_hex_sha(ref) == false {
+						severity := "medium"
+						rule_id := "workflow_action_unpinned"
+						message := "Workflow action is not pinned to a commit SHA"
+						if ref_lower == "main" || ref_lower == "master" || ref_lower == "latest" || ref_lower == "head" {
+							severity = "high"
+							rule_id = "workflow_action_floating_ref"
+							message = "Workflow action uses a floating branch reference"
+						}
+						current_findings = add_finding(current_findings, severity, "dependency", rule_id, path_value, line_number, message, action + "@" + ref)
+					}
+				}
+			}
+		}
+
+		if contains_text(line_lower, "curl ") && contains_text(line_lower, "|") {
+			if contains_text(line_lower, "bash") || contains_text(line_lower, "sh") {
+				current_findings = add_finding(current_findings, "high", "dependency", "pipe_to_shell", path_value, line_number, "Potential remote script execution pattern detected", trim(lines[i]))
+			}
+		}
+
+		i = i + 1
+	}
+
+	return current_findings
+}
+
+func summarize_findings(findings) {
+	high := 0
+	medium := 0
+	low := 0
+	info := 0
+	i := 0
+	while i < len(findings) {
+		severity := to_lower(dict_get_or(findings[i], "severity", ""))
+		if severity == "high" {
+			high = high + 1
+		} else if severity == "medium" {
+			medium = medium + 1
+		} else if severity == "low" {
+			low = low + 1
+		} else {
+			info = info + 1
+		}
+		i = i + 1
+	}
+	return {
+		"high": high,
+		"medium": medium,
+		"low": low,
+		"informational": info
+	}
+}
+
+flags := parse_flags(args())
+scan_root := dict_get_or(flags, "root", ".")
+output_path := dict_get_or(flags, "output", "./results/supply-chain-scan.json")
+
+if path_exists(scan_root) == false {
+	print(to_json({
+		"ok": false,
+		"error": "missing_scan_root",
+		"scan_root": scan_root
+	}))
+	exit(1)
+}
+
+excluded_prefixes := [
+	".git",
+	"results/releases",
+	"results/release_artifacts_test"
+]
+
+files := discover_scan_targets(scan_root, excluded_prefixes)
+findings := []
+
+file_index := 0
+while file_index < len(files) {
+	path_value := files[file_index]
+	content := ""
+	err := null
+	try {
+		content := read_file(path_value)
+	} except e {
+		err := e
+	}
+	if type(err) == "null" {
+		findings = scan_secrets(path_value, content, findings)
+		findings = scan_dependencies(path_value, content, findings)
+	}
+	file_index = file_index + 1
+}
+
+summary := summarize_findings(findings)
+high_count := dict_get_or(summary, "high", 0)
+result := {
+	"ok": high_count == 0,
+	"scan_root": scan_root,
+	"generated_at_unix_ms": current_timestamp(),
+	"scanned_file_count": len(files),
+	"summary": summary,
+	"high_severity_blocking": high_count > 0,
+	"findings": findings
+}
+
+output_dir := dirname(output_path)
+if output_dir != "" && output_dir != "." {
+	ensure_dir(output_dir)
+}
+write_replace_file(output_path, to_json(result))
+
+print(to_json(result))
+
+if high_count > 0 {
+	exit(1)
+}

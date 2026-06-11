@@ -1,0 +1,143 @@
+from src.common import dict_get_or, read_json_file_or
+from src.tests_helpers import assert_true
+
+kujo_bin := env_or("KUJO_BIN", "/path/to/kujo/target/debug/kujo")
+suffix := to_string(current_timestamp())
+
+func write_text(path, text) {
+	if file_exists(path) {
+		delete_file(path)
+	}
+	write_file(path, text)
+}
+
+benchmark_report_path := "/tmp/kujo_rag_perf_cost_report_" + suffix + ".json"
+policy_path := "/tmp/kujo_rag_perf_cost_policy_" + suffix + ".json"
+policy_fail_path := "/tmp/kujo_rag_perf_cost_policy_fail_" + suffix + ".json"
+doc_path := "/tmp/kujo_rag_perf_cost_doc_" + suffix + ".md"
+release_doc_path := "/tmp/kujo_rag_perf_cost_release_" + suffix + ".md"
+workflow_path := "/tmp/kujo_rag_perf_cost_workflow_" + suffix + ".yml"
+trend_path := "/tmp/kujo_rag_perf_cost_trend_" + suffix + ".json"
+output_valid_path := "/tmp/kujo_rag_perf_cost_status_valid_" + suffix + ".json"
+output_fail_path := "/tmp/kujo_rag_perf_cost_status_fail_" + suffix + ".json"
+
+write_text(benchmark_report_path, to_json({
+	"ok": true,
+	"generated_at_unix_ms": current_timestamp(),
+	"profiles": [
+		{
+			"name": "small",
+			"ingest": {"docs_per_sec": 10.0},
+			"query": {"avg_latency_ms": 200.0, "p95_latency_ms": 320.0},
+			"dataset": {"materialized_docs": 100}
+		}
+	]
+}))
+
+write_text(policy_path, to_json({
+	"history_limit": 5,
+	"cost_model": {
+		"cpu_utilization_factor": 1.0,
+		"usd_per_cpu_second": 0.001,
+		"base_memory_mb": 128.0,
+		"memory_mb_per_materialized_doc": 0.1,
+		"usd_per_mb_hour": 0.000002
+	},
+	"regression_thresholds": {
+		"max_latency_regression_ratio": 2.0,
+		"min_throughput_retention_ratio": 0.5,
+		"max_cost_regression_ratio": 2.0
+	},
+	"workload_classes": {
+		"small": {
+			"min_ingest_docs_per_sec": 1.0,
+			"max_avg_query_latency_ms": 1000.0,
+			"max_p95_query_latency_ms": 1500.0,
+			"max_estimated_cpu_ms_per_query": 1200.0,
+			"max_estimated_memory_mb": 5000.0,
+			"max_estimated_cost_per_1k_queries_usd": 1000.0
+		}
+	}
+}))
+
+write_text(policy_fail_path, to_json({
+	"history_limit": 5,
+	"cost_model": {
+		"cpu_utilization_factor": 1.0,
+		"usd_per_cpu_second": 0.001,
+		"base_memory_mb": 128.0,
+		"memory_mb_per_materialized_doc": 0.1,
+		"usd_per_mb_hour": 0.000002
+	},
+	"regression_thresholds": {
+		"max_latency_regression_ratio": 2.0,
+		"min_throughput_retention_ratio": 0.5,
+		"max_cost_regression_ratio": 2.0
+	},
+	"workload_classes": {
+		"small": {
+			"min_ingest_docs_per_sec": 1000.0,
+			"max_avg_query_latency_ms": 10.0,
+			"max_p95_query_latency_ms": 20.0,
+			"max_estimated_cpu_ms_per_query": 10.0,
+			"max_estimated_memory_mb": 10.0,
+			"max_estimated_cost_per_1k_queries_usd": 0.01
+		}
+	}
+}))
+
+write_text(doc_path, "# Performance and Cost Budget Gates\n\nRun kujo run scripts/run_performance_cost_budget_review.kujo --interpreter by workload class.\n")
+write_text(release_doc_path, "# Release Process\n\nrun_performance_cost_budget_review.kujo\ndocs/performance-cost-budget-gates.md\n")
+write_text(workflow_path, "name: performance-cost-budget-review\non:\n  schedule:\n    - cron: '0 14 * * 1'\njobs:\n  review:\n    steps:\n      - run: kujo run scripts/run_performance_cost_budget_review.kujo --interpreter\n")
+write_text(trend_path, to_json({"history": []}))
+
+cmd_valid := "KUJO_RAG_PERF_COST_POLICY_PATH=" + policy_path + " KUJO_RAG_PERF_COST_BENCHMARK_REPORT_PATH=" + benchmark_report_path + " KUJO_RAG_PERF_COST_DOC_PATH=" + doc_path + " KUJO_RAG_PERF_COST_RELEASE_PROCESS_DOC_PATH=" + release_doc_path + " KUJO_RAG_PERF_COST_WORKFLOW_PATH=" + workflow_path + " KUJO_RAG_PERF_COST_OUTPUT_PATH=" + output_valid_path + " KUJO_RAG_PERF_COST_TREND_PATH=" + trend_path + " " + kujo_bin + " run scripts/run_performance_cost_budget_review.kujo --interpreter"
+valid_res := execute_status(cmd_valid, {"timeout_ms": 240000})
+assert_true(to_bool(type(valid_res) == "struct"))
+assert_true(to_bool(valid_res.success == true))
+
+valid_payload := read_json_file_or(output_valid_path, {})
+assert_true(to_bool(dict_get_or(valid_payload, "ok", false) == true))
+valid_gates := dict_get_or(valid_payload, "gates", {})
+assert_true(to_bool(dict_get_or(valid_gates, "performance_budgets_enforced", false) == true))
+assert_true(to_bool(dict_get_or(valid_gates, "resource_cost_budgets_enforced", false) == true))
+
+cmd_fail := "KUJO_RAG_PERF_COST_POLICY_PATH=" + policy_fail_path + " KUJO_RAG_PERF_COST_BENCHMARK_REPORT_PATH=" + benchmark_report_path + " KUJO_RAG_PERF_COST_DOC_PATH=" + doc_path + " KUJO_RAG_PERF_COST_RELEASE_PROCESS_DOC_PATH=" + release_doc_path + " KUJO_RAG_PERF_COST_WORKFLOW_PATH=" + workflow_path + " KUJO_RAG_PERF_COST_OUTPUT_PATH=" + output_fail_path + " KUJO_RAG_PERF_COST_TREND_PATH=" + trend_path + " " + kujo_bin + " run scripts/run_performance_cost_budget_review.kujo --interpreter"
+fail_res := execute_status(cmd_fail, {"timeout_ms": 240000})
+assert_true(to_bool(type(fail_res) == "struct"))
+assert_true(to_bool(fail_res.success == false))
+
+fail_payload := read_json_file_or(output_fail_path, {})
+assert_true(to_bool(dict_get_or(fail_payload, "ok", true) == false))
+fail_gates := dict_get_or(fail_payload, "gates", {})
+assert_true(to_bool(dict_get_or(fail_gates, "performance_budgets_enforced", true) == false))
+
+if file_exists(benchmark_report_path) {
+	delete_file(benchmark_report_path)
+}
+if file_exists(policy_path) {
+	delete_file(policy_path)
+}
+if file_exists(policy_fail_path) {
+	delete_file(policy_fail_path)
+}
+if file_exists(doc_path) {
+	delete_file(doc_path)
+}
+if file_exists(release_doc_path) {
+	delete_file(release_doc_path)
+}
+if file_exists(workflow_path) {
+	delete_file(workflow_path)
+}
+if file_exists(trend_path) {
+	delete_file(trend_path)
+}
+if file_exists(output_valid_path) {
+	delete_file(output_valid_path)
+}
+if file_exists(output_fail_path) {
+	delete_file(output_fail_path)
+}
+
+print("test_performance_cost_budget_review: ok")

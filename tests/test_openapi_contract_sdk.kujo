@@ -1,0 +1,171 @@
+from src.common import dict_get_or, read_json_file_or
+from src.tests_helpers import assert_true
+
+func make_operation(operation_id, include_body) {
+	op := {
+		"operationId": operation_id,
+		"responses": {
+			"200": {"description": "ok"},
+			"default": {"description": "error"}
+		}
+	}
+	if include_body {
+		op["requestBody"] = {
+			"required": true,
+			"content": {
+				"application/json": {
+					"schema": {"type": "object"}
+				}
+			}
+		}
+	}
+	return op
+}
+
+kujo_bin := env_or("KUJO_BIN", "/path/to/kujo/target/debug/kujo")
+suffix := to_string(current_timestamp())
+
+spec_path := "/tmp/kujo_rag_openapi_spec_" + suffix + ".json"
+sdk_path := "/tmp/kujo_rag_openapi_sdk_" + suffix + ".js"
+output_valid_path := "/tmp/kujo_rag_openapi_status_valid_" + suffix + ".json"
+output_stale_path := "/tmp/kujo_rag_openapi_status_stale_" + suffix + ".json"
+workflow_doc_path := "/tmp/kujo_rag_openapi_doc_" + suffix + ".md"
+release_doc_path := "/tmp/kujo_rag_openapi_release_" + suffix + ".md"
+workflow_path := "/tmp/kujo_rag_openapi_workflow_" + suffix + ".yml"
+
+paths := {
+	"/": {
+		"get": make_operation("getRoot", false)
+	},
+	"/health": {
+		"get": make_operation("getHealth", false)
+	},
+	"/live": {
+		"get": make_operation("getLive", false)
+	},
+	"/ready": {
+		"get": make_operation("getReady", false)
+	},
+	"/startup": {
+		"get": make_operation("getStartup", false)
+	},
+	"/ingest": {
+		"post": make_operation("postIngest", true)
+	},
+	"/ingest/jobs": {
+		"post": make_operation("postIngestJobs", true)
+	},
+	"/ingest/jobs/status": {
+		"post": make_operation("postIngestJobsStatus", true)
+	},
+	"/ingest/jobs/worker/tick": {
+		"post": make_operation("postIngestJobsWorkerTick", false)
+	},
+	"/query": {
+		"post": make_operation("postQuery", true)
+	},
+	"/metrics": {
+		"get": make_operation("getMetrics", false)
+	},
+	"/retention": {
+		"get": make_operation("getRetention", false)
+	},
+	"/retention/policy": {
+		"post": make_operation("postRetentionPolicy", true)
+	},
+	"/retention/purge": {
+		"post": make_operation("postRetentionPurge", true)
+	},
+	"/retention/legal-hold/start": {
+		"post": make_operation("postRetentionLegalHoldStart", true)
+	},
+	"/retention/legal-hold/stop": {
+		"post": make_operation("postRetentionLegalHoldStop", true)
+	},
+	"/privacy/export": {
+		"post": make_operation("postPrivacyExport", true)
+	},
+	"/privacy/delete": {
+		"post": make_operation("postPrivacyDelete", true)
+	},
+	"/drain": {
+		"get": make_operation("getDrain", false)
+	},
+	"/drain/start": {
+		"post": make_operation("postDrainStart", true)
+	},
+	"/drain/stop": {
+		"post": make_operation("postDrainStop", false)
+	}
+}
+
+spec := {
+	"openapi": "3.0.3",
+	"info": {
+		"title": "Kujo RAG HTTP API",
+		"version": "1.0.0",
+		"x-kujo-rag-api-version": "v1"
+	},
+	"paths": paths
+}
+
+write_file(spec_path, to_json(spec))
+write_file(workflow_doc_path, "# OpenAPI Contract and Generated SDK Workflow\n\nSpec: " + spec_path + "\nRun: scripts/run_openapi_contract_review.kujo\n")
+write_file(release_doc_path, "# Release Process\n\nRequired gate: run scripts/run_openapi_contract_review.kujo --interpreter\nSee " + workflow_doc_path + "\n")
+write_file(workflow_path, "name: openapi-contract-review\non:\n  schedule:\n    - cron: '0 8 * * 2'\njobs:\n  review:\n    steps:\n      - run: kujo run scripts/run_openapi_contract_review.kujo --interpreter\n")
+
+valid_cmd := "KUJO_RAG_OPENAPI_SPEC_PATH=" + spec_path + " KUJO_RAG_OPENAPI_SDK_PATH=" + sdk_path + " KUJO_RAG_OPENAPI_OUTPUT_PATH=" + output_valid_path + " KUJO_RAG_OPENAPI_WORKFLOW_DOC_PATH=" + workflow_doc_path + " KUJO_RAG_RELEASE_PROCESS_DOC_PATH=" + release_doc_path + " KUJO_RAG_OPENAPI_WORKFLOW_PATH=" + workflow_path + " KUJO_RAG_OPENAPI_REGENERATE=true " + kujo_bin + " run scripts/run_openapi_contract_review.kujo --interpreter"
+valid_res := execute_status(valid_cmd, {"timeout_ms": 240000})
+assert_true(to_bool(type(valid_res) == "struct"))
+assert_true(to_bool(valid_res.success == true))
+
+valid_payload := read_json_file_or(output_valid_path, {})
+assert_true(to_bool(dict_get_or(valid_payload, "ok", false) == true))
+valid_gates := dict_get_or(valid_payload, "gates", {})
+assert_true(to_bool(dict_get_or(valid_gates, "required_paths_defined", false) == true))
+assert_true(to_bool(dict_get_or(valid_gates, "sdk_generated_match", false) == true))
+assert_true(to_bool(dict_get_or(valid_gates, "workflow_defined", false) == true))
+
+verify_cmd := "KUJO_RAG_OPENAPI_SPEC_PATH=" + spec_path + " KUJO_RAG_OPENAPI_SDK_PATH=" + sdk_path + " KUJO_RAG_OPENAPI_OUTPUT_PATH=" + output_valid_path + " KUJO_RAG_OPENAPI_WORKFLOW_DOC_PATH=" + workflow_doc_path + " KUJO_RAG_RELEASE_PROCESS_DOC_PATH=" + release_doc_path + " KUJO_RAG_OPENAPI_WORKFLOW_PATH=" + workflow_path + " " + kujo_bin + " run scripts/run_openapi_contract_review.kujo --interpreter"
+verify_res := execute_status(verify_cmd, {"timeout_ms": 240000})
+assert_true(to_bool(type(verify_res) == "struct"))
+assert_true(to_bool(verify_res.success == true))
+
+if file_exists(sdk_path) {
+	delete_file(sdk_path)
+}
+write_file(sdk_path, "// stale sdk\n")
+
+stale_cmd := "KUJO_RAG_OPENAPI_SPEC_PATH=" + spec_path + " KUJO_RAG_OPENAPI_SDK_PATH=" + sdk_path + " KUJO_RAG_OPENAPI_OUTPUT_PATH=" + output_stale_path + " KUJO_RAG_OPENAPI_WORKFLOW_DOC_PATH=" + workflow_doc_path + " KUJO_RAG_RELEASE_PROCESS_DOC_PATH=" + release_doc_path + " KUJO_RAG_OPENAPI_WORKFLOW_PATH=" + workflow_path + " " + kujo_bin + " run scripts/run_openapi_contract_review.kujo --interpreter"
+stale_res := execute_status(stale_cmd, {"timeout_ms": 240000})
+assert_true(to_bool(type(stale_res) == "struct"))
+assert_true(to_bool(stale_res.success == false))
+
+stale_payload := read_json_file_or(output_stale_path, {})
+assert_true(to_bool(dict_get_or(stale_payload, "ok", true) == false))
+stale_gates := dict_get_or(stale_payload, "gates", {})
+assert_true(to_bool(dict_get_or(stale_gates, "sdk_generated_match", true) == false))
+
+if file_exists(spec_path) {
+	delete_file(spec_path)
+}
+if file_exists(sdk_path) {
+	delete_file(sdk_path)
+}
+if file_exists(output_valid_path) {
+	delete_file(output_valid_path)
+}
+if file_exists(output_stale_path) {
+	delete_file(output_stale_path)
+}
+if file_exists(workflow_doc_path) {
+	delete_file(workflow_doc_path)
+}
+if file_exists(release_doc_path) {
+	delete_file(release_doc_path)
+}
+if file_exists(workflow_path) {
+	delete_file(workflow_path)
+}
+
+print("test_openapi_contract_sdk: ok")

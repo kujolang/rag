@@ -1,0 +1,324 @@
+from src.common import dict_get_or, read_json_file_or, write_json_file, str_or
+
+func ensure_dir(path_value) {
+	if path_value == "" || path_value == "." {
+		return true
+	}
+	if path_exists(path_value) {
+		return true
+	}
+	parent := dirname(path_value)
+	if parent != "" && parent != "." && parent != path_value {
+		_ = ensure_dir(parent)
+	}
+	create_dir(path_value)
+	return true
+}
+
+func ensure_parent_dir(path_value) {
+	dir := dirname(path_value)
+	if dir == "" || dir == "." {
+		return true
+	}
+	return ensure_dir(dir)
+}
+
+func normalize_text(value) {
+	return trim(str_or(value, ""))
+}
+
+func count_occurrences(text, token) {
+	if type(text) != "string" || type(token) != "string" {
+		return 0
+	}
+	if token == "" {
+		return 0
+	}
+	parts := split(text, token)
+	if len(parts) == 0 {
+		return 0
+	}
+	return len(parts) - 1
+}
+
+func text_has_token(text, token) {
+	return count_occurrences(text, token) > 0
+}
+
+func parse_bool_env(name, default_value) {
+	raw := to_lower(trim(env_or(name, "")))
+	if raw == "" {
+		return default_value
+	}
+	return raw == "1" || raw == "true" || raw == "yes" || raw == "on"
+}
+
+func get_operation(paths_obj, path_value, method_value) {
+	path_obj := dict_get_or(paths_obj, path_value, {})
+	if type(path_obj) != "dict" {
+		return {}
+	}
+	return dict_get_or(path_obj, to_lower(method_value), {})
+}
+
+func format_js_string(value) {
+	text := to_string(value)
+	text = replace(text, "\\", "\\\\")
+	text = replace(text, "\"", "\\\"")
+	return text
+}
+
+func generate_js_sdk(spec_path, operations) {
+	lines := []
+	lines = push(lines, "// Generated from " + spec_path + " by scripts/run_openapi_contract_review.kujo")
+	lines = push(lines, "// DO NOT EDIT MANUALLY.")
+	lines = push(lines, "")
+	lines = push(lines, "class KujoRagClient {")
+	lines = push(lines, "\tconstructor(options = {}) {")
+	lines = push(lines, "\t\tthis.baseUrl = options.baseUrl || \"http://127.0.0.1:8787\";")
+	lines = push(lines, "\t\tthis.defaultHeaders = options.defaultHeaders || {};")
+	lines = push(lines, "\t}")
+	lines = push(lines, "")
+	lines = push(lines, "\tasync request(method, path, body = null, extraHeaders = {}) {")
+	lines = push(lines, "\t\tconst headers = Object.assign({}, this.defaultHeaders, extraHeaders);")
+	lines = push(lines, "\t\tif (body !== null && headers['Content-Type'] === undefined) {")
+	lines = push(lines, "\t\t\theaders['Content-Type'] = 'application/json';")
+	lines = push(lines, "\t\t}")
+	lines = push(lines, "\t\tconst response = await fetch(this.baseUrl + path, {")
+	lines = push(lines, "\t\t\tmethod,")
+	lines = push(lines, "\t\t\theaders,")
+	lines = push(lines, "\t\t\tbody: body === null ? undefined : JSON.stringify(body)")
+	lines = push(lines, "\t\t});")
+	lines = push(lines, "\t\tconst text = await response.text();")
+	lines = push(lines, "\t\tlet parsed = null;")
+	lines = push(lines, "\t\tif (text !== '') {")
+	lines = push(lines, "\t\t\ttry {")
+	lines = push(lines, "\t\t\t\tparsed = JSON.parse(text);")
+	lines = push(lines, "\t\t\t} catch (_err) {")
+	lines = push(lines, "\t\t\t\tparsed = text;")
+	lines = push(lines, "\t\t\t}")
+	lines = push(lines, "\t\t}")
+	lines = push(lines, "\t\tif (!response.ok) {")
+	lines = push(lines, "\t\t\tconst err = new Error('Kujo RAG API request failed: ' + response.status);")
+	lines = push(lines, "\t\t\terr.status = response.status;")
+	lines = push(lines, "\t\t\terr.body = parsed;")
+	lines = push(lines, "\t\t\tthrow err;")
+	lines = push(lines, "\t\t}")
+	lines = push(lines, "\t\treturn parsed;")
+	lines = push(lines, "\t}")
+
+	op_index := 0
+	while op_index < len(operations) {
+		op := operations[op_index]
+		operation_id := normalize_text(dict_get_or(op, "operation_id", ""))
+		method_value := to_upper(normalize_text(dict_get_or(op, "method", "GET")))
+		path_value := normalize_text(dict_get_or(op, "path", ""))
+		has_body := dict_get_or(op, "has_body", false)
+		if operation_id != "" && path_value != "" {
+			lines = push(lines, "")
+			if has_body {
+				lines = push(lines, "\tasync " + operation_id + "(payload = {}, extraHeaders = {}) {")
+				lines = push(lines, "\t\treturn this.request(\"" + format_js_string(method_value) + "\", \"" + format_js_string(path_value) + "\", payload, extraHeaders);")
+				lines = push(lines, "\t}")
+			} else {
+				lines = push(lines, "\tasync " + operation_id + "(extraHeaders = {}) {")
+				lines = push(lines, "\t\treturn this.request(\"" + format_js_string(method_value) + "\", \"" + format_js_string(path_value) + "\", null, extraHeaders);")
+				lines = push(lines, "\t}")
+			}
+		}
+		op_index = op_index + 1
+	}
+
+	lines = push(lines, "}")
+	lines = push(lines, "")
+	lines = push(lines, "module.exports = { KujoRagClient };")
+
+	return join(lines, "\n") + "\n"
+}
+
+spec_path := env_or("KUJO_RAG_OPENAPI_SPEC_PATH", "./openapi/kujo-rag-openapi.json")
+sdk_path := env_or("KUJO_RAG_OPENAPI_SDK_PATH", "./sdk/javascript/kujo-rag-client.generated.js")
+output_path := env_or("KUJO_RAG_OPENAPI_OUTPUT_PATH", "./results/api/openapi_contract_status.json")
+workflow_doc_path := env_or("KUJO_RAG_OPENAPI_WORKFLOW_DOC_PATH", "./docs/openapi-contract-sdk.md")
+release_process_doc_path := env_or("KUJO_RAG_RELEASE_PROCESS_DOC_PATH", "./docs/release-process.md")
+workflow_path := env_or("KUJO_RAG_OPENAPI_WORKFLOW_PATH", "./.github/workflows/openapi-contract-review.yml")
+regenerate_sdk := parse_bool_env("KUJO_RAG_OPENAPI_REGENERATE", false)
+
+_ = ensure_parent_dir(output_path)
+_ = ensure_parent_dir(sdk_path)
+
+required_operations := [
+	{"method": "GET", "path": "/", "operation_id": "getRoot"},
+	{"method": "GET", "path": "/health", "operation_id": "getHealth"},
+	{"method": "GET", "path": "/live", "operation_id": "getLive"},
+	{"method": "GET", "path": "/ready", "operation_id": "getReady"},
+	{"method": "GET", "path": "/startup", "operation_id": "getStartup"},
+	{"method": "POST", "path": "/ingest", "operation_id": "postIngest"},
+	{"method": "POST", "path": "/ingest/jobs", "operation_id": "postIngestJobs"},
+	{"method": "POST", "path": "/ingest/jobs/status", "operation_id": "postIngestJobsStatus"},
+	{"method": "POST", "path": "/ingest/jobs/worker/tick", "operation_id": "postIngestJobsWorkerTick"},
+	{"method": "POST", "path": "/query", "operation_id": "postQuery"},
+	{"method": "GET", "path": "/metrics", "operation_id": "getMetrics"},
+	{"method": "GET", "path": "/retention", "operation_id": "getRetention"},
+	{"method": "POST", "path": "/retention/policy", "operation_id": "postRetentionPolicy"},
+	{"method": "POST", "path": "/retention/purge", "operation_id": "postRetentionPurge"},
+	{"method": "POST", "path": "/retention/legal-hold/start", "operation_id": "postRetentionLegalHoldStart"},
+	{"method": "POST", "path": "/retention/legal-hold/stop", "operation_id": "postRetentionLegalHoldStop"},
+	{"method": "POST", "path": "/privacy/export", "operation_id": "postPrivacyExport"},
+	{"method": "POST", "path": "/privacy/delete", "operation_id": "postPrivacyDelete"},
+	{"method": "GET", "path": "/drain", "operation_id": "getDrain"},
+	{"method": "POST", "path": "/drain/start", "operation_id": "postDrainStart"},
+	{"method": "POST", "path": "/drain/stop", "operation_id": "postDrainStop"}
+]
+
+raw_spec := read_json_file_or(spec_path, {})
+spec_available := type(raw_spec) == "dict" && len(keys(raw_spec)) > 0
+openapi_version := normalize_text(dict_get_or(raw_spec, "openapi", ""))
+openapi_version_defined := openapi_version != ""
+openapi_version_supported := text_has_token(openapi_version, "3.")
+
+info := dict_get_or(raw_spec, "info", {})
+api_title := normalize_text(dict_get_or(info, "title", ""))
+api_semver := normalize_text(dict_get_or(info, "version", ""))
+api_contract_version := normalize_text(dict_get_or(info, "x-kujo-rag-api-version", ""))
+info_defined := api_title != "" && api_semver != "" && api_contract_version != ""
+
+paths := dict_get_or(raw_spec, "paths", {})
+paths_defined := type(paths) == "dict" && len(keys(paths)) > 0
+
+missing_operations := []
+mismatched_operation_ids := []
+operation_id_missing := []
+resolved_operations := []
+
+required_index := 0
+while required_index < len(required_operations) {
+	required := required_operations[required_index]
+	method_value := to_upper(normalize_text(dict_get_or(required, "method", "GET")))
+	path_value := normalize_text(dict_get_or(required, "path", ""))
+	expected_operation_id := normalize_text(dict_get_or(required, "operation_id", ""))
+
+	op := get_operation(paths, path_value, method_value)
+	if type(op) != "dict" || len(keys(op)) == 0 {
+		missing_operations = push(missing_operations, method_value + " " + path_value)
+	} else {
+		actual_operation_id := normalize_text(dict_get_or(op, "operationId", ""))
+		if actual_operation_id == "" {
+			operation_id_missing = push(operation_id_missing, method_value + " " + path_value)
+		}
+		if expected_operation_id != "" && actual_operation_id != expected_operation_id {
+			mismatched_operation_ids = push(mismatched_operation_ids, method_value + " " + path_value)
+		}
+		resolved_operations = push(resolved_operations, {
+			"method": method_value,
+			"path": path_value,
+			"operation_id": actual_operation_id,
+			"has_body": has_key(op, "requestBody") == 1
+		})
+	}
+
+	required_index = required_index + 1
+}
+
+required_paths_defined := len(missing_operations) == 0
+operation_ids_defined := len(operation_id_missing) == 0 && len(mismatched_operation_ids) == 0
+
+sdk_generated := generate_js_sdk(spec_path, resolved_operations)
+sdk_exists := file_exists(sdk_path)
+sdk_generated_match := false
+
+if regenerate_sdk {
+	if file_exists(sdk_path) {
+		delete_file(sdk_path)
+	}
+	write_file(sdk_path, sdk_generated)
+	sdk_exists = true
+	sdk_generated_match = true
+} else {
+	if sdk_exists {
+		sdk_generated_match = read_file(sdk_path) == sdk_generated
+	}
+}
+
+sdk_method_count := count_occurrences(sdk_generated, "\tasync ") - 1
+required_method_count := len(required_operations)
+sdk_method_count_valid := sdk_method_count == required_method_count
+
+workflow_doc_exists := path_exists(workflow_doc_path)
+workflow_exists := path_exists(workflow_path)
+release_process_exists := path_exists(release_process_doc_path)
+
+workflow_doc_text := ""
+if workflow_doc_exists {
+	workflow_doc_text = read_file(workflow_doc_path)
+}
+workflow_text := ""
+if workflow_exists {
+	workflow_text = read_file(workflow_path)
+}
+release_process_text := ""
+if release_process_exists {
+	release_process_text = read_file(release_process_doc_path)
+}
+
+workflow_doc_name := basename(workflow_doc_path)
+workflow_doc_defined := workflow_doc_exists && text_has_token(workflow_doc_text, "OpenAPI Contract and Generated SDK Workflow") && text_has_token(workflow_doc_text, spec_path) && text_has_token(workflow_doc_text, "run_openapi_contract_review.kujo")
+release_process_linked := release_process_exists && text_has_token(release_process_text, "run_openapi_contract_review.kujo") && (text_has_token(release_process_text, workflow_doc_path) || text_has_token(release_process_text, workflow_doc_name))
+workflow_defined := workflow_exists && text_has_token(workflow_text, "run_openapi_contract_review.kujo") && text_has_token(workflow_text, "schedule:")
+
+expected_operation_ids := []
+resolved_index := 0
+while resolved_index < len(resolved_operations) {
+	resolved := resolved_operations[resolved_index]
+	operation_id := normalize_text(dict_get_or(resolved, "operation_id", ""))
+	if operation_id != "" {
+		expected_operation_ids = push(expected_operation_ids, operation_id)
+	}
+	resolved_index = resolved_index + 1
+}
+
+sdk_hash := sha256(sdk_generated)
+
+ok := spec_available && openapi_version_defined && openapi_version_supported && info_defined && paths_defined && required_paths_defined && operation_ids_defined && sdk_exists && sdk_generated_match && sdk_method_count_valid && workflow_doc_defined && release_process_linked && workflow_defined
+
+result := {
+	"ok": ok,
+	"generated_at_unix_ms": current_timestamp(),
+	"spec_path": spec_path,
+	"sdk_path": sdk_path,
+	"output_path": output_path,
+	"workflow_doc_path": workflow_doc_path,
+	"release_process_doc_path": release_process_doc_path,
+	"workflow_path": workflow_path,
+	"openapi_version": openapi_version,
+	"api_contract_version": api_contract_version,
+	"sdk_hash_sha256": sdk_hash,
+	"sdk_method_count": sdk_method_count,
+	"required_method_count": required_method_count,
+	"missing_operations": missing_operations,
+	"operation_ids_missing": operation_id_missing,
+	"operation_id_mismatches": mismatched_operation_ids,
+	"resolved_operation_ids": expected_operation_ids,
+	"gates": {
+		"spec_available": spec_available,
+		"openapi_version_defined": openapi_version_defined,
+		"openapi_version_supported": openapi_version_supported,
+		"info_defined": info_defined,
+		"paths_defined": paths_defined,
+		"required_paths_defined": required_paths_defined,
+		"operation_ids_defined": operation_ids_defined,
+		"sdk_exists": sdk_exists,
+		"sdk_generated_match": sdk_generated_match,
+		"sdk_method_count_valid": sdk_method_count_valid,
+		"workflow_doc_defined": workflow_doc_defined,
+		"release_process_linked": release_process_linked,
+		"workflow_defined": workflow_defined
+	}
+}
+
+_ = write_json_file(output_path, result)
+print(to_json(result))
+
+if ok == false {
+	exit(1)
+}

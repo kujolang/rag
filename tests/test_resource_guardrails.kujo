@@ -1,0 +1,127 @@
+from src.common import dict_get_or
+from src.tests_helpers import assert_true
+
+kujo_bin := env_or("KUJO_BIN", "/path/to/kujo/target/release/kujo")
+
+func run_cmd(command) {
+	res := execute_status(command, {"timeout_ms": 120000})
+	if type(res) == "struct" {
+		return {
+			"ok": res.success,
+			"exit_code": res.exitcode,
+			"stdout": to_string(res.stdout),
+			"stderr": to_string(res.stderr)
+		}
+	}
+	return {
+		"ok": false,
+		"exit_code": -1,
+		"stdout": "",
+		"stderr": "invalid execute_status result"
+	}
+}
+
+func parse_json_safe(text) {
+	obj := {}
+	err := null
+	try {
+		obj := parse_json(text)
+	} except e {
+		err := e
+	}
+	if type(err) != "null" {
+		return {
+			"ok": false,
+			"data": {},
+			"error": to_string(err)
+		}
+	}
+	return {
+		"ok": true,
+		"data": obj
+	}
+}
+
+func start_server(port, env_prefix, log_file) {
+	cmd := "env " + env_prefix + " " + kujo_bin + " run main.kujo --interpreter serve --host 127.0.0.1 --port " + to_string(port) + " > " + log_file + " 2>&1 & echo $!"
+	res := run_cmd(cmd)
+	return trim(dict_get_or(res, "stdout", ""))
+}
+
+func stop_server(pid) {
+	if pid == "" {
+		return true
+	}
+	_ := run_cmd("kill " + pid + " >/dev/null 2>&1 || true")
+	_ := run_cmd("wait " + pid + " >/dev/null 2>&1 || true")
+	return true
+}
+
+func wait_for_health(port) {
+	attempt := 0
+	while attempt < 800 {
+		res := run_cmd("curl -s http://127.0.0.1:" + to_string(port) + "/health")
+		body := trim(dict_get_or(res, "stdout", ""))
+		if body != "" {
+			parsed := parse_json_safe(body)
+			if dict_get_or(parsed, "ok", false) == true {
+				return true
+			}
+		}
+		attempt = attempt + 1
+	}
+	return false
+}
+
+func post_json(port, path, payload) {
+	cmd := "curl -s -X POST http://127.0.0.1:" + to_string(port) + path + " -H \"Content-Type: application/json\" -d '" + payload + "'"
+	return run_cmd(cmd)
+}
+
+func repeat_text(char, count) {
+	out := ""
+	i := 0
+	while i < count {
+		out = out + char
+		i = i + 1
+	}
+	return out
+}
+
+func require_true(condition, label) {
+	if to_bool(condition) == false {
+		print("test_resource_guardrails assertion failed: " + label)
+		exit(1)
+	}
+}
+
+base_port := 19000 + (current_timestamp() % 1000)
+env_guardrails := "KUJO_RAG_API_AUTH_PROVIDER=none KUJO_RAG_API_GUARDRAIL_QUERY_MAX_COMPLEXITY=256 KUJO_RAG_API_GUARDRAIL_QUERY_MAX_FILTER_KEYS=1 KUJO_RAG_API_GUARDRAIL_QUERY_MAX_SESSION_CHARS=256 KUJO_RAG_API_GUARDRAIL_INGEST_MAX_FILES=1 KUJO_RAG_API_GUARDRAIL_INGEST_MAX_TOTAL_BYTES=50000000"
+pid := start_server(base_port, env_guardrails, "/tmp/kujo_rag_resource_guardrails.log")
+require_true(pid != "", "server pid")
+require_true(wait_for_health(base_port) == true, "server health")
+
+query_filter := post_json(base_port, "/query", "{\"query\":\"Kujo speed\",\"filters\":{\"a\":\"1\",\"b\":\"2\"}}")
+query_filter_raw := to_string(dict_get_or(query_filter, "stdout", ""))
+require_true(index_of(query_filter_raw, "query_filter_complexity_exceeded") >= 0, "filter guardrail code")
+
+query_complexity_payload := "{\"query\":\"" + repeat_text("x", 700) + "\"}"
+query_complexity := post_json(base_port, "/query", query_complexity_payload)
+query_complexity_raw := to_string(dict_get_or(query_complexity, "stdout", ""))
+require_true(index_of(query_complexity_raw, "query_complexity_exceeded") >= 0, "query complexity guardrail code")
+
+query_session_one := post_json(base_port, "/query", "{\"query\":\"hi\",\"session_id\":\"guardrail-session\"}")
+query_session_one_parsed := parse_json_safe(dict_get_or(query_session_one, "stdout", ""))
+require_true(dict_get_or(query_session_one_parsed, "ok", false) == true, "session seed query parse")
+
+query_session_two := post_json(base_port, "/query", "{\"query\":\"next\",\"session_id\":\"guardrail-session\"}")
+query_session_two_raw := to_string(dict_get_or(query_session_two, "stdout", ""))
+require_true(index_of(query_session_two_raw, "query_session_context_too_large") >= 0, "session guardrail code")
+
+ingest_guardrail := post_json(base_port, "/ingest", "{\"path\":\"./examples/kujo_docs\",\"recursive\":true}")
+ingest_guardrail_raw := to_string(dict_get_or(ingest_guardrail, "stdout", ""))
+require_true(index_of(ingest_guardrail_raw, "ingest_guardrail_files_exceeded") >= 0, "ingest file guardrail code")
+
+_ := stop_server(pid)
+
+print("test_resource_guardrails: ok")

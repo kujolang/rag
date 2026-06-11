@@ -1,0 +1,154 @@
+from src.common import dict_get_or
+from src.config import load_config
+from src.rag_engine import query_rag
+from src.vector_backend import load_index_with_backend
+
+kujo_bin := env_or("KUJO_BIN", "/path/to/kujo/target/release/kujo")
+
+func parse_json_safe(text) {
+	payload := {}
+	err := null
+	try {
+		payload := parse_json(text)
+	} except e {
+		err := e
+	}
+	if type(err) != "null" {
+		return {
+			"ok": false,
+			"data": {},
+			"error": to_string(err)
+		}
+	}
+	return {
+		"ok": true,
+		"data": payload,
+		"error": ""
+	}
+}
+
+func check(condition, label) {
+	if to_bool(condition) == false {
+		print("check_failed:" + label)
+		exit(1)
+	}
+	return true
+}
+
+if path_exists("results") == false {
+	create_dir("results")
+}
+
+suffix := to_string(current_timestamp())
+index_path := "results/test_index_maintenance_" + suffix + ".json"
+report_path := "results/test_index_maintenance_report_" + suffix + ".json"
+
+index_fixture := {
+	"schema_version": 2,
+	"version": "2.0",
+	"created_at": current_timestamp(),
+	"updated_at": current_timestamp(),
+	"chunks": [
+		{
+			"chunk_id": "c1",
+			"doc_id": "d1",
+			"path": "examples/kujo_docs/LANGUAGE_SPEC.md",
+			"line_start": 1,
+			"line_end": 5,
+			"text": "Kujo supports module imports and namespace semantics."
+		},
+		{
+			"chunk_id": "c1",
+			"doc_id": "d1",
+			"path": "examples/kujo_docs/LANGUAGE_SPEC.md",
+			"line_start": 1,
+			"line_end": 5,
+			"text": "Kujo supports module imports and namespace semantics."
+		},
+		{
+			"chunk_id": "c2",
+			"doc_id": "d2",
+			"path": "examples/kujo_docs/API.md",
+			"line_start": 1,
+			"line_end": 5,
+			"text": "The API reference includes query and status endpoints."
+		}
+	],
+	"vectors": [
+		{"chunk_id": "c1", "embedding": [0.9, 0.1, 0.2]},
+		{"chunk_id": "c1", "embedding": [0.9, 0.1, 0.2]},
+		{"chunk_id": "c2", "embedding": [0.2, 0.8, 0.3]},
+		{"chunk_id": "orphan", "embedding": [0.1, 0.1, 0.1]}
+	],
+	"lexical": [
+		{"chunk_id": "c1", "term_freq": {"kujo": 1, "imports": 1}, "term_count": 6},
+		{"chunk_id": "c1", "term_freq": {"kujo": 1, "imports": 1}, "term_count": 6},
+		{"chunk_id": "c2", "term_freq": {"api": 1, "query": 1}, "term_count": 7},
+		{"chunk_id": "orphan", "term_freq": {"unused": 1}, "term_count": 1}
+	],
+	"meta": {
+		"documents": 2,
+		"chunks": 3,
+		"provider": "hash"
+	}
+}
+
+write_file(index_path, to_json(index_fixture))
+size_before := file_size(index_path)
+
+cfg_before := load_config({})
+cfg_before["index_path"] := index_path
+index_before := load_index_with_backend(cfg_before)
+before_query := query_rag(index_before, "module imports", cfg_before, null, null)
+before_citations := dict_get_or(before_query, "citations", [])
+check(to_bool(type(before_citations) == "array"), "before_citations_array")
+check(to_bool(len(before_citations) > 0), "before_citations_non_empty")
+
+cmd_apply := "KUJO_RAG_INDEX_PATH=" + index_path + " KUJO_RAG_INDEX_MAINTENANCE_MODE=apply KUJO_RAG_INDEX_MAINTENANCE_ALLOWED_UTC_HOURS=0-23 KUJO_RAG_INDEX_MAINTENANCE_MAX_LATENCY_REGRESSION_RATIO=20 KUJO_RAG_INDEX_MAINTENANCE_REPORT_PATH=" + report_path + " " + kujo_bin + " run scripts/maintain_index.kujo --interpreter"
+apply_res := execute_status(cmd_apply, {"timeout_ms": 300000})
+check(to_bool(type(apply_res) == "struct"), "apply_result_struct")
+check(to_bool(apply_res.success == true), "apply_result_success")
+
+parsed_apply := parse_json_safe(to_string(apply_res.stdout))
+check(to_bool(dict_get_or(parsed_apply, "ok", false) == true), "apply_stdout_json")
+apply_payload := dict_get_or(parsed_apply, "data", {})
+check(to_bool(dict_get_or(apply_payload, "ok", false) == true), "apply_payload_ok")
+check(to_bool(dict_get_or(apply_payload, "applied", false) == true), "apply_payload_applied")
+
+compaction := dict_get_or(apply_payload, "compaction", {})
+stats := dict_get_or(compaction, "stats", {})
+check(to_bool(dict_get_or(compaction, "size_reduced_or_equal", false) == true), "compaction_size_reduced")
+check(to_bool(dict_get_or(stats, "duplicate_chunks_removed", 0) >= 1), "duplicate_chunks_removed")
+check(to_bool(dict_get_or(stats, "orphan_vectors_removed", 0) >= 1), "orphan_vectors_removed")
+
+size_after := file_size(index_path)
+check(to_bool(size_after < size_before), "size_after_less_than_before")
+
+cfg_after := load_config({})
+cfg_after["index_path"] := index_path
+index_after := load_index_with_backend(cfg_after)
+after_query := query_rag(index_after, "module imports", cfg_after, null, null)
+after_citations := dict_get_or(after_query, "citations", [])
+check(to_bool(type(after_citations) == "array"), "after_citations_array")
+check(to_bool(len(after_citations) > 0), "after_citations_non_empty")
+
+cmd_skip := "KUJO_RAG_INDEX_PATH=" + index_path + " KUJO_RAG_INDEX_MAINTENANCE_MODE=report KUJO_RAG_INDEX_MAINTENANCE_ALLOWED_UTC_HOURS=99 KUJO_RAG_INDEX_MAINTENANCE_REPORT_PATH=" + report_path + " " + kujo_bin + " run scripts/maintain_index.kujo --interpreter"
+skip_res := execute_status(cmd_skip, {"timeout_ms": 120000})
+check(to_bool(type(skip_res) == "struct"), "skip_result_struct")
+check(to_bool(skip_res.success == true), "skip_result_success")
+
+parsed_skip := parse_json_safe(to_string(skip_res.stdout))
+check(to_bool(dict_get_or(parsed_skip, "ok", false) == true), "skip_stdout_json")
+skip_payload := dict_get_or(parsed_skip, "data", {})
+check(to_bool(dict_get_or(skip_payload, "ok", false) == true), "skip_payload_ok")
+check(to_bool(dict_get_or(skip_payload, "skipped", false) == true), "skip_payload_skipped")
+check(to_bool(dict_get_or(skip_payload, "reason", "") == "outside_maintenance_window"), "skip_payload_reason")
+
+if file_exists(index_path) {
+	delete_file(index_path)
+}
+if file_exists(report_path) {
+	delete_file(report_path)
+}
+
+print("test_index_compaction_maintenance: ok")

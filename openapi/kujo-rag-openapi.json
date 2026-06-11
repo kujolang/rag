@@ -1,0 +1,733 @@
+{
+	"openapi": "3.0.3",
+	"info": {
+		"title": "Kujo RAG HTTP API",
+		"version": "1.0.0",
+		"description": "Contract for the Kujo RAG HTTP service endpoints.",
+		"x-kujo-rag-api-version": "v1"
+	},
+	"servers": [
+		{
+			"url": "http://127.0.0.1:8787",
+			"description": "Local default"
+		}
+	],
+	"paths": {
+		"/": {
+			"get": {
+				"operationId": "getRoot",
+				"summary": "Get API root summary",
+				"responses": {
+					"200": {
+						"description": "Root summary response",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/ApiSuccessEnvelope"
+								}
+							}
+						}
+					},
+					"default": {
+						"$ref": "#/components/responses/ApiError"
+					}
+				}
+			}
+		},
+		"/health": {
+			"get": {
+				"operationId": "getHealth",
+				"summary": "Get health summary",
+				"responses": {
+					"200": {
+						"description": "Health response",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/ApiSuccessEnvelope"
+								}
+							}
+						}
+					},
+					"default": {
+						"$ref": "#/components/responses/ApiError"
+					}
+				}
+			}
+		},
+		"/live": {
+			"get": {
+				"operationId": "getLive",
+				"summary": "Get liveness status",
+				"responses": {
+					"200": {
+						"description": "Liveness response",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/ApiSuccessEnvelope"
+								}
+							}
+						}
+					},
+					"default": {
+						"$ref": "#/components/responses/ApiError"
+					}
+				}
+			}
+		},
+		"/ready": {
+			"get": {
+				"operationId": "getReady",
+				"summary": "Get readiness status",
+				"responses": {
+					"200": {
+						"description": "Readiness response",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/ApiSuccessEnvelope"
+								}
+							}
+						}
+					},
+					"503": {
+						"$ref": "#/components/responses/ApiError"
+					},
+					"default": {
+						"$ref": "#/components/responses/ApiError"
+					}
+				}
+			}
+		},
+		"/startup": {
+			"get": {
+				"operationId": "getStartup",
+				"summary": "Get startup lifecycle status",
+				"responses": {
+					"200": {
+						"description": "Startup response",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/ApiSuccessEnvelope"
+								}
+							}
+						}
+					},
+					"503": {
+						"$ref": "#/components/responses/ApiError"
+					},
+					"default": {
+						"$ref": "#/components/responses/ApiError"
+					}
+				}
+			}
+		},
+		"/ingest": {
+			"post": {
+				"operationId": "postIngest",
+				"summary": "Run synchronous ingest",
+				"requestBody": {
+					"required": true,
+					"content": {
+						"application/json": {
+							"schema": {
+								"$ref": "#/components/schemas/IngestRequest"
+							}
+						}
+					}
+				},
+				"responses": {
+					"200": {
+						"description": "Ingest response",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/ApiSuccessEnvelope"
+								}
+							}
+						}
+					},
+					"default": {
+						"$ref": "#/components/responses/ApiError"
+					}
+				}
+			}
+		},
+		"/ingest/jobs": {
+			"post": {
+				"operationId": "postIngestJobs",
+				"summary": "Create ingest job",
+				"requestBody": {
+					"required": true,
+					"content": {
+						"application/json": {
+							"schema": {
+								"$ref": "#/components/schemas/IngestRequest"
+							}
+						}
+					}
+				},
+				"responses": {
+					"202": {
+						"description": "Ingest job response",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/ApiSuccessEnvelope"
+								}
+							}
+						}
+					},
+					"default": {
+						"$ref": "#/components/responses/ApiError"
+					}
+				}
+			}
+		},
+		"/ingest/jobs/status": {
+			"post": {
+				"operationId": "postIngestJobsStatus",
+				"summary": "Get ingest job status",
+				"requestBody": {
+					"required": true,
+					"content": {
+						"application/json": {
+							"schema": {
+								"$ref": "#/components/schemas/IngestJobStatusRequest"
+							}
+						}
+					}
+				},
+				"responses": {
+					"200": {
+						"description": "Ingest job status response",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/ApiSuccessEnvelope"
+								}
+							}
+						}
+					},
+					"default": {
+						"$ref": "#/components/responses/ApiError"
+					}
+				}
+			}
+		},
+		"/ingest/jobs/worker/tick": {
+			"post": {
+				"operationId": "postIngestJobsWorkerTick",
+				"summary": "Run one ingest worker cycle",
+				"responses": {
+					"200": {
+						"description": "Worker tick response",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/ApiSuccessEnvelope"
+								}
+							}
+						}
+					},
+					"default": {
+						"$ref": "#/components/responses/ApiError"
+					}
+				}
+			}
+		},
+		"/query": {
+			"post": {
+				"operationId": "postQuery",
+				"summary": "Run query against index",
+				"requestBody": {
+					"required": true,
+					"content": {
+						"application/json": {
+							"schema": {
+								"$ref": "#/components/schemas/QueryRequest"
+							}
+						}
+					}
+				},
+				"responses": {
+					"200": {
+						"description": "Query response",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/ApiSuccessEnvelope"
+								}
+							}
+						}
+					},
+					"default": {
+						"$ref": "#/components/responses/ApiError"
+					}
+				}
+			}
+		},
+		"/metrics": {
+			"get": {
+				"operationId": "getMetrics",
+				"summary": "Get metrics snapshot",
+				"responses": {
+					"200": {
+						"description": "Metrics response",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/ApiSuccessEnvelope"
+								}
+							}
+						}
+					},
+					"default": {
+						"$ref": "#/components/responses/ApiError"
+					}
+				}
+			}
+		},
+		"/retention": {
+			"get": {
+				"operationId": "getRetention",
+				"summary": "Get retention state",
+				"responses": {
+					"200": {
+						"description": "Retention response",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/ApiSuccessEnvelope"
+								}
+							}
+						}
+					},
+					"default": {
+						"$ref": "#/components/responses/ApiError"
+					}
+				}
+			}
+		},
+		"/retention/policy": {
+			"post": {
+				"operationId": "postRetentionPolicy",
+				"summary": "Set namespace retention policy",
+				"requestBody": {
+					"required": true,
+					"content": {
+						"application/json": {
+							"schema": {
+								"$ref": "#/components/schemas/RetentionPolicyRequest"
+							}
+						}
+					}
+				},
+				"responses": {
+					"200": {
+						"description": "Retention policy response",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/ApiSuccessEnvelope"
+								}
+							}
+						}
+					},
+					"default": {
+						"$ref": "#/components/responses/ApiError"
+					}
+				}
+			}
+		},
+		"/retention/purge": {
+			"post": {
+				"operationId": "postRetentionPurge",
+				"summary": "Run retention purge",
+				"requestBody": {
+					"required": true,
+					"content": {
+						"application/json": {
+							"schema": {
+								"$ref": "#/components/schemas/NamespaceRequest"
+							}
+						}
+					}
+				},
+				"responses": {
+					"200": {
+						"description": "Retention purge response",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/ApiSuccessEnvelope"
+								}
+							}
+						}
+					},
+					"409": {
+						"$ref": "#/components/responses/ApiError"
+					},
+					"default": {
+						"$ref": "#/components/responses/ApiError"
+					}
+				}
+			}
+		},
+		"/retention/legal-hold/start": {
+			"post": {
+				"operationId": "postRetentionLegalHoldStart",
+				"summary": "Start legal hold",
+				"requestBody": {
+					"required": true,
+					"content": {
+						"application/json": {
+							"schema": {
+								"$ref": "#/components/schemas/ReasonedNamespaceRequest"
+							}
+						}
+					}
+				},
+				"responses": {
+					"200": {
+						"description": "Legal hold start response",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/ApiSuccessEnvelope"
+								}
+							}
+						}
+					},
+					"default": {
+						"$ref": "#/components/responses/ApiError"
+					}
+				}
+			}
+		},
+		"/retention/legal-hold/stop": {
+			"post": {
+				"operationId": "postRetentionLegalHoldStop",
+				"summary": "Stop legal hold",
+				"requestBody": {
+					"required": true,
+					"content": {
+						"application/json": {
+							"schema": {
+								"$ref": "#/components/schemas/ReasonedNamespaceRequest"
+							}
+						}
+					}
+				},
+				"responses": {
+					"200": {
+						"description": "Legal hold stop response",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/ApiSuccessEnvelope"
+								}
+							}
+						}
+					},
+					"default": {
+						"$ref": "#/components/responses/ApiError"
+					}
+				}
+			}
+		},
+		"/privacy/export": {
+			"post": {
+				"operationId": "postPrivacyExport",
+				"summary": "Run privacy export",
+				"requestBody": {
+					"required": true,
+					"content": {
+						"application/json": {
+							"schema": {
+								"$ref": "#/components/schemas/PrivacyExportRequest"
+							}
+						}
+					}
+				},
+				"responses": {
+					"200": {
+						"description": "Privacy export response",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/ApiSuccessEnvelope"
+								}
+							}
+						}
+					},
+					"default": {
+						"$ref": "#/components/responses/ApiError"
+					}
+				}
+			}
+		},
+		"/privacy/delete": {
+			"post": {
+				"operationId": "postPrivacyDelete",
+				"summary": "Run privacy delete workflow",
+				"requestBody": {
+					"required": true,
+					"content": {
+						"application/json": {
+							"schema": {
+								"$ref": "#/components/schemas/ReasonedNamespaceRequest"
+							}
+						}
+					}
+				},
+				"responses": {
+					"200": {
+						"description": "Privacy delete response",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/ApiSuccessEnvelope"
+								}
+							}
+						}
+					},
+					"409": {
+						"$ref": "#/components/responses/ApiError"
+					},
+					"default": {
+						"$ref": "#/components/responses/ApiError"
+					}
+				}
+			}
+		},
+		"/drain": {
+			"get": {
+				"operationId": "getDrain",
+				"summary": "Get drain mode state",
+				"responses": {
+					"200": {
+						"description": "Drain state response",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/ApiSuccessEnvelope"
+								}
+							}
+						}
+					},
+					"default": {
+						"$ref": "#/components/responses/ApiError"
+					}
+				}
+			}
+		},
+		"/drain/start": {
+			"post": {
+				"operationId": "postDrainStart",
+				"summary": "Enable drain mode",
+				"requestBody": {
+					"required": false,
+					"content": {
+						"application/json": {
+							"schema": {
+								"$ref": "#/components/schemas/ReasonRequest"
+							}
+						}
+					}
+				},
+				"responses": {
+					"200": {
+						"description": "Drain start response",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/ApiSuccessEnvelope"
+								}
+							}
+						}
+					},
+					"default": {
+						"$ref": "#/components/responses/ApiError"
+					}
+				}
+			}
+		},
+		"/drain/stop": {
+			"post": {
+				"operationId": "postDrainStop",
+				"summary": "Disable drain mode",
+				"responses": {
+					"200": {
+						"description": "Drain stop response",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/ApiSuccessEnvelope"
+								}
+							}
+						}
+					},
+					"default": {
+						"$ref": "#/components/responses/ApiError"
+					}
+				}
+			}
+		}
+	},
+	"components": {
+		"schemas": {
+			"ApiSuccessEnvelope": {
+				"type": "object",
+				"required": ["ok", "data", "request_id", "correlation_id"],
+				"properties": {
+					"ok": {"type": "boolean", "enum": [true]},
+					"data": {"type": "object"},
+					"request_id": {"type": "string"},
+					"correlation_id": {"type": "string"}
+				}
+			},
+			"ApiError": {
+				"type": "object",
+				"required": ["code", "message"],
+				"properties": {
+					"code": {"type": "string"},
+					"message": {"type": "string"},
+					"details": {"type": "object"}
+				}
+			},
+			"ApiErrorEnvelope": {
+				"type": "object",
+				"required": ["ok", "error", "request_id", "correlation_id"],
+				"properties": {
+					"ok": {"type": "boolean", "enum": [false]},
+					"error": {"$ref": "#/components/schemas/ApiError"},
+					"request_id": {"type": "string"},
+					"correlation_id": {"type": "string"}
+				}
+			},
+			"NamespaceRequest": {
+				"type": "object",
+				"properties": {
+					"namespace": {"type": "string", "minLength": 1}
+				}
+			},
+			"ReasonRequest": {
+				"type": "object",
+				"properties": {
+					"reason": {"type": "string"}
+				}
+			},
+			"ReasonedNamespaceRequest": {
+				"allOf": [
+					{"$ref": "#/components/schemas/NamespaceRequest"},
+					{"$ref": "#/components/schemas/ReasonRequest"}
+				]
+			},
+			"IngestRequest": {
+				"allOf": [
+					{"$ref": "#/components/schemas/NamespaceRequest"},
+					{
+						"type": "object",
+						"required": ["path"],
+						"properties": {
+							"path": {"type": "string"},
+							"recursive": {"type": "boolean"}
+						}
+					}
+				]
+			},
+			"IngestJobStatusRequest": {
+				"type": "object",
+				"required": ["job_id"],
+				"properties": {
+					"job_id": {"type": "string", "minLength": 1}
+				}
+			},
+			"FederationTarget": {
+				"type": "object",
+				"required": ["namespace"],
+				"properties": {
+					"namespace": {"type": "string"},
+					"weight": {"type": "number"}
+				}
+			},
+			"FederationRequest": {
+				"type": "object",
+				"required": ["targets"],
+				"properties": {
+					"merge_strategy": {"type": "string", "enum": ["weighted_score"]},
+					"fallback_policy": {"type": "string", "enum": ["best_effort", "primary_then_all"]},
+					"targets": {
+						"type": "array",
+						"minItems": 1,
+						"items": {"$ref": "#/components/schemas/FederationTarget"}
+					}
+				}
+			},
+			"ResponsePolicyRequest": {
+				"type": "object",
+				"properties": {
+					"style": {"type": "string", "enum": ["strict_extractive", "concise", "expanded"]},
+					"safety_mode": {"type": "string", "enum": ["balanced", "strict", "permissive"]},
+					"min_confidence": {"type": "number"},
+					"min_citations": {"type": "number"}
+				}
+			},
+			"QueryRequest": {
+				"allOf": [
+					{"$ref": "#/components/schemas/NamespaceRequest"},
+					{
+						"type": "object",
+						"required": ["query"],
+						"properties": {
+							"query": {"type": "string", "minLength": 1},
+							"filters": {"type": "object"},
+							"session_id": {"type": "string"},
+							"include_retrieval_explanation": {"type": "boolean"},
+							"federation": {"$ref": "#/components/schemas/FederationRequest"},
+							"response_policy": {"$ref": "#/components/schemas/ResponsePolicyRequest"}
+						}
+					}
+				]
+			},
+			"RetentionPolicyRequest": {
+				"allOf": [
+					{"$ref": "#/components/schemas/NamespaceRequest"},
+					{
+						"type": "object",
+						"properties": {
+							"enabled": {"type": "boolean"},
+							"ttl_days": {"type": "number"}
+						}
+					}
+				]
+			},
+			"PrivacyExportRequest": {
+				"allOf": [
+					{"$ref": "#/components/schemas/NamespaceRequest"},
+					{
+						"type": "object",
+						"properties": {
+							"export_type": {"type": "string"}
+						}
+					}
+				]
+			}
+		},
+		"responses": {
+			"ApiError": {
+				"description": "Error response",
+				"content": {
+					"application/json": {
+						"schema": {
+							"$ref": "#/components/schemas/ApiErrorEnvelope"
+						}
+					}
+				}
+			}
+		}
+	}
+}

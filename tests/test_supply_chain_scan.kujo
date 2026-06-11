@@ -1,0 +1,62 @@
+from src.common import dict_get_or
+from src.tests_helpers import assert_true
+
+kujo_bin := env_or("KUJO_BIN", "kujo")
+fixture_root := "./results/supply_chain_scan_fixture"
+safe_root := fixture_root + "/safe"
+high_root := fixture_root + "/high"
+
+if path_exists("./results") == false {
+	create_dir("./results")
+}
+if path_exists(fixture_root) == false {
+	create_dir(fixture_root)
+}
+if path_exists(safe_root) == false {
+	create_dir(safe_root)
+}
+if path_exists(high_root) == false {
+	create_dir(high_root)
+}
+
+safe_file := safe_root + "/README.md"
+safe_output := safe_root + "/scan.json"
+if file_exists(safe_file) {
+	delete_file(safe_file)
+}
+if file_exists(safe_output) {
+	delete_file(safe_output)
+}
+write_file(safe_file, "# Safe fixture\nNo secrets here.\n")
+
+safe_cmd := kujo_bin + " run scripts/run_supply_chain_scan.kujo --interpreter --root " + safe_root + " --output " + safe_output
+safe_res := execute_status(safe_cmd, {"timeout_ms": 120000})
+assert_true(to_bool(safe_res.success == true))
+assert_true(to_bool(safe_res.exitcode == 0))
+assert_true(to_bool(file_exists(safe_output) == true))
+
+safe_payload := parse_json(read_file(safe_output))
+assert_true(to_bool(dict_get_or(safe_payload, "ok", false) == true))
+assert_true(to_bool(dict_get_or(dict_get_or(safe_payload, "summary", {}), "high", 1) == 0))
+
+high_file := high_root + "/secrets.txt"
+high_output := high_root + "/scan.json"
+if file_exists(high_file) {
+	delete_file(high_file)
+}
+if file_exists(high_output) {
+	delete_file(high_output)
+}
+write_file(high_file, "-----BEGIN PRIVATE KEY-----\nleaked\n-----END PRIVATE KEY-----\n")
+
+high_cmd := kujo_bin + " run scripts/run_supply_chain_scan.kujo --interpreter --root " + high_root + " --output " + high_output
+high_res := execute_status(high_cmd, {"timeout_ms": 120000})
+assert_true(to_bool(high_res.exitcode == 1))
+assert_true(to_bool(file_exists(high_output) == true))
+
+high_payload := parse_json(read_file(high_output))
+assert_true(to_bool(dict_get_or(high_payload, "ok", true) == false))
+assert_true(to_bool(dict_get_or(dict_get_or(high_payload, "summary", {}), "high", 0) > 0))
+assert_true(to_bool(dict_get_or(high_payload, "high_severity_blocking", false) == true))
+
+print("test_supply_chain_scan: ok")

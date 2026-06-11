@@ -1,0 +1,97 @@
+from src.common import dict_get_or
+
+func read_json_file(path) {
+	if file_exists(path) == false {
+		return {
+			"ok": false,
+			"error": "missing_file",
+			"message": "File not found: " + path,
+			"data": {}
+		}
+	}
+	raw := read_file(path)
+	err := null
+	parsed := {}
+	try {
+		parsed := parse_json(raw)
+	} except e {
+		err := e
+	}
+	if type(err) != "null" {
+		return {
+			"ok": false,
+			"error": "invalid_json",
+			"message": to_string(err),
+			"data": {}
+		}
+	}
+	return {
+		"ok": true,
+		"data": parsed
+	}
+}
+
+func verify_sha256(path, expected_hash) {
+	if file_exists(path) == false {
+		return false
+	}
+	content := read_file(path)
+	return sha256(content) == expected_hash
+}
+
+func main() {
+	backup_dir := env_or("RESTORE_BACKUP_DIR", "")
+	if trim(backup_dir) == "" {
+		print(to_json({"ok": false, "error": "missing_backup_dir", "message": "Set RESTORE_BACKUP_DIR"}))
+		exit(1)
+	}
+
+	manifest_path := backup_dir + "/manifest.json"
+	manifest_res := read_json_file(manifest_path)
+	if manifest_res["ok"] == false {
+		print(to_json({"ok": false, "error": manifest_res["error"], "message": manifest_res["message"]}))
+		exit(1)
+	}
+	manifest := manifest_res["data"]
+	files := dict_get_or(manifest, "files", {})
+	index_meta := dict_get_or(files, "index", {})
+	config_meta := dict_get_or(files, "config", {})
+
+	index_backup := dict_get_or(index_meta, "backup", "")
+	config_backup := dict_get_or(config_meta, "backup", "")
+	index_hash := dict_get_or(index_meta, "sha256", "")
+	config_hash := dict_get_or(config_meta, "sha256", "")
+
+	if verify_sha256(index_backup, index_hash) == false {
+		print(to_json({"ok": false, "error": "index_checksum_mismatch", "path": index_backup}))
+		exit(1)
+	}
+	if verify_sha256(config_backup, config_hash) == false {
+		print(to_json({"ok": false, "error": "config_checksum_mismatch", "path": config_backup}))
+		exit(1)
+	}
+
+	target_index := env_or("RESTORE_TARGET_INDEX", dict_get_or(index_meta, "source", "data/rag_index.json"))
+	target_config := env_or("RESTORE_TARGET_CONFIG", dict_get_or(config_meta, "source", "config/release_eval_thresholds.json"))
+
+	if file_exists(target_index) {
+		delete_file(target_index)
+	}
+	if file_exists(target_config) {
+		delete_file(target_config)
+	}
+
+	write_file(target_index, read_file(index_backup))
+	write_file(target_config, read_file(config_backup))
+
+	print(to_json({
+		"ok": true,
+		"restored": {
+			"index": target_index,
+			"config": target_config
+		},
+		"verified": true
+	}))
+}
+
+main()

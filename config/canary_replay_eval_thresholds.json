@@ -1,0 +1,10 @@
+{
+	"min_case_count": 6,
+	"min_quality_pass_rate": 0.83,
+	"max_error_rate": 0.0,
+	"max_avg_latency_ms": 2200,
+	"max_p95_latency_ms": 2800,
+	"min_average_confidence": 0.30,
+	"min_average_grounding": 0.5,
+	"thresholds_note": "Canary replay quality thresholds for production-like sampled traffic checks"
+}

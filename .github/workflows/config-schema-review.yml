@@ -1,0 +1,53 @@
+name: config-schema-review
+
+on:
+  schedule:
+    - cron: "0 10 * * 4"
+  workflow_dispatch:
+
+jobs:
+  config-schema-review:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      KUJO_RUNTIME_REF: "7819d1475e909ec88f510c9927445791ea928836"
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Build Kujo runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          git init /tmp/kujo-runtime
+          git -C /tmp/kujo-runtime remote add origin https://github.com/kujolang/kujo.git
+          git -C /tmp/kujo-runtime fetch --depth 1 origin "$KUJO_RUNTIME_REF"
+          git -C /tmp/kujo-runtime checkout --detach "$KUJO_RUNTIME_REF"
+          cargo build --release --locked --manifest-path /tmp/kujo-runtime/Cargo.toml
+          echo "/tmp/kujo-runtime/target/release" >> "$GITHUB_PATH"
+
+      - name: Verify Kujo runtime
+        run: kujo --version
+
+      - name: Run config schema review gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          kujo run scripts/run_config_schema_review.kujo --interpreter > config-schema-review-status.json
+          cat config-schema-review-status.json
+
+      - name: Upload config schema review artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: config-schema-review
+          path: |
+            config-schema-review-status.json
+            results/config/config_schema_review_status.json
+            config/config_schema_reference.json
+            config/config_validation_examples.json
+            docs/config-schema-reference.md

@@ -1,0 +1,98 @@
+from src.common import dict_get_or
+from src.tests_helpers import assert_true
+
+kujo_bin := env_or("KUJO_BIN", "/path/to/kujo/target/release/kujo")
+
+func run_cmd(command) {
+	res := execute_status(command, {"timeout_ms": 120000})
+	if type(res) == "struct" {
+		return {
+			"ok": res.success,
+			"exit_code": res.exitcode,
+			"stdout": to_string(res.stdout),
+			"stderr": to_string(res.stderr)
+		}
+	}
+	return {
+		"ok": false,
+		"exit_code": -1,
+		"stdout": "",
+		"stderr": "invalid execute_status result"
+	}
+}
+
+func parse_json_safe(text) {
+	obj := {}
+	err := null
+	try {
+		obj := parse_json(text)
+	} except e {
+		err := e
+	}
+	if type(err) != "null" {
+		return {
+			"ok": false,
+			"error": to_string(err),
+			"data": {}
+		}
+	}
+	return {
+		"ok": true,
+		"data": obj
+	}
+}
+
+func start_server(port, env_prefix, log_file) {
+	cmd := "env " + env_prefix + " " + kujo_bin + " run main.kujo --interpreter serve --host 127.0.0.1 --port " + to_string(port) + " > " + log_file + " 2>&1 & echo $!"
+	res := run_cmd(cmd)
+	pid := trim(dict_get_or(res, "stdout", ""))
+	return pid
+}
+
+func stop_server(pid) {
+	if pid == "" {
+		return true
+	}
+	_ := run_cmd("kill " + pid + " >/dev/null 2>&1 || true")
+	_ := run_cmd("wait " + pid + " >/dev/null 2>&1 || true")
+	return true
+}
+
+func wait_for_health(port) {
+	attempt := 0
+	while attempt < 800 {
+		res := run_cmd("curl -s http://127.0.0.1:" + to_string(port) + "/health")
+		body := trim(dict_get_or(res, "stdout", ""))
+		if body != "" {
+			parsed := parse_json_safe(body)
+			if dict_get_or(parsed, "ok", false) == true {
+				payload := dict_get_or(parsed, "data", {})
+				if dict_get_or(payload, "ok", false) == true {
+					return true
+				}
+			}
+		}
+		attempt = attempt + 1
+	}
+	return false
+}
+
+port := 28000 + (current_timestamp() % 10000)
+env_prefix := "KUJO_RAG_ENV=development KUJO_RAG_API_AUTH_PROVIDER=bearer KUJO_RAG_API_BEARER_TOKEN=safe-token KUJO_RAG_API_REDACTION_ENABLED=true KUJO_RAG_API_REDACTION_MASK=REDACTED KUJO_RAG_API_REDACTION_KEYS=authorization,token,secret,password,x-api-key KUJO_RAG_API_REDACTION_VALUES=top-secret-value"
+pid := start_server(port, env_prefix, "/tmp/kujo_rag_redaction_policy.log")
+assert_true(to_bool(pid != ""))
+assert_true(to_bool(wait_for_health(port) == true))
+
+bad_query := run_cmd("curl -s -X POST http://127.0.0.1:" + to_string(port) + "/query -H \"Content-Type: application/json\" -H \"Authorization: Bearer top-secret-value\" -d '{\"query\":\"hello\"}'")
+raw_body := dict_get_or(bad_query, "stdout", "")
+bad_query_parsed := parse_json_safe(raw_body)
+assert_true(to_bool(dict_get_or(bad_query_parsed, "ok", false) == true))
+err_obj := dict_get_or(dict_get_or(bad_query_parsed, "data", {}), "error", {})
+assert_true(to_bool(dict_get_or(err_obj, "code", "") == "forbidden"))
+details := dict_get_or(err_obj, "details", {})
+assert_true(to_bool(type(details) == "dict"))
+assert_true(to_bool(contains(raw_body, "top-secret-value") == 0))
+
+_ := stop_server(pid)
+
+print("test_redaction_policy: ok")

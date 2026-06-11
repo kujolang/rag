@@ -1,0 +1,28 @@
+{
+  "connectors": [
+    {
+      "id": "local_docs_git",
+      "type": "git_repo",
+      "enabled": true,
+      "source_path": "./examples/release_eval_corpus"
+    },
+    {
+      "id": "remote_http_docs",
+      "type": "http_docs",
+      "enabled": false,
+      "urls": [
+        "https://example.com/docs"
+      ]
+    },
+    {
+      "id": "enterprise_stub_example",
+      "type": "plugin_script",
+      "enabled": false,
+      "runner_script": "./scripts/connectors/example_enterprise_connector_stub.kujo",
+      "payload": {
+        "source_path": "./examples/release_eval_corpus",
+        "source_label": "wiki_confluence"
+      }
+    }
+  ]
+}

@@ -1,0 +1,69 @@
+from src.common import dict_get_or
+from src.tests_helpers import assert_true
+
+kujo_bin := env_or("KUJO_BIN", "/path/to/kujo/target/release/kujo")
+
+func parse_json_safe(text) {
+	obj := {}
+	err := null
+	try {
+		obj := parse_json(text)
+	} except e {
+		err := e
+	}
+	if type(err) != "null" {
+		return {
+			"ok": false,
+			"error": to_string(err),
+			"data": {}
+		}
+	}
+	return {
+		"ok": true,
+		"data": obj
+	}
+}
+
+if path_exists("results") == false {
+	create_dir("results")
+}
+
+metrics_path := "results/test_slo_metrics_snapshot.json"
+if file_exists(metrics_path) {
+	delete_file(metrics_path)
+}
+write_file(metrics_path, to_json({
+	"availability": 0.989,
+	"query_latency_p95_ms": 1800,
+	"answer_correctness": 0.86,
+	"error_budget_burn": 0.8
+}))
+
+cmd := "SLO_PATH=config/slo_targets.json SLO_METRICS_PATH=" + metrics_path + " " + kujo_bin + " run scripts/simulate_slo_alerts.kujo --interpreter"
+res := execute_status(cmd, {"timeout_ms": 120000})
+assert_true(to_bool(type(res) == "struct"))
+assert_true(to_bool(res.success == true))
+
+parsed := parse_json_safe(to_string(res.stdout))
+assert_true(to_bool(dict_get_or(parsed, "ok", false) == true))
+payload := dict_get_or(parsed, "data", {})
+assert_true(to_bool(dict_get_or(payload, "ok", false) == true))
+assert_true(to_bool(dict_get_or(payload, "overall", "") == "page"))
+
+alerts := dict_get_or(payload, "alerts", [])
+assert_true(to_bool(len(alerts) >= 4))
+
+page_count := 0
+for item in alerts {
+	if dict_get_or(item, "state", "") == "page" {
+		page_count = page_count + 1
+	}
+	assert_true(to_bool(trim(to_string(dict_get_or(item, "runbook", ""))) != ""))
+}
+assert_true(to_bool(page_count >= 2))
+
+if file_exists(metrics_path) {
+	delete_file(metrics_path)
+}
+
+print("test_slo_alert_policy: ok")

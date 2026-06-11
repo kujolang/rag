@@ -1,0 +1,184 @@
+from src.common import dict_get_or, read_json_file_or
+from src.tests_helpers import assert_true
+
+kujo_bin := env_or("KUJO_BIN", "/path/to/kujo/target/debug/kujo")
+
+suffix := to_string(current_timestamp())
+valid_plan_path := "/tmp/kujo_rag_pen_test_plan_valid_" + suffix + ".json"
+invalid_plan_path := "/tmp/kujo_rag_pen_test_plan_invalid_" + suffix + ".json"
+backlog_path := "/tmp/kujo_rag_pen_test_backlog_" + suffix + ".json"
+workflow_doc_path := "/tmp/kujo_rag_pen_test_workflow_doc_" + suffix + ".md"
+release_doc_path := "/tmp/kujo_rag_pen_test_release_doc_" + suffix + ".md"
+workflow_path := "/tmp/kujo_rag_pen_test_workflow_" + suffix + ".yml"
+report_path := "/tmp/kujo_rag_pen_test_report_" + suffix + ".md"
+evidence_path := "/tmp/kujo_rag_pen_test_evidence_" + suffix + ".md"
+valid_output_path := "/tmp/kujo_rag_pen_test_output_valid_" + suffix + ".json"
+invalid_output_path := "/tmp/kujo_rag_pen_test_output_invalid_" + suffix + ".json"
+
+write_file(workflow_doc_path, "# Penetration Testing and Remediation Workflow\n\nHigh severity findings block production promotion until resolved or approved exception.\n\nRun: scripts/run_penetration_test_remediation_review.kujo\n")
+write_file(release_doc_path, "# Release Process\n\nRequired gate: run scripts/run_penetration_test_remediation_review.kujo --interpreter\nSee " + workflow_doc_path + "\nHigh severity findings block production promotion until resolved or approved exception.\n")
+write_file(workflow_path, "name: penetration-test-remediation\non:\n  schedule:\n    - cron: '0 8 * * 2'\njobs:\n  review:\n    steps:\n      - run: kujo run scripts/run_penetration_test_remediation_review.kujo --interpreter\n")
+write_file(report_path, "penetration test report")
+write_file(evidence_path, "remediation evidence")
+
+write_file(backlog_path, to_json({
+	"version": "test-backlog-v1",
+	"updated_at_unix_ms": current_timestamp(),
+	"items": [
+		{
+			"ticket_id": "SEC-PT-T1",
+			"finding_id": "PT-TEST-001",
+			"status": "resolved",
+			"evidence_paths": [evidence_path]
+		},
+		{
+			"ticket_id": "SEC-PT-T2",
+			"finding_id": "PT-TEST-002",
+			"status": "accepted_exception",
+			"evidence_paths": [evidence_path]
+		}
+	]
+}))
+
+write_file(valid_plan_path, to_json({
+	"version": "test-pen-v1",
+	"last_tested_at_unix_ms": current_timestamp() - 1000,
+	"review_cadence_days": 30,
+	"owner": "Security Team",
+	"scope": {
+		"in_scope": ["api"],
+		"out_of_scope": ["infra"],
+		"methodology": ["authenticated testing"]
+	},
+	"severity_sla_days": {
+		"critical": 2,
+		"high": 7,
+		"medium": 30,
+		"low": 90
+	},
+	"report_artifact_path": report_path,
+	"remediation_evidence_paths": [evidence_path],
+	"backlog_path": backlog_path,
+	"findings": [
+		{
+			"id": "PT-TEST-001",
+			"title": "resolved high",
+			"severity": "high",
+			"status": "resolved",
+			"backlog_ticket": "SEC-PT-T1",
+			"reported_at_unix_ms": current_timestamp() - 60000,
+			"sla_due_at_unix_ms": current_timestamp() + 86400000,
+			"resolved_at_unix_ms": current_timestamp() - 1000,
+			"exception_id": "",
+			"exception_approved_by": "",
+			"exception_expires_at_unix_ms": 0,
+			"evidence_paths": [evidence_path]
+		},
+		{
+			"id": "PT-TEST-002",
+			"title": "critical accepted exception",
+			"severity": "critical",
+			"status": "accepted_exception",
+			"backlog_ticket": "SEC-PT-T2",
+			"reported_at_unix_ms": current_timestamp() - 60000,
+			"sla_due_at_unix_ms": current_timestamp() + 86400000,
+			"resolved_at_unix_ms": 0,
+			"exception_id": "EXC-TEST-001",
+			"exception_approved_by": "Security Director",
+			"exception_expires_at_unix_ms": current_timestamp() + 604800000,
+			"evidence_paths": [evidence_path]
+		}
+	]
+}))
+
+write_file(invalid_plan_path, to_json({
+	"version": "test-pen-v1",
+	"last_tested_at_unix_ms": current_timestamp() - 1000,
+	"review_cadence_days": 30,
+	"owner": "Security Team",
+	"scope": {
+		"in_scope": ["api"],
+		"out_of_scope": ["infra"],
+		"methodology": ["authenticated testing"]
+	},
+	"severity_sla_days": {
+		"critical": 2,
+		"high": 7,
+		"medium": 30,
+		"low": 90
+	},
+	"report_artifact_path": report_path,
+	"remediation_evidence_paths": [evidence_path],
+	"backlog_path": backlog_path,
+	"findings": [
+		{
+			"id": "PT-TEST-003",
+			"title": "open high without exception",
+			"severity": "high",
+			"status": "open",
+			"backlog_ticket": "SEC-PT-MISSING",
+			"reported_at_unix_ms": current_timestamp() - 60000,
+			"sla_due_at_unix_ms": current_timestamp() + 86400000,
+			"resolved_at_unix_ms": 0,
+			"exception_id": "",
+			"exception_approved_by": "",
+			"exception_expires_at_unix_ms": 0,
+			"evidence_paths": [evidence_path]
+		}
+	]
+}))
+
+valid_cmd := "KUJO_RAG_PEN_TEST_PLAN_PATH=" + valid_plan_path + " KUJO_RAG_PEN_TEST_REVIEW_OUTPUT_PATH=" + valid_output_path + " KUJO_RAG_PEN_TEST_WORKFLOW_DOC_PATH=" + workflow_doc_path + " KUJO_RAG_RELEASE_PROCESS_DOC_PATH=" + release_doc_path + " KUJO_RAG_PEN_TEST_WORKFLOW_PATH=" + workflow_path + " " + kujo_bin + " run scripts/run_penetration_test_remediation_review.kujo --interpreter"
+valid_res := execute_status(valid_cmd, {"timeout_ms": 240000})
+assert_true(to_bool(type(valid_res) == "struct"))
+assert_true(to_bool(valid_res.success == true))
+
+valid_payload := read_json_file_or(valid_output_path, {})
+assert_true(to_bool(dict_get_or(valid_payload, "ok", false) == true))
+assert_true(to_bool(dict_get_or(dict_get_or(valid_payload, "gates", {}), "high_severity_gate", false) == true))
+assert_true(to_bool(dict_get_or(dict_get_or(valid_payload, "gates", {}), "backlog_integrated", false) == true))
+assert_true(to_bool(dict_get_or(dict_get_or(valid_payload, "gates", {}), "workflow_defined", false) == true))
+
+invalid_cmd := "KUJO_RAG_PEN_TEST_PLAN_PATH=" + invalid_plan_path + " KUJO_RAG_PEN_TEST_REVIEW_OUTPUT_PATH=" + invalid_output_path + " KUJO_RAG_PEN_TEST_WORKFLOW_DOC_PATH=" + workflow_doc_path + " KUJO_RAG_RELEASE_PROCESS_DOC_PATH=" + release_doc_path + " KUJO_RAG_PEN_TEST_WORKFLOW_PATH=" + workflow_path + " " + kujo_bin + " run scripts/run_penetration_test_remediation_review.kujo --interpreter"
+invalid_res := execute_status(invalid_cmd, {"timeout_ms": 240000})
+assert_true(to_bool(type(invalid_res) == "struct"))
+assert_true(to_bool(invalid_res.success == false))
+
+invalid_payload := read_json_file_or(invalid_output_path, {})
+assert_true(to_bool(dict_get_or(invalid_payload, "ok", true) == false))
+invalid_gates := dict_get_or(invalid_payload, "gates", {})
+assert_true(to_bool(dict_get_or(invalid_gates, "high_severity_gate", true) == false))
+assert_true(to_bool(dict_get_or(invalid_gates, "backlog_integrated", true) == false))
+
+if file_exists(valid_plan_path) {
+	delete_file(valid_plan_path)
+}
+if file_exists(invalid_plan_path) {
+	delete_file(invalid_plan_path)
+}
+if file_exists(backlog_path) {
+	delete_file(backlog_path)
+}
+if file_exists(workflow_doc_path) {
+	delete_file(workflow_doc_path)
+}
+if file_exists(release_doc_path) {
+	delete_file(release_doc_path)
+}
+if file_exists(workflow_path) {
+	delete_file(workflow_path)
+}
+if file_exists(report_path) {
+	delete_file(report_path)
+}
+if file_exists(evidence_path) {
+	delete_file(evidence_path)
+}
+if file_exists(valid_output_path) {
+	delete_file(valid_output_path)
+}
+if file_exists(invalid_output_path) {
+	delete_file(invalid_output_path)
+}
+
+print("test_penetration_test_remediation_workflow: ok")

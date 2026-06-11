@@ -1,0 +1,109 @@
+from src.rag_engine import query_rag
+from src.common import dict_get_or
+
+func expect(condition, message) {
+	if condition == false {
+		print("FAIL: " + message)
+		exit(1)
+	}
+}
+
+func make_index() {
+	chunk_id := "intent_chunk_1"
+	return {
+		"chunks": [{
+			"chunk_id": chunk_id,
+			"doc_id": "intent_doc_1",
+			"path": "./intent.md",
+			"line_start": 1,
+			"line_end": 1,
+			"text": "compare troubleshoot navigation fact reference",
+			"meta": {
+				"kind": "text",
+				"tags": ["intent"]
+			}
+		}],
+		"vectors": [{
+			"chunk_id": chunk_id,
+			"embedding": [0.0, 0.0, 0.0, 0.0]
+		}],
+		"lexical": [{
+			"chunk_id": chunk_id,
+			"term_freq": {
+				"compare": 2,
+				"troubleshoot": 2,
+				"navigation": 2,
+				"fact": 2,
+				"reference": 2
+			},
+			"term_count": 10
+		}],
+		"meta": {}
+	}
+}
+
+func base_cfg() {
+	return {
+		"top_k": 4,
+		"hybrid_alpha": 0.0,
+		"hybrid_beta": 1.0,
+		"query_expansion": false,
+		"query_safe_response_enabled": false,
+		"query_intent_rewrite_enabled": true
+	}
+}
+
+func test_compare_intent_rewrite() {
+	result := query_rag(make_index(), "Compare backup retention vs legal hold", base_cfg(), {}, [])
+	intent_payload := dict_get_or(result, "query_intent", {})
+	expect(dict_get_or(intent_payload, "intent", "") == "compare", "compare query should classify as compare")
+	rewritten := to_string(dict_get_or(intent_payload, "rewritten_query", ""))
+	expect(index_of(rewritten, "differences similarities tradeoffs") >= 0, "compare query should append compare rewrite terms")
+	expect(dict_get_or(intent_payload, "rewrite_applied", false) == true, "compare rewrite should be applied")
+}
+
+func test_troubleshooting_intent_rewrite() {
+	result := query_rag(make_index(), "API returns timeout error", base_cfg(), {}, [])
+	intent_payload := dict_get_or(result, "query_intent", {})
+	expect(dict_get_or(intent_payload, "intent", "") == "troubleshooting", "error query should classify as troubleshooting")
+	rewritten := to_string(dict_get_or(intent_payload, "rewritten_query", ""))
+	expect(index_of(rewritten, "root cause remediation fix steps") >= 0, "troubleshooting query should append remediation terms")
+}
+
+func test_navigation_intent_rewrite() {
+	result := query_rag(make_index(), "Where is the incident runbook file", base_cfg(), {}, [])
+	intent_payload := dict_get_or(result, "query_intent", {})
+	expect(dict_get_or(intent_payload, "intent", "") == "navigation", "location query should classify as navigation")
+	rewritten := to_string(dict_get_or(intent_payload, "rewritten_query", ""))
+	expect(index_of(rewritten, "location path file section") >= 0, "navigation query should append location terms")
+}
+
+func test_fact_intent_no_rewrite_change() {
+	result := query_rag(make_index(), "What is retrieval confidence", base_cfg(), {}, [])
+	intent_payload := dict_get_or(result, "query_intent", {})
+	expect(dict_get_or(intent_payload, "intent", "") == "fact", "default query should classify as fact")
+	expect(dict_get_or(intent_payload, "rewrite_applied", true) == false, "fact query should remain unchanged")
+}
+
+func test_pipeline_can_be_disabled() {
+	cfg := base_cfg()
+	cfg["query_intent_rewrite_enabled"] = false
+	query := "Compare backup retention vs legal hold"
+	result := query_rag(make_index(), query, cfg, {}, [])
+	intent_payload := dict_get_or(result, "query_intent", {})
+	expect(dict_get_or(intent_payload, "intent", "") == "compare", "intent classification should still run when rewrite disabled")
+	expect(dict_get_or(intent_payload, "rewrite_enabled", true) == false, "rewrite flag should report disabled")
+	expect(dict_get_or(intent_payload, "rewrite_applied", true) == false, "rewrite should not apply when disabled")
+	expect(dict_get_or(intent_payload, "rewritten_query", "") == query, "rewritten query should remain original when disabled")
+}
+
+func run_all() {
+	test_compare_intent_rewrite()
+	test_troubleshooting_intent_rewrite()
+	test_navigation_intent_rewrite()
+	test_fact_intent_no_rewrite_change()
+	test_pipeline_can_be_disabled()
+	print("test_intent_rewrite_pipeline: ok")
+}
+
+run_all()

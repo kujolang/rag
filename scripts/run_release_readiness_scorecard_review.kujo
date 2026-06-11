@@ -1,0 +1,359 @@
+from src.common import dict_get_or, read_json_file_or, str_or, num_or, write_json_file
+
+func ensure_dir(path_value) {
+	if path_value == "" || path_value == "." {
+		return true
+	}
+	if path_exists(path_value) {
+		return true
+	}
+	parent := dirname(path_value)
+	if parent != "" && parent != "." && parent != path_value {
+		_ = ensure_dir(parent)
+	}
+	create_dir(path_value)
+	return true
+}
+
+func ensure_parent_dir(path_value) {
+	dir := dirname(path_value)
+	if dir == "" || dir == "." {
+		return true
+	}
+	return ensure_dir(dir)
+}
+
+func normalize_text(value) {
+	return trim(str_or(value, ""))
+}
+
+func normalize_text_array(raw_items) {
+	items := []
+	if type(raw_items) != "array" {
+		return items
+	}
+	item_index := 0
+	while item_index < len(raw_items) {
+		item := normalize_text(raw_items[item_index])
+		if item != "" {
+			items = push(items, item)
+		}
+		item_index = item_index + 1
+	}
+	return items
+}
+
+func count_occurrences(text, token) {
+	if type(text) != "string" || type(token) != "string" {
+		return 0
+	}
+	if token == "" {
+		return 0
+	}
+	parts := split(text, token)
+	if len(parts) == 0 {
+		return 0
+	}
+	return len(parts) - 1
+}
+
+func text_has_token(text, token) {
+	return count_occurrences(text, token) > 0
+}
+
+func list_has_value(values, target) {
+	if type(values) != "array" {
+		return false
+	}
+	target_norm := normalize_text(target)
+	value_index := 0
+	while value_index < len(values) {
+		if normalize_text(values[value_index]) == target_norm {
+			return true
+		}
+		value_index = value_index + 1
+	}
+	return false
+}
+
+func is_semver(value) {
+	candidate := normalize_text(value)
+	if starts_with(candidate, "v") {
+		candidate = substring(candidate, 1, len(candidate))
+	}
+	if candidate == "" {
+		return false
+	}
+	return to_bool(regex_match(candidate, "^[0-9]+\\.[0-9]+\\.[0-9]+$"))
+}
+
+func normalize_domain(raw_domain) {
+	return {
+		"name": to_lower(normalize_text(dict_get_or(raw_domain, "name", ""))),
+		"weight": num_or(dict_get_or(raw_domain, "weight", 0), 0),
+		"score": num_or(dict_get_or(raw_domain, "score", -1), -1),
+		"min_score": num_or(dict_get_or(raw_domain, "min_score", 0), 0),
+		"status": to_lower(normalize_text(dict_get_or(raw_domain, "status", ""))),
+		"reviewer": normalize_text(dict_get_or(raw_domain, "reviewer", "")),
+		"evidence_paths": normalize_text_array(dict_get_or(raw_domain, "evidence_paths", []))
+	}
+}
+
+func paths_exist(paths) {
+	ok := true
+	missing := []
+	path_index := 0
+	while path_index < len(paths) {
+		path_value := normalize_text(paths[path_index])
+		if path_value != "" && path_exists(path_value) == false {
+			ok = false
+			missing = push(missing, path_value)
+		}
+		path_index = path_index + 1
+	}
+	return {
+		"ok": ok,
+		"missing": missing
+	}
+}
+
+scorecard_path := env_or("KUJO_RAG_RELEASE_READINESS_SCORECARD_PATH", "./config/release_readiness_scorecard.json")
+doc_path := env_or("KUJO_RAG_RELEASE_READINESS_SCORECARD_DOC_PATH", "./docs/release-readiness-scorecard.md")
+release_process_doc_path := env_or("KUJO_RAG_RELEASE_READINESS_SCORECARD_RELEASE_PROCESS_DOC_PATH", "./docs/release-process.md")
+workflow_path := env_or("KUJO_RAG_RELEASE_READINESS_SCORECARD_WORKFLOW_PATH", "./.github/workflows/release-readiness-scorecard-review.yml")
+output_path := env_or("KUJO_RAG_RELEASE_READINESS_SCORECARD_OUTPUT_PATH", "./results/release/release_readiness_scorecard_status.json")
+
+_ = ensure_parent_dir(output_path)
+
+required_domains := ["security", "reliability", "quality", "scalability", "compliance"]
+allowed_statuses := ["pass", "conditional", "fail"]
+
+raw_scorecard := read_json_file_or(scorecard_path, {})
+scorecard_available := type(raw_scorecard) == "dict" && len(keys(raw_scorecard)) > 0
+
+version := normalize_text(dict_get_or(raw_scorecard, "version", ""))
+candidate_version := normalize_text(dict_get_or(raw_scorecard, "candidate_version", ""))
+evaluated_at_unix_ms := num_or(dict_get_or(raw_scorecard, "evaluated_at_unix_ms", 0), 0)
+review_cadence_days := num_or(dict_get_or(raw_scorecard, "review_cadence_days", 30), 30)
+if review_cadence_days < 1 {
+	review_cadence_days = 1
+}
+owner := normalize_text(dict_get_or(raw_scorecard, "owner", ""))
+approvers := normalize_text_array(dict_get_or(raw_scorecard, "approvers", []))
+signed_off_by := normalize_text(dict_get_or(raw_scorecard, "signed_off_by", ""))
+decision := to_lower(normalize_text(dict_get_or(raw_scorecard, "decision", "")))
+minimum_weighted_score := num_or(dict_get_or(raw_scorecard, "minimum_weighted_score", 85), 85)
+go_requires_all_domains := to_bool(dict_get_or(raw_scorecard, "go_decision_requires_all_domains_meet_minimum", true))
+
+raw_domains := dict_get_or(raw_scorecard, "domains", [])
+domains := []
+if type(raw_domains) == "array" {
+	raw_domain_index := 0
+	while raw_domain_index < len(raw_domains) {
+		domain := normalize_domain(raw_domains[raw_domain_index])
+		if dict_get_or(domain, "name", "") != "" {
+			domains = push(domains, domain)
+		}
+		raw_domain_index = raw_domain_index + 1
+	}
+}
+
+missing_required_domains := []
+required_index := 0
+while required_index < len(required_domains) {
+	required_domain := required_domains[required_index]
+	found := false
+	domain_index := 0
+	while domain_index < len(domains) {
+		domain_name := normalize_text(dict_get_or(domains[domain_index], "name", ""))
+		if domain_name == required_domain {
+			found = true
+			break
+		}
+		domain_index = domain_index + 1
+	}
+	if found == false {
+		missing_required_domains = push(missing_required_domains, required_domain)
+	}
+	required_index = required_index + 1
+}
+
+required_domains_present := len(missing_required_domains) == 0
+
+weights_total := 0.0
+weighted_score_sum := 0.0
+domains_valid := true
+domains_evidence_resolve := true
+all_domains_meet_minimum := true
+domain_checks := []
+
+scorecard_domain_index := 0
+while scorecard_domain_index < len(domains) {
+	domain := domains[scorecard_domain_index]
+	name := normalize_text(dict_get_or(domain, "name", ""))
+	weight := num_or(dict_get_or(domain, "weight", 0), 0)
+	score := num_or(dict_get_or(domain, "score", -1), -1)
+	min_score := num_or(dict_get_or(domain, "min_score", 0), 0)
+	status := normalize_text(dict_get_or(domain, "status", ""))
+	reviewer := normalize_text(dict_get_or(domain, "reviewer", ""))
+	evidence_paths := normalize_text_array(dict_get_or(domain, "evidence_paths", []))
+
+	name_valid := list_has_value(required_domains, name)
+	weight_valid := weight > 0
+	score_valid := score >= 0 && score <= 100
+	min_score_valid := min_score >= 0 && min_score <= 100
+	status_valid := list_has_value(allowed_statuses, status)
+	reviewer_defined := reviewer != ""
+	paths_check := paths_exist(evidence_paths)
+	evidence_resolves := len(evidence_paths) > 0 && dict_get_or(paths_check, "ok", false)
+	meets_minimum := score >= min_score
+
+	if name_valid == false || weight_valid == false || score_valid == false || min_score_valid == false || status_valid == false || reviewer_defined == false || evidence_resolves == false {
+		domains_valid = false
+	}
+	if evidence_resolves == false {
+		domains_evidence_resolve = false
+	}
+	if meets_minimum == false {
+		all_domains_meet_minimum = false
+	}
+
+	weights_total = weights_total + weight
+	weighted_score_sum = weighted_score_sum + (score * weight)
+
+	domain_checks = push(domain_checks, {
+		"name": name,
+		"weight": weight,
+		"score": score,
+		"min_score": min_score,
+		"status": status,
+		"reviewer": reviewer,
+		"name_valid": name_valid,
+		"weight_valid": weight_valid,
+		"score_valid": score_valid,
+		"min_score_valid": min_score_valid,
+		"status_valid": status_valid,
+		"reviewer_defined": reviewer_defined,
+		"evidence_resolves": evidence_resolves,
+		"missing_evidence_paths": dict_get_or(paths_check, "missing", []),
+		"meets_minimum": meets_minimum
+	})
+
+	scorecard_domain_index = scorecard_domain_index + 1
+}
+
+weights_delta := weights_total - 100.0
+if weights_delta < 0 {
+	weights_delta = 0 - weights_delta
+}
+weights_sum_100 := weights_delta < 0.0001
+
+weighted_score := 0.0
+if weights_total > 0 {
+	weighted_score = weighted_score_sum / weights_total
+}
+weighted_score_meets_minimum := weighted_score >= minimum_weighted_score
+
+version_defined := version != ""
+candidate_version_defined := is_semver(candidate_version)
+scorecard_timestamp_defined := evaluated_at_unix_ms > 0
+
+review_due_at_unix_ms := 0
+review_overdue := false
+if evaluated_at_unix_ms > 0 {
+	review_due_at_unix_ms = evaluated_at_unix_ms + (review_cadence_days * 86400000)
+	review_overdue = current_timestamp() > review_due_at_unix_ms
+}
+review_not_overdue := review_overdue == false
+
+signoff_complete := owner != "" && signed_off_by != "" && len(approvers) >= 2
+decision_valid := decision == "go" || decision == "no_go"
+decision_go := decision == "go"
+
+eligibility_gates_pass := version_defined && candidate_version_defined && scorecard_timestamp_defined && required_domains_present && domains_valid && domains_evidence_resolve && weights_sum_100 && weighted_score_meets_minimum && signoff_complete && review_not_overdue
+if go_requires_all_domains && all_domains_meet_minimum == false {
+	eligibility_gates_pass = false
+}
+
+decision_consistent := false
+if decision_valid {
+	if decision == "go" {
+		decision_consistent = eligibility_gates_pass
+	} else {
+		decision_consistent = true
+	}
+}
+
+doc_exists := file_exists(doc_path)
+doc_text := ""
+if doc_exists {
+	doc_text = read_file(doc_path)
+}
+doc_defined := doc_exists && text_has_token(doc_text, "Release Readiness Scorecard") && text_has_token(doc_text, "Weighted Readiness Criteria") && text_has_token(doc_text, "Signoff Requirements") && text_has_token(doc_text, "run_release_readiness_scorecard_review.kujo")
+
+release_process_exists := file_exists(release_process_doc_path)
+release_process_text := ""
+if release_process_exists {
+	release_process_text = read_file(release_process_doc_path)
+}
+release_process_linked := release_process_exists && text_has_token(release_process_text, "run_release_readiness_scorecard_review.kujo") && text_has_token(release_process_text, "docs/release-readiness-scorecard.md")
+
+workflow_exists := file_exists(workflow_path)
+workflow_text := ""
+if workflow_exists {
+	workflow_text = read_file(workflow_path)
+}
+workflow_defined := workflow_exists && text_has_token(workflow_text, "release-readiness-scorecard-review") && text_has_token(workflow_text, "run_release_readiness_scorecard_review.kujo") && text_has_token(workflow_text, "schedule:")
+
+ok := version_defined && candidate_version_defined && scorecard_timestamp_defined && required_domains_present && domains_valid && domains_evidence_resolve && all_domains_meet_minimum && weights_sum_100 && weighted_score_meets_minimum && signoff_complete && decision_valid && decision_go && decision_consistent && review_not_overdue && doc_defined && release_process_linked && workflow_defined
+
+result := {
+	"ok": ok,
+	"generated_at_unix_ms": current_timestamp(),
+	"scorecard_path": scorecard_path,
+	"doc_path": doc_path,
+	"release_process_doc_path": release_process_doc_path,
+	"workflow_path": workflow_path,
+	"output_path": output_path,
+	"version": version,
+	"candidate_version": candidate_version,
+	"evaluated_at_unix_ms": evaluated_at_unix_ms,
+	"review_cadence_days": review_cadence_days,
+	"review_due_at_unix_ms": review_due_at_unix_ms,
+	"review_overdue": review_overdue,
+	"owner": owner,
+	"approver_count": len(approvers),
+	"signed_off_by": signed_off_by,
+	"decision": decision,
+	"minimum_weighted_score": minimum_weighted_score,
+	"weighted_score": weighted_score,
+	"weights_total": weights_total,
+	"missing_required_domains": missing_required_domains,
+	"domain_checks": domain_checks,
+	"gates": {
+		"version_defined": version_defined,
+		"candidate_version_defined": candidate_version_defined,
+		"scorecard_timestamp_defined": scorecard_timestamp_defined,
+		"required_domains_present": required_domains_present,
+		"domains_valid": domains_valid,
+		"domains_evidence_resolve": domains_evidence_resolve,
+		"all_domains_meet_minimum": all_domains_meet_minimum,
+		"weights_sum_100": weights_sum_100,
+		"weighted_score_meets_minimum": weighted_score_meets_minimum,
+		"signoff_complete": signoff_complete,
+		"decision_valid": decision_valid,
+		"decision_go": decision_go,
+		"decision_consistent": decision_consistent,
+		"review_not_overdue": review_not_overdue,
+		"doc_defined": doc_defined,
+		"release_process_linked": release_process_linked,
+		"workflow_defined": workflow_defined
+	}
+}
+
+write_json_file(output_path, result)
+print(to_json(result))
+
+if ok == false {
+	exit(1)
+}

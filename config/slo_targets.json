@@ -1,0 +1,29 @@
+{
+  "availability": {
+    "target": 0.995,
+    "window": "30d",
+    "alert_threshold": 0.992,
+    "page_threshold": 0.99,
+    "runbook": "docs/runbooks/availability-alert-runbook.md"
+  },
+  "query_latency_p95_ms": {
+    "target": 1200,
+    "window": "7d",
+    "alert_threshold": 1400,
+    "page_threshold": 1700,
+    "runbook": "docs/runbooks/latency-alert-runbook.md"
+  },
+  "answer_correctness": {
+    "target": 0.9,
+    "window": "7d",
+    "alert_threshold": 0.87,
+    "page_threshold": 0.84,
+    "runbook": "docs/runbooks/correctness-alert-runbook.md"
+  },
+  "error_budget": {
+    "window": "30d",
+    "burn_alert_threshold": 0.5,
+    "burn_page_threshold": 0.75,
+    "runbook": "docs/runbooks/error-budget-runbook.md"
+  }
+}

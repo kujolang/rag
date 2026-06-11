@@ -1,0 +1,126 @@
+from src.common import dict_get_or
+from src.tests_helpers import assert_true
+
+kujo_bin := env_or("KUJO_BIN", "/path/to/kujo/target/release/kujo")
+
+func run_cmd(command) {
+	res := execute_status(command, {"timeout_ms": 120000})
+	if type(res) == "struct" {
+		return {
+			"ok": res.success,
+			"exit_code": res.exitcode,
+			"stdout": to_string(res.stdout),
+			"stderr": to_string(res.stderr)
+		}
+	}
+	return {
+		"ok": false,
+		"exit_code": -1,
+		"stdout": "",
+		"stderr": "invalid execute_status result"
+	}
+}
+
+func parse_json_safe(text) {
+	obj := {}
+	err := null
+	try {
+		obj := parse_json(text)
+	} except e {
+		err := e
+	}
+	if type(err) != "null" {
+		return {
+			"ok": false,
+			"error": to_string(err),
+			"data": {}
+		}
+	}
+	return {
+		"ok": true,
+		"data": obj
+	}
+}
+
+func start_server(port, env_prefix, log_file) {
+	cmd := "env " + env_prefix + " " + kujo_bin + " run main.kujo --interpreter serve --host 127.0.0.1 --port " + to_string(port) + " > " + log_file + " 2>&1 & echo $!"
+	res := run_cmd(cmd)
+	pid := trim(dict_get_or(res, "stdout", ""))
+	return pid
+}
+
+func stop_server(pid) {
+	if pid == "" {
+		return true
+	}
+	_ := run_cmd("kill " + pid + " >/dev/null 2>&1 || true")
+	_ := run_cmd("wait " + pid + " >/dev/null 2>&1 || true")
+	return true
+}
+
+func wait_for_health(port) {
+	attempt := 0
+	while attempt < 5000 {
+		res := run_cmd("curl -s http://127.0.0.1:" + to_string(port) + "/health")
+		body := trim(dict_get_or(res, "stdout", ""))
+		if body != "" {
+			parsed := parse_json_safe(body)
+			if dict_get_or(parsed, "ok", false) == true {
+				payload := dict_get_or(parsed, "data", {})
+				if dict_get_or(payload, "ok", false) == true {
+					return true
+				}
+			}
+		}
+		attempt = attempt + 1
+	}
+	return false
+}
+
+state_file := "results/test_shared_rate_state.json"
+if file_exists(state_file) {
+	delete_file(state_file)
+}
+
+port_a := 43000 + (current_timestamp() % 10000)
+port_b := port_a + 1
+env_common := "KUJO_RAG_ENV=development KUJO_RAG_API_AUTH_PROVIDER=none KUJO_RAG_API_RATE_LIMIT_WINDOW_SEC=60 KUJO_RAG_API_RATE_LIMIT_MAX_REQUESTS=200 KUJO_RAG_API_RATE_LIMIT_BURST_WINDOW_SEC=60 KUJO_RAG_API_RATE_LIMIT_BURST_MAX_REQUESTS=200 KUJO_RAG_API_RATE_LIMIT_BACKEND=shared_file KUJO_RAG_API_RATE_LIMIT_BACKEND_FILE=" + state_file
+
+pid_a := start_server(port_a, env_common, "/tmp/kujo_rag_rate_backend_a.log")
+pid_b := start_server(port_b, env_common, "/tmp/kujo_rag_rate_backend_b.log")
+assert_true(to_bool(pid_a != ""))
+assert_true(to_bool(pid_b != ""))
+assert_true(to_bool(wait_for_health(port_a) == true))
+assert_true(to_bool(wait_for_health(port_b) == true))
+
+i := 0
+while i < 120 {
+	_ = run_cmd("curl -s http://127.0.0.1:" + to_string(port_a) + "/health")
+	i = i + 1
+}
+
+limited := false
+j := 0
+while j < 120 {
+	res := run_cmd("curl -s http://127.0.0.1:" + to_string(port_b) + "/health")
+	parsed := parse_json_safe(dict_get_or(res, "stdout", ""))
+	if dict_get_or(parsed, "ok", false) == true {
+		payload := dict_get_or(parsed, "data", {})
+		code := dict_get_or(dict_get_or(payload, "error", {}), "code", "")
+		if code == "rate_limited" || code == "burst_limited" {
+			limited = true
+			break
+		}
+	}
+	j = j + 1
+}
+assert_true(to_bool(limited == true))
+
+_ := stop_server(pid_a)
+_ := stop_server(pid_b)
+
+if file_exists(state_file) {
+	delete_file(state_file)
+}
+
+print("test_rate_limit_backend_shared: ok")

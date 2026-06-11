@@ -1,0 +1,336 @@
+from src.common import dict_get_or, num_or, read_json_file_or, str_or, write_json_file
+
+func ensure_dir(path_value) {
+	if path_value == "" || path_value == "." {
+		return true
+	}
+	if path_exists(path_value) {
+		return true
+	}
+	parent := dirname(path_value)
+	if parent != "" && parent != "." && parent != path_value {
+		_ = ensure_dir(parent)
+	}
+	create_dir(path_value)
+	return true
+}
+
+func ensure_parent_dir(path_value) {
+	dir := dirname(path_value)
+	if dir == "" || dir == "." {
+		return true
+	}
+	return ensure_dir(dir)
+}
+
+func normalize_text(value) {
+	return trim(str_or(value, ""))
+}
+
+func count_occurrences(text, token) {
+	if type(text) != "string" || type(token) != "string" {
+		return 0
+	}
+	if token == "" {
+		return 0
+	}
+	parts := split(text, token)
+	if len(parts) == 0 {
+		return 0
+	}
+	return len(parts) - 1
+}
+
+func text_has_token(text, token) {
+	return count_occurrences(text, token) > 0
+}
+
+func safe_ratio(current_value, previous_value) {
+	prev := num_or(previous_value, 0.0)
+	if prev <= 0.0 {
+		return 1.0
+	}
+	return num_or(current_value, 0.0) / prev
+}
+
+func find_profile_entry(entries, target_name) {
+	if type(entries) != "array" {
+		return {}
+	}
+	target := normalize_text(target_name)
+	i := 0
+	while i < len(entries) {
+		entry := entries[i]
+		name := normalize_text(dict_get_or(entry, "name", ""))
+		if name == target {
+			return entry
+		}
+		i = i + 1
+	}
+	return {}
+}
+
+func derive_cost_metrics(profile, cost_model) {
+	ingest := dict_get_or(profile, "ingest", {})
+	query := dict_get_or(profile, "query", {})
+	dataset := dict_get_or(profile, "dataset", {})
+
+	ingest_docs_per_sec := num_or(dict_get_or(ingest, "docs_per_sec", 0.0), 0.0)
+	avg_latency_ms := num_or(dict_get_or(query, "avg_latency_ms", 0.0), 0.0)
+	p95_latency_ms := num_or(dict_get_or(query, "p95_latency_ms", 0.0), 0.0)
+	materialized_docs := num_or(dict_get_or(dataset, "materialized_docs", 0.0), 0.0)
+
+	cpu_utilization_factor := num_or(dict_get_or(cost_model, "cpu_utilization_factor", 1.0), 1.0)
+	if cpu_utilization_factor <= 0.0 {
+		cpu_utilization_factor = 1.0
+	}
+	usd_per_cpu_second := num_or(dict_get_or(cost_model, "usd_per_cpu_second", 0.0), 0.0)
+	base_memory_mb := num_or(dict_get_or(cost_model, "base_memory_mb", 0.0), 0.0)
+	memory_mb_per_materialized_doc := num_or(dict_get_or(cost_model, "memory_mb_per_materialized_doc", 0.0), 0.0)
+	usd_per_mb_hour := num_or(dict_get_or(cost_model, "usd_per_mb_hour", 0.0), 0.0)
+
+	estimated_cpu_ms_per_query := avg_latency_ms * cpu_utilization_factor
+	estimated_memory_mb := base_memory_mb + (materialized_docs * memory_mb_per_materialized_doc)
+	if estimated_memory_mb < 0.0 {
+		estimated_memory_mb = 0.0
+	}
+	estimated_cpu_seconds_per_query := estimated_cpu_ms_per_query / 1000.0
+
+	estimated_compute_cost_per_query_usd := estimated_cpu_seconds_per_query * usd_per_cpu_second
+	estimated_memory_cost_per_query_usd := estimated_memory_mb * usd_per_mb_hour * (estimated_cpu_seconds_per_query / 3600.0)
+	estimated_cost_per_query_usd := estimated_compute_cost_per_query_usd + estimated_memory_cost_per_query_usd
+	estimated_cost_per_1k_queries_usd := estimated_cost_per_query_usd * 1000.0
+
+	return {
+		"ingest_docs_per_sec": ingest_docs_per_sec,
+		"avg_query_latency_ms": avg_latency_ms,
+		"p95_query_latency_ms": p95_latency_ms,
+		"estimated_cpu_ms_per_query": estimated_cpu_ms_per_query,
+		"estimated_memory_mb": estimated_memory_mb,
+		"estimated_cost_per_1k_queries_usd": estimated_cost_per_1k_queries_usd
+	}
+}
+
+func evaluate_profile(profile, budget, previous_profile, thresholds, cost_model) {
+	name := normalize_text(dict_get_or(profile, "name", ""))
+	measured := derive_cost_metrics(profile, cost_model)
+
+	min_ingest_docs_per_sec := num_or(dict_get_or(budget, "min_ingest_docs_per_sec", 0.0), 0.0)
+	max_avg_query_latency_ms := num_or(dict_get_or(budget, "max_avg_query_latency_ms", 999999.0), 999999.0)
+	max_p95_query_latency_ms := num_or(dict_get_or(budget, "max_p95_query_latency_ms", 999999.0), 999999.0)
+	max_estimated_cpu_ms_per_query := num_or(dict_get_or(budget, "max_estimated_cpu_ms_per_query", 999999.0), 999999.0)
+	max_estimated_memory_mb := num_or(dict_get_or(budget, "max_estimated_memory_mb", 999999.0), 999999.0)
+	max_estimated_cost_per_1k_queries_usd := num_or(dict_get_or(budget, "max_estimated_cost_per_1k_queries_usd", 999999.0), 999999.0)
+
+	gate_ingest := num_or(dict_get_or(measured, "ingest_docs_per_sec", 0.0), 0.0) >= min_ingest_docs_per_sec
+	gate_avg_latency := num_or(dict_get_or(measured, "avg_query_latency_ms", 0.0), 0.0) <= max_avg_query_latency_ms
+	gate_p95_latency := num_or(dict_get_or(measured, "p95_query_latency_ms", 0.0), 0.0) <= max_p95_query_latency_ms
+	gate_cpu := num_or(dict_get_or(measured, "estimated_cpu_ms_per_query", 0.0), 0.0) <= max_estimated_cpu_ms_per_query
+	gate_memory := num_or(dict_get_or(measured, "estimated_memory_mb", 0.0), 0.0) <= max_estimated_memory_mb
+	gate_cost := num_or(dict_get_or(measured, "estimated_cost_per_1k_queries_usd", 0.0), 0.0) <= max_estimated_cost_per_1k_queries_usd
+
+	previous_measured := dict_get_or(previous_profile, "measured", {})
+	latency_ratio := safe_ratio(num_or(dict_get_or(measured, "avg_query_latency_ms", 0.0), 0.0), num_or(dict_get_or(previous_measured, "avg_query_latency_ms", 0.0), 0.0))
+	throughput_ratio := safe_ratio(num_or(dict_get_or(measured, "ingest_docs_per_sec", 0.0), 0.0), num_or(dict_get_or(previous_measured, "ingest_docs_per_sec", 0.0), 0.0))
+	cost_ratio := safe_ratio(num_or(dict_get_or(measured, "estimated_cost_per_1k_queries_usd", 0.0), 0.0), num_or(dict_get_or(previous_measured, "estimated_cost_per_1k_queries_usd", 0.0), 0.0))
+
+	max_latency_regression_ratio := num_or(dict_get_or(thresholds, "max_latency_regression_ratio", 999999.0), 999999.0)
+	min_throughput_retention_ratio := num_or(dict_get_or(thresholds, "min_throughput_retention_ratio", 0.0), 0.0)
+	max_cost_regression_ratio := num_or(dict_get_or(thresholds, "max_cost_regression_ratio", 999999.0), 999999.0)
+
+	trend_latency_gate := latency_ratio <= max_latency_regression_ratio
+	trend_throughput_gate := throughput_ratio >= min_throughput_retention_ratio
+	trend_cost_gate := cost_ratio <= max_cost_regression_ratio
+
+	profile_ok := gate_ingest && gate_avg_latency && gate_p95_latency && gate_cpu && gate_memory && gate_cost && trend_latency_gate && trend_throughput_gate && trend_cost_gate
+
+	return {
+		"name": name,
+		"ok": profile_ok,
+		"measured": measured,
+		"budget": {
+			"min_ingest_docs_per_sec": min_ingest_docs_per_sec,
+			"max_avg_query_latency_ms": max_avg_query_latency_ms,
+			"max_p95_query_latency_ms": max_p95_query_latency_ms,
+			"max_estimated_cpu_ms_per_query": max_estimated_cpu_ms_per_query,
+			"max_estimated_memory_mb": max_estimated_memory_mb,
+			"max_estimated_cost_per_1k_queries_usd": max_estimated_cost_per_1k_queries_usd
+		},
+		"gates": {
+			"ingest_throughput": gate_ingest,
+			"avg_latency": gate_avg_latency,
+			"p95_latency": gate_p95_latency,
+			"estimated_cpu": gate_cpu,
+			"estimated_memory": gate_memory,
+			"estimated_cost": gate_cost,
+			"trend_latency_regression": trend_latency_gate,
+			"trend_throughput_retention": trend_throughput_gate,
+			"trend_cost_regression": trend_cost_gate
+		},
+		"trend": {
+			"latency_ratio": latency_ratio,
+			"throughput_ratio": throughput_ratio,
+			"cost_ratio": cost_ratio
+		}
+	}
+}
+
+func append_trend(trend_path, history_limit, snapshot) {
+	trend_payload := read_json_file_or(trend_path, {
+		"history": []
+	})
+	history := dict_get_or(trend_payload, "history", [])
+	if type(history) != "array" {
+		history = []
+	}
+
+	history = push(history, snapshot)
+	while len(history) > history_limit {
+		history = slice(history, 1, len(history))
+	}
+
+	write_json_file(trend_path, {
+		"history": history
+	})
+
+	return len(history)
+}
+
+policy_path := env_or("KUJO_RAG_PERF_COST_POLICY_PATH", "./config/performance_cost_budget_policy.json")
+benchmark_report_path := env_or("KUJO_RAG_PERF_COST_BENCHMARK_REPORT_PATH", "./results/large_corpus_benchmark_report.json")
+doc_path := env_or("KUJO_RAG_PERF_COST_DOC_PATH", "./docs/performance-cost-budget-gates.md")
+release_process_doc_path := env_or("KUJO_RAG_PERF_COST_RELEASE_PROCESS_DOC_PATH", "./docs/release-process.md")
+workflow_path := env_or("KUJO_RAG_PERF_COST_WORKFLOW_PATH", "./.github/workflows/performance-cost-budget-review.yml")
+output_path := env_or("KUJO_RAG_PERF_COST_OUTPUT_PATH", "./results/performance/performance_cost_budget_status.json")
+trend_path := env_or("KUJO_RAG_PERF_COST_TREND_PATH", "./results/performance/performance_cost_budget_trend.json")
+
+_ = ensure_parent_dir(output_path)
+_ = ensure_parent_dir(trend_path)
+
+policy := read_json_file_or(policy_path, {})
+benchmark_report := read_json_file_or(benchmark_report_path, {})
+profiles := dict_get_or(benchmark_report, "profiles", [])
+workload_classes := dict_get_or(policy, "workload_classes", {})
+cost_model := dict_get_or(policy, "cost_model", {})
+regression_thresholds := dict_get_or(policy, "regression_thresholds", {})
+history_limit := num_or(dict_get_or(policy, "history_limit", 180), 180)
+if history_limit < 1 {
+	history_limit = 1
+}
+
+trend_payload := read_json_file_or(trend_path, {
+	"history": []
+})
+trend_history := dict_get_or(trend_payload, "history", [])
+previous_snapshot := {}
+if type(trend_history) == "array" && len(trend_history) > 0 {
+	previous_snapshot = trend_history[len(trend_history) - 1]
+}
+previous_profiles := dict_get_or(previous_snapshot, "profiles", [])
+
+benchmark_report_defined := file_exists(benchmark_report_path) && type(benchmark_report) == "dict" && type(profiles) == "array" && len(profiles) > 0
+policy_defined := type(policy) == "dict" && type(workload_classes) == "dict" && type(cost_model) == "dict" && type(regression_thresholds) == "dict"
+
+evaluations := []
+workload_budgets_complete := true
+performance_budgets_enforced := true
+resource_cost_budgets_enforced := true
+trend_regression_guard_enforced := true
+
+i := 0
+while i < len(profiles) {
+	profile := profiles[i]
+	name := normalize_text(dict_get_or(profile, "name", ""))
+	budget := dict_get_or(workload_classes, name, {})
+	budget_defined := type(budget) == "dict" && num_or(dict_get_or(budget, "max_avg_query_latency_ms", -1), -1) >= 0 && num_or(dict_get_or(budget, "max_estimated_cost_per_1k_queries_usd", -1), -1) >= 0
+	if !budget_defined {
+		workload_budgets_complete = false
+		evaluations = push(evaluations, {
+			"name": name,
+			"ok": false,
+			"error": "missing_workload_budget"
+		})
+	} else {
+		previous_profile := find_profile_entry(previous_profiles, name)
+		evaluation := evaluate_profile(profile, budget, previous_profile, regression_thresholds, cost_model)
+		evaluations = push(evaluations, evaluation)
+		gates := dict_get_or(evaluation, "gates", {})
+		if to_bool(dict_get_or(gates, "ingest_throughput", false)) == false || to_bool(dict_get_or(gates, "avg_latency", false)) == false || to_bool(dict_get_or(gates, "p95_latency", false)) == false {
+			performance_budgets_enforced = false
+		}
+		if to_bool(dict_get_or(gates, "estimated_cpu", false)) == false || to_bool(dict_get_or(gates, "estimated_memory", false)) == false || to_bool(dict_get_or(gates, "estimated_cost", false)) == false {
+			resource_cost_budgets_enforced = false
+		}
+		if to_bool(dict_get_or(gates, "trend_latency_regression", false)) == false || to_bool(dict_get_or(gates, "trend_throughput_retention", false)) == false || to_bool(dict_get_or(gates, "trend_cost_regression", false)) == false {
+			trend_regression_guard_enforced = false
+		}
+	}
+	i = i + 1
+}
+
+doc_exists := file_exists(doc_path)
+doc_text := ""
+if doc_exists {
+	doc_text = read_file(doc_path)
+}
+doc_defined := doc_exists && text_has_token(doc_text, "Performance and Cost Budget Gates") && text_has_token(doc_text, "run_performance_cost_budget_review.kujo") && text_has_token(doc_text, "workload class")
+
+release_process_exists := file_exists(release_process_doc_path)
+release_process_text := ""
+if release_process_exists {
+	release_process_text = read_file(release_process_doc_path)
+}
+release_process_linked := release_process_exists && text_has_token(release_process_text, "run_performance_cost_budget_review.kujo") && text_has_token(release_process_text, "docs/performance-cost-budget-gates.md")
+
+workflow_exists := file_exists(workflow_path)
+workflow_text := ""
+if workflow_exists {
+	workflow_text = read_file(workflow_path)
+}
+workflow_defined := workflow_exists && text_has_token(workflow_text, "performance-cost-budget-review") && text_has_token(workflow_text, "run_performance_cost_budget_review.kujo") && text_has_token(workflow_text, "schedule:")
+
+ok := benchmark_report_defined && policy_defined && workload_budgets_complete && performance_budgets_enforced && resource_cost_budgets_enforced && trend_regression_guard_enforced && doc_defined && release_process_linked && workflow_defined
+
+snapshot := {
+	"generated_at_unix_ms": current_timestamp(),
+	"benchmark_generated_at_unix_ms": num_or(dict_get_or(benchmark_report, "generated_at_unix_ms", 0), 0),
+	"ok": ok,
+	"profile_count": len(evaluations),
+	"profiles": evaluations
+}
+history_count := append_trend(trend_path, history_limit, snapshot)
+
+result := {
+	"ok": ok,
+	"generated_at_unix_ms": current_timestamp(),
+	"policy_path": policy_path,
+	"benchmark_report_path": benchmark_report_path,
+	"trend_path": trend_path,
+	"doc_path": doc_path,
+	"release_process_doc_path": release_process_doc_path,
+	"workflow_path": workflow_path,
+	"profile_count": len(evaluations),
+	"profiles": evaluations,
+	"trend_history_count": history_count,
+	"gates": {
+		"benchmark_report_defined": benchmark_report_defined,
+		"policy_defined": policy_defined,
+		"workload_budgets_complete": workload_budgets_complete,
+		"performance_budgets_enforced": performance_budgets_enforced,
+		"resource_cost_budgets_enforced": resource_cost_budgets_enforced,
+		"trend_regression_guard_enforced": trend_regression_guard_enforced,
+		"doc_defined": doc_defined,
+		"release_process_linked": release_process_linked,
+		"workflow_defined": workflow_defined
+	}
+}
+
+if file_exists(output_path) {
+	delete_file(output_path)
+}
+write_json_file(output_path, result)
+print(to_json(result))
+
+if !ok {
+	exit(1)
+}

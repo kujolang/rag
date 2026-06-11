@@ -1,0 +1,119 @@
+from src.common import dict_get_or
+
+func read_json_file(path) {
+	if file_exists(path) == false {
+		return {
+			"ok": false,
+			"error": "missing_file",
+			"message": "File not found: " + path,
+			"data": {}
+		}
+	}
+	raw := read_file(path)
+	err := null
+	parsed := {}
+	try {
+		parsed := parse_json(raw)
+	} except e {
+		err := e
+	}
+	if type(err) != "null" {
+		return {
+			"ok": false,
+			"error": "invalid_json",
+			"message": to_string(err),
+			"data": {}
+		}
+	}
+	return {
+		"ok": true,
+		"data": parsed
+	}
+}
+
+func find_tier(tiers, requested, fallback) {
+	selected := fallback
+	if trim(requested) != "" {
+		selected = requested
+	}
+	i := 0
+	while i < len(tiers) {
+		item := tiers[i]
+		if dict_get_or(item, "tier", "") == selected {
+			return item
+		}
+		i = i + 1
+	}
+	return {}
+}
+
+func main() {
+	targets_path := env_or("DR_TARGETS_PATH", "config/dr_tiers.json")
+	drill_path := env_or("DR_DRILL_PATH", "results/dr_drill_snapshot.json")
+
+	targets_res := read_json_file(targets_path)
+	if targets_res["ok"] == false {
+		print(to_json({"ok": false, "error": targets_res["error"], "message": targets_res["message"]}))
+		exit(1)
+	}
+	drill_res := read_json_file(drill_path)
+	if drill_res["ok"] == false {
+		print(to_json({"ok": false, "error": drill_res["error"], "message": drill_res["message"]}))
+		exit(1)
+	}
+
+	targets := targets_res["data"]
+	drill := drill_res["data"]
+	tiers := dict_get_or(targets, "tiers", [])
+	tier := find_tier(tiers, dict_get_or(drill, "tier", ""), dict_get_or(targets, "default_tier", "standard"))
+	if len(tier) == 0 {
+		print(to_json({"ok": false, "error": "unknown_tier", "tier": dict_get_or(drill, "tier", "")}))
+		exit(1)
+	}
+
+	rto_target := to_int(dict_get_or(tier, "rto_minutes", 60))
+	rpo_target := to_int(dict_get_or(tier, "rpo_minutes", 15))
+	rto_actual := to_int(dict_get_or(drill, "actual_restore_minutes", 0))
+	rpo_actual := to_int(dict_get_or(drill, "actual_data_loss_minutes", 0))
+	recovery_ok := to_bool(dict_get_or(drill, "recovery_completed", false))
+
+	rto_ok := rto_actual <= rto_target
+	rpo_ok := rpo_actual <= rpo_target
+
+	issues := []
+	if recovery_ok == false {
+		issues = push(issues, "Recovery did not complete successfully")
+	}
+	if rto_ok == false {
+		issues = push(issues, "RTO exceeded target")
+	}
+	if rpo_ok == false {
+		issues = push(issues, "RPO exceeded target")
+	}
+
+	status := "pass"
+	if len(issues) > 0 {
+		status = "fail"
+	}
+
+	print(to_json({
+		"ok": true,
+		"status": status,
+		"tier": dict_get_or(tier, "tier", ""),
+		"targets": {
+			"rto_minutes": rto_target,
+			"rpo_minutes": rpo_target
+		},
+		"actual": {
+			"rto_minutes": rto_actual,
+			"rpo_minutes": rpo_actual,
+			"recovery_completed": recovery_ok
+		},
+		"rto_ok": rto_ok,
+		"rpo_ok": rpo_ok,
+		"issues": issues,
+		"runbook": dict_get_or(tier, "runbook", "")
+	}))
+}
+
+main()

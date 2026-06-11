@@ -1,0 +1,57 @@
+{
+	"version": "1.0",
+	"examples": [
+		{
+			"name": "invalid_api_port",
+			"overrides": {
+				"api_port": 70000
+			},
+			"expected_error_codes": [
+				"api_port_out_of_range"
+			]
+		},
+		{
+			"name": "strict_mode_missing_secrets_and_overrides",
+			"overrides": {
+				"runtime_environment": "production",
+				"strict_config": true,
+				"api_auth_provider": "bearer",
+				"api_bearer_token": "",
+				"api_bearer_token_next": "",
+				"namespace": "default",
+				"index_path": "./data/rag_index.json",
+				"at_rest_encryption_enabled": false,
+				"at_rest_encryption_key": "",
+				"at_rest_encryption_key_file": ""
+			},
+			"expected_error_codes": [
+				"strict_requires_at_rest_encryption",
+				"strict_requires_encryption_key",
+				"strict_requires_api_bearer_token",
+				"strict_requires_namespace_override",
+				"strict_requires_index_path_override"
+			]
+		},
+		{
+			"name": "qdrant_sync_requires_url",
+			"overrides": {
+				"vector_backend": "qdrant_http",
+				"vector_backend_qdrant_sync_enabled": true,
+				"vector_backend_qdrant_url": ""
+			},
+			"expected_error_codes": [
+				"qdrant_url_required"
+			]
+		},
+		{
+			"name": "audit_enabled_requires_path",
+			"overrides": {
+				"api_audit_enabled": true,
+				"api_audit_path": ""
+			},
+			"expected_error_codes": [
+				"invalid_audit_path"
+			]
+		}
+	]
+}

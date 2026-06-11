@@ -1,0 +1,46 @@
+from src.common import dict_get_or
+from src.tests_helpers import assert_true
+
+project_kujo_bin := env_or("KUJO_BIN", "/path/to/kujo/target/debug/kujo")
+
+# Ensure invalid runtimes fail fast with a clear, actionable error payload.
+invalid_runtime_cmd := "KUJO_BIN=/usr/bin/false " + project_kujo_bin + " run scripts/run_tests.kujo --interpreter"
+invalid_runtime_res := execute_status(invalid_runtime_cmd, {"timeout_ms": 120000})
+assert_true(to_bool(type(invalid_runtime_res) == "struct"))
+assert_true(to_bool(invalid_runtime_res.success == false))
+assert_true(to_bool(trim(invalid_runtime_res.stdout) != ""))
+
+invalid_runtime_payload := parse_json(invalid_runtime_res.stdout)
+assert_true(to_bool(dict_get_or(invalid_runtime_payload, "ok", true) == false))
+invalid_runtime_fatal := dict_get_or(invalid_runtime_payload, "fatal_error", {})
+assert_true(to_bool(dict_get_or(invalid_runtime_fatal, "code", "") == "invalid_kujo_binary"))
+
+# Allow focused test subsets for faster local validation loops.
+subset_cmd := "KUJO_BIN=" + project_kujo_bin + " KUJO_RAG_TEST_FILES=tests/test_compliance_control_mapping_baseline.kujo " + project_kujo_bin + " run scripts/run_tests.kujo --interpreter"
+subset_res := execute_status(subset_cmd, {"timeout_ms": 240000})
+assert_true(to_bool(type(subset_res) == "struct"))
+assert_true(to_bool(subset_res.success == true))
+assert_true(to_bool(trim(subset_res.stdout) != ""))
+
+subset_payload := parse_json(subset_res.stdout)
+assert_true(to_bool(dict_get_or(subset_payload, "ok", false) == true))
+assert_true(to_bool(dict_get_or(subset_payload, "configured_test_count", 0) == 1))
+subset_results := dict_get_or(subset_payload, "results", [])
+assert_true(to_bool(type(subset_results) == "array"))
+assert_true(to_bool(len(subset_results) == 1))
+subset_first := subset_results[0]
+assert_true(to_bool(dict_get_or(subset_first, "file", "") == "tests/test_compliance_control_mapping_baseline.kujo"))
+
+# Reject malformed paths from env-driven test list input.
+invalid_list_cmd := "KUJO_BIN=" + project_kujo_bin + " KUJO_RAG_TEST_FILES='tests/test_unit.kujo;bad' " + project_kujo_bin + " run scripts/run_tests.kujo --interpreter"
+invalid_list_res := execute_status(invalid_list_cmd, {"timeout_ms": 120000})
+assert_true(to_bool(type(invalid_list_res) == "struct"))
+assert_true(to_bool(invalid_list_res.success == false))
+assert_true(to_bool(trim(invalid_list_res.stdout) != ""))
+
+invalid_list_payload := parse_json(invalid_list_res.stdout)
+assert_true(to_bool(dict_get_or(invalid_list_payload, "ok", true) == false))
+invalid_list_fatal := dict_get_or(invalid_list_payload, "fatal_error", {})
+assert_true(to_bool(dict_get_or(invalid_list_fatal, "code", "") == "invalid_test_file_list"))
+
+print("test_run_tests_runner_guardrails: ok")

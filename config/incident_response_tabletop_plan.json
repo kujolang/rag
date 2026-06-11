@@ -1,0 +1,108 @@
+{
+  "version": "incident-tabletop-v1",
+  "owner": "SRE and Security",
+  "last_drill_at_unix_ms": 1779820800000,
+  "review_cadence_days": 30,
+  "scenarios": [
+    {
+      "id": "IR-2026-05-01",
+      "incident_type": "auth_compromise",
+      "runbook_path": "./docs/runbooks/incident-auth-compromise-runbook.md",
+      "tabletop_report_path": "./docs/incident-tabletop-action-report-2026-05.md",
+      "executed_at_unix_ms": 1779820800000,
+      "facilitator": "On-call Lead",
+      "participants": [
+        "Platform Security",
+        "SRE",
+        "Product Engineering"
+      ],
+      "lessons_learned": [
+        "Require backup incident commander assignment."
+      ],
+      "follow_up_issues": [
+        {
+          "id": "IR-301",
+          "title": "Add backup incident commander assignment",
+          "owner": "Platform Security",
+          "status": "open",
+          "target_date": "2026-06-05"
+        }
+      ]
+    },
+    {
+      "id": "IR-2026-05-02",
+      "incident_type": "data_corruption",
+      "runbook_path": "./docs/runbooks/incident-data-corruption-runbook.md",
+      "tabletop_report_path": "./docs/incident-tabletop-action-report-2026-05.md",
+      "executed_at_unix_ms": 1779820800000,
+      "facilitator": "On-call Lead",
+      "participants": [
+        "Data Governance",
+        "SRE",
+        "Platform Reliability"
+      ],
+      "lessons_learned": [
+        "Add mandatory sample-query checklist after restore."
+      ],
+      "follow_up_issues": [
+        {
+          "id": "IR-302",
+          "title": "Add restore verification sample-query checklist",
+          "owner": "Platform Reliability",
+          "status": "open",
+          "target_date": "2026-06-07"
+        }
+      ]
+    },
+    {
+      "id": "IR-2026-05-03",
+      "incident_type": "service_outage",
+      "runbook_path": "./docs/runbooks/incident-service-outage-runbook.md",
+      "tabletop_report_path": "./docs/incident-tabletop-action-report-2026-05.md",
+      "executed_at_unix_ms": 1779820800000,
+      "facilitator": "On-call Lead",
+      "participants": [
+        "SRE",
+        "Platform Security",
+        "Support"
+      ],
+      "lessons_learned": [
+        "Improve customer communication checkpoints during rollback."
+      ],
+      "follow_up_issues": [
+        {
+          "id": "IR-303",
+          "title": "Codify outage communication checkpoints",
+          "owner": "SRE",
+          "status": "open",
+          "target_date": "2026-06-08"
+        }
+      ]
+    },
+    {
+      "id": "IR-2026-05-04",
+      "incident_type": "quality_regression",
+      "runbook_path": "./docs/runbooks/incident-quality-regression-runbook.md",
+      "tabletop_report_path": "./docs/incident-tabletop-action-report-2026-05.md",
+      "executed_at_unix_ms": 1779820800000,
+      "facilitator": "On-call Lead",
+      "participants": [
+        "QA Lead",
+        "SRE",
+        "Product Engineering"
+      ],
+      "lessons_learned": [
+        "Pre-stage rollback config bundles for quality incidents."
+      ],
+      "follow_up_issues": [
+        {
+          "id": "IR-304",
+          "title": "Create pre-staged quality rollback bundle",
+          "owner": "QA Lead",
+          "status": "open",
+          "target_date": "2026-06-10"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,6 @@
+Incident: Checkout latency spike on 2026-03-14
+
+Primary trigger: cache cluster saturation after an unbounded warmup job.
+Customer impact: p95 latency rose from 420ms to 1900ms for 11 minutes.
+Mitigation: disabled warmup job, scaled cache nodes, and enabled request shedding.
+Follow-up action: enforce warmup concurrency guardrail and add cache saturation alerting.

@@ -1,0 +1,109 @@
+from src.common import dict_get_or
+from src.tests_helpers import assert_true
+
+kujo_bin := env_or("KUJO_BIN", "/path/to/kujo/target/release/kujo")
+
+func run_cmd(command) {
+	res := execute_status(command, {"timeout_ms": 120000})
+	if type(res) == "struct" {
+		return {
+			"ok": res.success,
+			"exit_code": res.exitcode,
+			"stdout": to_string(res.stdout),
+			"stderr": to_string(res.stderr)
+		}
+	}
+	return {
+		"ok": false,
+		"exit_code": -1,
+		"stdout": "",
+		"stderr": "invalid execute_status result"
+	}
+}
+
+func parse_json_safe(text) {
+	obj := {}
+	err := null
+	try {
+		obj := parse_json(text)
+	} except e {
+		err := e
+	}
+	if type(err) != "null" {
+		return {
+			"ok": false,
+			"error": to_string(err),
+			"data": {}
+		}
+	}
+	return {
+		"ok": true,
+		"data": obj
+	}
+}
+
+func start_server(port, env_prefix, log_file) {
+	cmd := "env " + env_prefix + " " + kujo_bin + " run main.kujo --interpreter serve --host 127.0.0.1 --port " + to_string(port) + " > " + log_file + " 2>&1 & echo $!"
+	res := run_cmd(cmd)
+	pid := trim(dict_get_or(res, "stdout", ""))
+	return pid
+}
+
+func stop_server(pid) {
+	if pid == "" {
+		return true
+	}
+	_ := run_cmd("kill " + pid + " >/dev/null 2>&1 || true")
+	_ := run_cmd("wait " + pid + " >/dev/null 2>&1 || true")
+	return true
+}
+
+func wait_for_health(port) {
+	attempt := 0
+	while attempt < 1200 {
+		res := run_cmd("curl -s http://127.0.0.1:" + to_string(port) + "/health")
+		body := trim(dict_get_or(res, "stdout", ""))
+		if body != "" {
+			parsed := parse_json_safe(body)
+			if dict_get_or(parsed, "ok", false) == true {
+				payload := dict_get_or(parsed, "data", {})
+				if dict_get_or(payload, "ok", false) == true {
+					return true
+				}
+			}
+		}
+		attempt = attempt + 1
+	}
+	return false
+}
+
+func post_json(port, path, payload, request_id, correlation_id) {
+	cmd := "curl -s -X POST http://127.0.0.1:" + to_string(port) + path + " -H \"Content-Type: application/json\" -H \"X-Request-ID: " + request_id + "\" -H \"X-Correlation-ID: " + correlation_id + "\" -d '" + payload + "'"
+	return run_cmd(cmd)
+}
+
+port := 48000 + (current_timestamp() % 10000)
+audit_path := "/tmp/kujo_rag_otel_trace_audit.log"
+request_id := "req-otel-001"
+correlation_id := "corr-otel-001"
+
+env_prefix := "KUJO_RAG_ENV=development KUJO_RAG_API_AUTH_PROVIDER=none KUJO_RAG_API_AUDIT_ENABLED=true KUJO_RAG_API_AUDIT_PATH=" + audit_path + " KUJO_RAG_OTEL_ENABLED=true KUJO_RAG_OTEL_EXPORT_MODE=audit KUJO_RAG_OTEL_SERVICE_NAME=kujo-rag-test KUJO_RAG_OTEL_OTLP_ENDPOINT=http://otel.example:4318"
+pid := start_server(port, env_prefix, "/tmp/kujo_rag_otel_tracing.log")
+assert_true(to_bool(pid != ""))
+assert_true(to_bool(wait_for_health(port) == true))
+
+_ = post_json(port, "/query", "{\"query\":\"Kujo speed\"}", request_id, correlation_id)
+
+trace_log := run_cmd("cat " + audit_path + " | cat")
+trace_text := dict_get_or(trace_log, "stdout", "")
+assert_true(to_bool(contains(trace_text, "trace_span") == 1))
+assert_true(to_bool(contains(trace_text, "query.retrieval") == 1))
+assert_true(to_bool(contains(trace_text, "query.stage.tokenize") == 1))
+assert_true(to_bool(contains(trace_text, "query.stage.synthesize") == 1))
+assert_true(to_bool(contains(trace_text, request_id) == 1))
+assert_true(to_bool(contains(trace_text, correlation_id) == 1))
+assert_true(to_bool(contains(trace_text, "kujo-rag-test") == 1))
+
+_ := stop_server(pid)
+
+print("test_otel_tracing: ok")

@@ -1,0 +1,104 @@
+from src.common import dict_get_or
+from src.tests_helpers import assert_true
+
+kujo_bin := env_or("KUJO_BIN", "/path/to/kujo/target/debug/kujo")
+
+func parse_json_safe(text) {
+	payload := {}
+	err := null
+	try {
+		payload := parse_json(text)
+	} except e {
+		err := e
+	}
+	if type(err) != "null" {
+		return {
+			"ok": false,
+			"data": {},
+			"error": to_string(err)
+		}
+	}
+	return {
+		"ok": true,
+		"data": payload,
+		"error": ""
+	}
+}
+
+suffix := to_string(current_timestamp())
+valid_path := "/tmp/kujo_rag_release_override_valid_" + suffix + ".json"
+invalid_path := "/tmp/kujo_rag_release_override_invalid_" + suffix + ".json"
+valid_report_path := "/tmp/kujo_rag_release_override_valid_report_" + suffix + ".json"
+invalid_report_path := "/tmp/kujo_rag_release_override_invalid_report_" + suffix + ".json"
+
+write_file(valid_path, to_json({
+	"version": "1.0",
+	"overrides": [
+		{
+			"id": "override-quality-001",
+			"active": true,
+			"gates": ["avg_grounding"],
+			"approvers": ["alice@example.com", "bob@example.com"],
+			"reviewed_by": "release-owner@example.com",
+			"ticket": "REL-123",
+			"rationale": "Temporary waiver while remediation is in flight.",
+			"expires_at_unix_ms": current_timestamp() + 3600000
+		}
+	]
+}))
+
+write_file(invalid_path, to_json({
+	"version": "1.0",
+	"overrides": [
+		{
+			"id": "override-quality-002",
+			"active": true,
+			"gates": [],
+			"approvers": ["alice@example.com"],
+			"reviewed_by": "",
+			"ticket": "",
+			"rationale": "",
+			"expires_at_unix_ms": current_timestamp() - 1000
+		}
+	]
+}))
+
+valid_cmd := "KUJO_RAG_RELEASE_GATE_OVERRIDES_PATH=" + valid_path + " KUJO_RAG_RELEASE_GATE_OVERRIDE_REPORT_PATH=" + valid_report_path + " " + kujo_bin + " run scripts/validate_release_gate_overrides.kujo --interpreter"
+valid_res := execute_status(valid_cmd, {"timeout_ms": 120000})
+assert_true(to_bool(type(valid_res) == "struct"))
+assert_true(to_bool(valid_res.success == true))
+
+valid_parsed := parse_json_safe(to_string(valid_res.stdout))
+assert_true(to_bool(dict_get_or(valid_parsed, "ok", false) == true))
+valid_payload := dict_get_or(valid_parsed, "data", {})
+assert_true(to_bool(dict_get_or(valid_payload, "ok", false) == true))
+assert_true(to_bool(dict_get_or(valid_payload, "active_overrides", 0) == 1))
+assert_true(to_bool(dict_get_or(valid_payload, "invalid_override_count", 1) == 0))
+assert_true(to_bool(file_exists(valid_report_path) == true))
+
+invalid_cmd := "KUJO_RAG_RELEASE_GATE_OVERRIDES_PATH=" + invalid_path + " KUJO_RAG_RELEASE_GATE_OVERRIDE_REPORT_PATH=" + invalid_report_path + " " + kujo_bin + " run scripts/validate_release_gate_overrides.kujo --interpreter"
+invalid_res := execute_status(invalid_cmd, {"timeout_ms": 120000})
+assert_true(to_bool(type(invalid_res) == "struct"))
+assert_true(to_bool(invalid_res.success == false))
+
+invalid_parsed := parse_json_safe(to_string(invalid_res.stdout))
+assert_true(to_bool(dict_get_or(invalid_parsed, "ok", false) == true))
+invalid_payload := dict_get_or(invalid_parsed, "data", {})
+assert_true(to_bool(dict_get_or(invalid_payload, "ok", true) == false))
+assert_true(to_bool(dict_get_or(invalid_payload, "invalid_override_count", 0) >= 1))
+assert_true(to_bool(file_exists(invalid_report_path) == true))
+
+if file_exists(valid_path) {
+	delete_file(valid_path)
+}
+if file_exists(invalid_path) {
+	delete_file(invalid_path)
+}
+if file_exists(valid_report_path) {
+	delete_file(valid_report_path)
+}
+if file_exists(invalid_report_path) {
+	delete_file(invalid_report_path)
+}
+
+print("test_release_gate_override_workflow: ok")
