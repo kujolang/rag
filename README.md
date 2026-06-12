@@ -16,6 +16,8 @@ This project implements an end-to-end local RAG pipeline in Kujo:
 
 CLI note: `help`, `--help`, and `--version` all render the same help text in this repository; there is no separate version banner.
 
+Agent readability note: prioritize copyable examples over tests. Examples should model the most token-efficient idioms we want agents to imitate.
+
 No Python runtime or Python package tooling is required.
 
 ## Repository Layout
@@ -184,6 +186,40 @@ No Python runtime or Python package tooling is required.
 - root source-of-truth files remain intentionally minimal (`main.kujo`, `VERSION`, top-level configs/docs)
 - runtime outputs are isolated under ignored directories (`data/`, `results/`) and are not committed
 - transient local artifacts (`*.log`, `*.tmp`, editor/cache files) are ignored by default via `.gitignore`
+
+## Agent Search Hygiene
+
+Canonical, copyable surfaces:
+
+- `README.md`
+- `main.kujo`
+- `demo/kujo_docs_assistant.kujo`
+- `docs/adoption-playbook.md`
+- `docs/extension-guide.md`
+- `examples/kujo_docs/`
+
+Contract and fixture surfaces:
+
+- `tests/`: behavior checks; read for contracts, not as style examples
+- `examples/release_eval_corpus/`, `examples/multilingual_release_eval_corpus/`, `examples/parser_matrix_corpus/`, `examples/malformed_parser_corpus/`, `examples/chunking_preset_eval_corpus/`: evaluation/parser fixtures
+- `config/*.json` and `compatibility/`: machine-readable gate inputs and compatibility fixtures
+- `openapi/kujo-rag-openapi.json`: canonical API contract
+- `sdk/javascript/kujo-rag-client.generated.js`: generated SDK; do not hand-edit
+- `data/` and `results/`: ignored local runtime/generated output
+
+Recommended search exclusions for broad cleanup sweeps:
+
+```bash
+rg "pattern" . \
+	-g '!data/**' \
+	-g '!results/**' \
+	-g '!sdk/**' \
+	-g '!openapi/**' \
+	-g '!config/*.json' \
+	-g '!compatibility/**'
+```
+
+Include generated or bulk paths only when the task explicitly targets contracts, fixtures, reports, or generated clients.
 
 ## Implementation Backlog
 
@@ -421,10 +457,22 @@ For third-party adoption patterns (minimum setup, docs/code/mixed recipes, deplo
 kujo run main.kujo --interpreter ingest --path ./examples/kujo_docs --recursive true
 ```
 
+Expected output shape:
+
+```json
+{"ok":true,"command":"ingest","namespace":"default","index_path":"./data/rag_index.json","path":"./examples/kujo_docs","recursive":true,"summary":{"documents":4,"chunks":4},"stats":{"files_seen":4},"errors":[]}
+```
+
 2) Query the index:
 
 ```bash
 kujo run main.kujo --interpreter query --question "How does Kujo handle module imports?"
+```
+
+Expected output shape:
+
+```json
+{"answer":"...","citations":[{"path":"./examples/kujo_docs/LANGUAGE_SPEC.md","line_start":1,"line_end":6}],"count":4}
 ```
 
 Optional namespace override for tenant/project isolation:

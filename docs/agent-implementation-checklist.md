@@ -22,6 +22,13 @@ While implementing:
 - Keep behavior stable unless the item explicitly changes behavior.
 - Prefer small composable functions and shared helpers over copy/paste logic.
 - Keep offline-first behavior intact unless item explicitly changes it.
+- Prioritize copyable examples over tests: examples should model the most token-efficient idioms we want agents to imitate.
+- Exclude generated/bulk paths from broad searches unless the task explicitly targets them; document the exclusions used.
+
+Search hygiene for broad scans:
+- Start with canonical surfaces (`README.md`, `main.kujo`, `demo/`, `docs/adoption-playbook.md`, `docs/extension-guide.md`, `examples/kujo_docs/`).
+- Treat `tests/`, evaluation corpora, malformed parser corpora, and config JSON as contracts or fixtures, not style examples.
+- Skip `data/`, `results/`, `sdk/`, `openapi/`, `config/*.json`, and `compatibility/` by default when searching for readability cleanup targets.
 
 Before checking an item complete:
 - All acceptance criteria must pass.
