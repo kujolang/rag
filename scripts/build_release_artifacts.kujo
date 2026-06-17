@@ -296,13 +296,17 @@ func write_replace_file(path_value, content) {
 	return true
 }
 
+func print_json(payload) {
+	print(to_json(payload))
+}
+
 func fail_json(error_code, message, details) {
-	print(to_json({
+	print_json({
 		"ok": false,
 		"error": error_code,
 		"message": message,
 		"details": details
-	}))
+	})
 	exit(1)
 }
 
@@ -372,7 +376,7 @@ write_replace_file(sbom_path, to_json(sbom))
 write_checksums_file(checksums_path, manifest, manifest_path)
 write_replace_file(notes_copy_path, read_file(notes_path))
 
-print(to_json({
+print_json({
 	"ok": true,
 	"release_version": version,
 	"release_tag": release_tag,
@@ -384,4 +388,4 @@ print(to_json({
 	"release_notes_artifact_path": notes_copy_path,
 	"file_count": len(dict_get_or(manifest, "files", [])),
 	"created_at_unix_ms": dict_get_or(manifest, "created_at_unix_ms", 0)
-}))
+})

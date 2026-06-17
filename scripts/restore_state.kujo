@@ -1,5 +1,37 @@
 from src.common import dict_get_or
 
+func print_json(payload) {
+	print(to_json(payload))
+}
+
+func exit_json(payload) {
+	print_json(payload)
+	exit(1)
+}
+
+func error_payload(error_code, message) {
+	return {
+		"ok": false,
+		"error": error_code,
+		"message": message
+	}
+}
+
+func path_error_payload(error_code, path_value) {
+	return {
+		"ok": false,
+		"error": error_code,
+		"path": path_value
+	}
+}
+
+func read_result_error_payload(result) {
+	return error_payload(
+		dict_get_or(result, "error", "read_error"),
+		dict_get_or(result, "message", "Unable to read JSON file")
+	)
+}
+
 func read_json_file(path) {
 	if file_exists(path) == false {
 		return {
@@ -42,15 +74,13 @@ func verify_sha256(path, expected_hash) {
 func main() {
 	backup_dir := env_or("RESTORE_BACKUP_DIR", "")
 	if trim(backup_dir) == "" {
-		print(to_json({"ok": false, "error": "missing_backup_dir", "message": "Set RESTORE_BACKUP_DIR"}))
-		exit(1)
+		exit_json(error_payload("missing_backup_dir", "Set RESTORE_BACKUP_DIR"))
 	}
 
 	manifest_path := backup_dir + "/manifest.json"
 	manifest_res := read_json_file(manifest_path)
 	if manifest_res["ok"] == false {
-		print(to_json({"ok": false, "error": manifest_res["error"], "message": manifest_res["message"]}))
-		exit(1)
+		exit_json(read_result_error_payload(manifest_res))
 	}
 	manifest := manifest_res["data"]
 	files := dict_get_or(manifest, "files", {})
@@ -63,12 +93,10 @@ func main() {
 	config_hash := dict_get_or(config_meta, "sha256", "")
 
 	if verify_sha256(index_backup, index_hash) == false {
-		print(to_json({"ok": false, "error": "index_checksum_mismatch", "path": index_backup}))
-		exit(1)
+		exit_json(path_error_payload("index_checksum_mismatch", index_backup))
 	}
 	if verify_sha256(config_backup, config_hash) == false {
-		print(to_json({"ok": false, "error": "config_checksum_mismatch", "path": config_backup}))
-		exit(1)
+		exit_json(path_error_payload("config_checksum_mismatch", config_backup))
 	}
 
 	target_index := env_or("RESTORE_TARGET_INDEX", dict_get_or(index_meta, "source", "data/rag_index.json"))
@@ -84,14 +112,14 @@ func main() {
 	write_file(target_index, read_file(index_backup))
 	write_file(target_config, read_file(config_backup))
 
-	print(to_json({
+	print_json({
 		"ok": true,
 		"restored": {
 			"index": target_index,
 			"config": target_config
 		},
 		"verified": true
-	}))
+	})
 }
 
 main()

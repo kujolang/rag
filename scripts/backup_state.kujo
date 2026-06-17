@@ -2,6 +2,23 @@ func default_backup_dir() {
 	return "results/backups/backup-" + to_string(current_timestamp())
 }
 
+func print_json(payload) {
+	print(to_json(payload))
+}
+
+func exit_json(payload) {
+	print_json(payload)
+	exit(1)
+}
+
+func missing_source_payload(error_code, path_value) {
+	return {
+		"ok": false,
+		"error": error_code,
+		"path": path_value
+	}
+}
+
 func read_json_file(path) {
 	if file_exists(path) == false {
 		return {
@@ -41,12 +58,10 @@ func main() {
 	create_dir(output_dir)
 
 	if file_exists(index_source) == false {
-		print(to_json({"ok": false, "error": "missing_index_source", "path": index_source}))
-		exit(1)
+		exit_json(missing_source_payload("missing_index_source", index_source))
 	}
 	if file_exists(config_source) == false {
-		print(to_json({"ok": false, "error": "missing_config_source", "path": config_source}))
-		exit(1)
+		exit_json(missing_source_payload("missing_config_source", config_source))
 	}
 
 	index_content := read_file(index_source)
@@ -87,13 +102,13 @@ func main() {
 	}
 
 	write_file(manifest_path, to_json(manifest))
-	print(to_json({
+	print_json({
 		"ok": true,
 		"backup_dir": output_dir,
 		"manifest": manifest_path,
 		"index_backup": index_backup,
 		"config_backup": config_backup
-	}))
+	})
 }
 
 main()

@@ -37,6 +37,15 @@ func write_replace_file(path_value, content) {
 	return true
 }
 
+func print_json(payload) {
+	print(to_json(payload))
+}
+
+func exit_json(payload) {
+	print_json(payload)
+	exit(1)
+}
+
 func normalize_path(path_value) {
 	value := to_string(path_value)
 	if starts_with(value, "./") {
@@ -301,12 +310,11 @@ scan_root := dict_get_or(flags, "root", ".")
 output_path := dict_get_or(flags, "output", "./results/supply-chain-scan.json")
 
 if path_exists(scan_root) == false {
-	print(to_json({
+	exit_json({
 		"ok": false,
 		"error": "missing_scan_root",
 		"scan_root": scan_root
-	}))
-	exit(1)
+	})
 }
 
 excluded_prefixes := [
@@ -353,7 +361,7 @@ if output_dir != "" && output_dir != "." {
 }
 write_replace_file(output_path, to_json(result))
 
-print(to_json(result))
+print_json(result)
 
 if high_count > 0 {
 	exit(1)

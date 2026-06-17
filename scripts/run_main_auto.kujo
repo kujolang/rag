@@ -8,6 +8,15 @@ func shell_quote(value) {
 	return "'" + escaped + "'"
 }
 
+func print_json(payload) {
+	print(to_json(payload))
+}
+
+func exit_json(payload) {
+	print_json(payload)
+	exit(1)
+}
+
 func quoted_args(args_list) {
 	parts := []
 	for item in args_list {
@@ -41,12 +50,11 @@ func run_command(command_text) {
 
 passed := args()
 if len(passed) == 0 {
-	print(to_json({
+	exit_json({
 		"ok": false,
 		"error": "missing_args",
 		"message": "Provide main.kujo command arguments, for example: ingest --path ./examples/kujo_docs --recursive true"
-	}))
-	exit(1)
+	})
 }
 
 arg_str := quoted_args(passed)
@@ -54,23 +62,23 @@ native_cmd := kujo_bin + " run main.kujo " + arg_str
 native_result := run_command(native_cmd)
 
 if dict_get_or(native_result, "ok", false) == true {
-	print(to_json({
+	print_json({
 		"ok": true,
 		"mode": "native",
 		"result": native_result
-	}))
+	})
 	exit(0)
 }
 
 interp_cmd := kujo_bin + " run main.kujo --interpreter " + arg_str
 interp_result := run_command(interp_cmd)
 
-print(to_json({
+print_json({
 	"ok": dict_get_or(interp_result, "ok", false),
 	"mode": "interpreter",
 	"native_result": native_result,
 	"result": interp_result
-}))
+})
 
 if dict_get_or(interp_result, "ok", false) == false {
 	exit(1)

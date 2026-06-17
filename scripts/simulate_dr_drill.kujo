@@ -1,5 +1,30 @@
 from src.common import dict_get_or
 
+func print_json(payload) {
+	print(to_json(payload))
+}
+
+func exit_json(payload) {
+	print_json(payload)
+	exit(1)
+}
+
+func read_result_error_payload(result) {
+	return {
+		"ok": false,
+		"error": dict_get_or(result, "error", "read_error"),
+		"message": dict_get_or(result, "message", "Unable to read JSON file")
+	}
+}
+
+func unknown_tier_payload(drill) {
+	return {
+		"ok": false,
+		"error": "unknown_tier",
+		"tier": dict_get_or(drill, "tier", "")
+	}
+}
+
 func read_json_file(path) {
 	if file_exists(path) == false {
 		return {
@@ -53,13 +78,11 @@ func main() {
 
 	targets_res := read_json_file(targets_path)
 	if targets_res["ok"] == false {
-		print(to_json({"ok": false, "error": targets_res["error"], "message": targets_res["message"]}))
-		exit(1)
+		exit_json(read_result_error_payload(targets_res))
 	}
 	drill_res := read_json_file(drill_path)
 	if drill_res["ok"] == false {
-		print(to_json({"ok": false, "error": drill_res["error"], "message": drill_res["message"]}))
-		exit(1)
+		exit_json(read_result_error_payload(drill_res))
 	}
 
 	targets := targets_res["data"]
@@ -67,8 +90,7 @@ func main() {
 	tiers := dict_get_or(targets, "tiers", [])
 	tier := find_tier(tiers, dict_get_or(drill, "tier", ""), dict_get_or(targets, "default_tier", "standard"))
 	if len(tier) == 0 {
-		print(to_json({"ok": false, "error": "unknown_tier", "tier": dict_get_or(drill, "tier", "")}))
-		exit(1)
+		exit_json(unknown_tier_payload(drill))
 	}
 
 	rto_target := to_int(dict_get_or(tier, "rto_minutes", 60))
@@ -96,7 +118,7 @@ func main() {
 		status = "fail"
 	}
 
-	print(to_json({
+	print_json({
 		"ok": true,
 		"status": status,
 		"tier": dict_get_or(tier, "tier", ""),
@@ -113,7 +135,7 @@ func main() {
 		"rpo_ok": rpo_ok,
 		"issues": issues,
 		"runbook": dict_get_or(tier, "runbook", "")
-	}))
+	})
 }
 
 main()

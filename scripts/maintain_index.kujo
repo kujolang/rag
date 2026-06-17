@@ -25,6 +25,10 @@ func ensure_parent_dir(path_value) {
 	return ensure_dir(dir)
 }
 
+func print_json(payload) {
+	print(to_json(payload))
+}
+
 func parse_int_or(value, fallback) {
 	err := null
 	parsed := fallback
@@ -419,7 +423,7 @@ if dict_get_or(window, "match", false) == false {
 		"generated_at_unix_ms": current_timestamp()
 	}
 	write_json_file(report_path, result)
-	print(to_json(result))
+	print_json(result)
 	exit(0)
 }
 
@@ -477,7 +481,7 @@ result := {
 }
 
 write_json_file(report_path, result)
-print(to_json(result))
+print_json(result)
 
 if overall_ok == false {
 	exit(1)

@@ -16,7 +16,7 @@ This project implements an end-to-end local RAG pipeline in Kujo:
 
 CLI note: `help`, `--help`, and `--version` all render the same help text in this repository; there is no separate version banner.
 
-Agent readability note: prioritize copyable examples over tests. Examples should model the most token-efficient idioms we want agents to imitate.
+Agent readability note: prioritize copyable examples over tests. Examples should model the most token-efficient idioms we want agents to imitate. In CLI/demo Kujo files, prefer small local helpers such as `print_json`, `exit_json`, and read-result payload builders when the same output pattern repeats; keep tests, fixtures, and generated contracts explicit unless a behavior change requires alignment.
 
 No Python runtime or Python package tooling is required.
 
