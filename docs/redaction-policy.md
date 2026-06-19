@@ -34,6 +34,7 @@ Defaults redact common secret-bearing keys including:
 
 - Access logging sanitizes `extra` payload values before emission.
 - Error responses sanitize `details` when redaction is enabled.
+- Literal values configured in `KUJO_RAG_API_REDACTION_VALUES` are scrubbed even when they appear inside a larger string field.
 - In `production` runtime, HTTP `5xx` responses are forced to a generic message and omit details.
 
 ## Validation Coverage

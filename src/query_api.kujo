@@ -145,14 +145,21 @@ func key_needs_redaction(key_name, sensitive_keys) {
 	return false
 }
 
-func redact_text_value(raw_value, cfg) {
+func redact_text_value(raw_value, cfg, sensitive_values, mask) {
 	text := to_string(raw_value)
 	if redaction_enabled(cfg) == false {
 		return text
 	}
-	mask := redaction_mask(cfg)
 	if index_of(to_lower(text), "bearer ") >= 0 {
 		return mask
+	}
+	i := 0
+	while i < len(sensitive_values) {
+		needle := sensitive_values[i]
+		if needle != "" && index_of(text, needle) >= 0 {
+			return mask
+		}
+		i = i + 1
 	}
 	return text
 }
@@ -161,7 +168,7 @@ func redact_any(value, cfg, sensitive_keys, sensitive_values, mask) {
 	vtype := type(value)
 
 	if vtype == "string" {
-		return redact_text_value(value, cfg)
+		return redact_text_value(value, cfg, sensitive_values, mask)
 	}
 
 	if vtype == "dict" {
@@ -2193,8 +2200,8 @@ func rate_check(state, cfg, req) {
 	violation_threshold := dict_get_or(cfg, "api_anomaly_violation_threshold", 3)
 	block_ttl_sec := dict_get_or(cfg, "api_anomaly_block_ttl_sec", 900)
 	now_ts := current_timestamp()
-	state = load_shared_rate_state(state, cfg)
 	state = load_api_runtime_state(state)
+	state = load_shared_rate_state(state, cfg)
 	state = prune_rate_state(state, cfg, now_ts)
 	key := rate_key(req)
 

@@ -93,6 +93,15 @@ details := dict_get_or(err_obj, "details", {})
 assert_true(to_bool(type(details) == "dict"))
 assert_true(to_bool(contains(raw_body, "top-secret-value") == 0))
 
+invalid_namespace := run_cmd("curl -s -X POST http://127.0.0.1:" + to_string(port) + "/query -H \"Content-Type: application/json\" -H \"Authorization: Bearer safe-token\" -d '{\"query\":\"hello\",\"namespace\":\"top-secret-value!\"}'")
+invalid_namespace_raw := dict_get_or(invalid_namespace, "stdout", "")
+invalid_namespace_parsed := parse_json_safe(invalid_namespace_raw)
+assert_true(to_bool(dict_get_or(invalid_namespace_parsed, "ok", false) == true))
+invalid_namespace_err := dict_get_or(dict_get_or(invalid_namespace_parsed, "data", {}), "error", {})
+assert_true(to_bool(dict_get_or(invalid_namespace_err, "code", "") == "invalid_namespace"))
+assert_true(to_bool(contains(invalid_namespace_raw, "top-secret-value") == 0))
+assert_true(to_bool(contains(invalid_namespace_raw, "REDACTED") == 1))
+
 _ := stop_server(pid)
 
 print("test_redaction_policy: ok")
