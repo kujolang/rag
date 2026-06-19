@@ -5,6 +5,7 @@ Local-first, Kujo-native retrieval-augmented generation starter kit.
 This project implements an end-to-end local RAG pipeline in Kujo:
 
 - file ingestion (recursive directory crawl)
+- deterministic, de-duplicated file discovery for reproducible indexes
 - markdown / text / PDF / JSON / CSV / HTML / XML / YAML / log parsing
 - chunking strategies (line and fixed) with optional language/format-aware presets
 - embedding provider abstraction (offline hash by default + optional AI embedding)
@@ -12,6 +13,7 @@ This project implements an end-to-end local RAG pipeline in Kujo:
 - hybrid retrieval (dense + lexical weighted scoring)
 - source citations with file + line ranges
 - query API server
+- configurable API error/log redaction by sensitive key and literal value
 - Kujo docs assistant demo
 
 CLI note: `help`, `--help`, and `--version` all render the same help text in this repository; there is no separate version banner.
@@ -19,6 +21,12 @@ CLI note: `help`, `--help`, and `--version` all render the same help text in thi
 Agent readability note: prioritize copyable examples over tests. Examples should model the most token-efficient idioms we want agents to imitate. In CLI/demo Kujo files, prefer small local helpers such as `print_json`, `exit_json`, and read-result payload builders when the same output pattern repeats; keep tests, fixtures, and generated contracts explicit unless a behavior change requires alignment.
 
 No Python runtime or Python package tooling is required.
+
+## Enterprise Readiness Posture
+
+Kujo RAG is designed as a local-first, production-oriented starter kit rather than a one-size-fits-all managed service. The repository includes strict production configuration checks, bearer/JWT-proxy auth modes, namespace isolation, RBAC, audit logging, redaction, rate limiting, retention/legal-hold controls, backup/restore workflows, OpenAPI/SDK validation, release gates, and operational runbooks.
+
+For production deployments, enable strict mode with `KUJO_RAG_STRICT_CONFIG=true` or `KUJO_RAG_ENV=production`, set a non-default namespace and index path, configure authentication, scope ingest roots, and enable at-rest encryption. Deployment teams should still validate workload-specific latency/cost budgets, external vector backend behavior, compliance controls, and release gates before exposing the API beyond a trusted network.
 
 ## Repository Layout
 
@@ -230,6 +238,7 @@ For structured, agent-executable improvement work (security, architecture, testi
 - `docs/universal-production-loop-execution-order.md`
 - `docs/universal-production-progress-log.md`
 - `docs/next-session-enterprise-enhancement-checklist.md`
+- `docs/next-session-enterprise-readiness-review-2026-06-19.md`
 
 The checklist is designed so each agent can pick one item, implement it, validate it, update this README when behavior changes, and then mark the item complete.
 
