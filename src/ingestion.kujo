@@ -1,4 +1,4 @@
-from src.common import dict_get_or, str_or
+from src.common import dict_get_or, str_or, sort_strings_asc
 from src.parsers import parse_file
 
 func should_skip_name(name) {
@@ -31,6 +31,7 @@ func should_include_file(path, cfg) {
 
 export discover_files := func(root_path, cfg, recursive) {
 	files := []
+	seen := {}
 	stack := [root_path]
 
 	while len(stack) > 0 {
@@ -47,12 +48,16 @@ export discover_files := func(root_path, cfg, recursive) {
 			}
 
 			if type(err) == "null" {
+				entries = sort_strings_asc(entries)
 				for name in entries {
 					if should_skip_name(name) == false {
 						child := path_join(current, name)
 						if path_is_file(child) {
 							if should_include_file(child, cfg) {
-								files := push(files, child)
+								if has_key(seen, child) == 0 {
+									seen[child] := true
+									files := push(files, child)
+								}
 							}
 						}
 						if recursive == true {
@@ -66,12 +71,15 @@ export discover_files := func(root_path, cfg, recursive) {
 		}
 		if path_is_file(current) {
 			if should_include_file(current, cfg) {
-				files := push(files, current)
+				if has_key(seen, current) == 0 {
+					seen[current] := true
+					files := push(files, current)
+				}
 			}
 		}
 	}
 
-	return files
+	return sort_strings_asc(files)
 }
 
 export ingest_documents := func(root_path, cfg, recursive) {

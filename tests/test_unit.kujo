@@ -1,7 +1,8 @@
-from src.common import tokenize, term_frequency, cosine_similarity, dict_get_or, rank_desc
+from src.common import tokenize, term_frequency, cosine_similarity, dict_get_or, rank_desc, sort_strings_asc
 from src.chunking import chunk_document, chunk_documents
 from src.parsers import parse_file, get_parser_registry
 from src.embeddings import embed_texts, get_embedding_provider_registry
+from src.ingestion import discover_files
 from src.query_api import validate_api_ingest_path, validate_api_auth, parse_api_json_body, get_session_history, append_session_turn, create_ingest_job, set_ingest_job_status, get_ingest_job, resolve_cors_origin, prune_rate_state
 from src.vector_store import load_index
 from src.vector_backend import get_vector_backend_registry, load_index_with_backend, save_index_with_backend
@@ -42,6 +43,13 @@ rank_output := rank_desc(rank_input, "score", 2)
 assert_true(to_bool(len(rank_output) == 2))
 assert_true(to_bool(dict_get_or(rank_output[0], "id", "") == "a"))
 assert_true(to_bool(dict_get_or(rank_output[1], "id", "") == "b"))
+
+sorted_values := sort_strings_asc(["bravo", "alpha", "charlie", "alpha"])
+assert_true(to_bool(len(sorted_values) == 4))
+assert_true(to_bool(sorted_values[0] == "alpha"))
+assert_true(to_bool(sorted_values[1] == "alpha"))
+assert_true(to_bool(sorted_values[2] == "bravo"))
+assert_true(to_bool(sorted_values[3] == "charlie"))
 
 # Retrieval filter tests (RAG-001)
 filter_index := {
@@ -562,6 +570,28 @@ assert_true(to_bool(array_has_value(dict_get_or(metadata_meta, "tags", []), "sou
 if file_exists(metadata_test_path) {
 	delete_file(metadata_test_path)
 }
+
+# Deterministic ingestion discovery tests
+discover_root := "results/test_discover_order_" + to_string(current_timestamp())
+discover_nested := path_join(discover_root, "nested")
+if path_exists(discover_root) == false {
+	create_dir(discover_root)
+}
+if path_exists(discover_nested) == false {
+	create_dir(discover_nested)
+}
+write_file(path_join(discover_root, "zeta.txt"), "z")
+write_file(path_join(discover_root, "alpha.txt"), "a")
+write_file(path_join(discover_nested, "middle.txt"), "m")
+
+discovered_files := discover_files(discover_root, {
+	"ingest_extensions": ["txt"]
+}, true)
+assert_true(to_bool(len(discovered_files) == 3))
+assert_true(to_bool(discovered_files[0] < discovered_files[1]))
+assert_true(to_bool(discovered_files[1] < discovered_files[2]))
+assert_true(to_bool(contains(discovered_files[0], "alpha.txt") == 1))
+assert_true(to_bool(contains(discovered_files[2], "zeta.txt") == 1))
 
 # Index schema migration tests
 if path_exists("results") == false {
