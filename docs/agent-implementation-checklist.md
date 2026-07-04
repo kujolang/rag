@@ -56,7 +56,7 @@ Security and reliability findings to prioritize:
 - Fixed chunk strategy uses coarse line range attribution in [src/chunking.kujo](../src/chunking.kujo#L73) and [src/chunking.kujo](../src/chunking.kujo#L93), reducing citation accuracy.
 - Line-chunk overlap resets with line_start := line_end in [src/chunking.kujo](../src/chunking.kujo#L60), likely producing off-by-one or duplicated boundary context.
 - Retrieval ranks by iterating every chunk key in [src/retrieval.kujo](../src/retrieval.kujo#L121) and uses O(n^2) sort helper in [src/common.kujo](../src/common.kujo#L121), which will not scale to larger corpora.
-- tests use assert_true heavily in [tests/test_unit.kujo](../tests/test_unit.kujo#L7) and [tests/test_integration.kujo](../tests/test_integration.kujo#L18), and current runs emit RUFRUN001 undefined-function warnings (runtime passes, static checks noisy).
+- tests use assert_true heavily in [tests/test_unit.kujo](../tests/test_unit.kujo#L7) and [tests/test_integration.kujo](../tests/test_integration.kujo#L18), and current runs emit KUJORUN001 undefined-function warnings (runtime passes, static checks noisy).
 - data and results are ignored in [.gitignore](../.gitignore#L9), [.gitignore](../.gitignore#L10), but a generated index file currently exists under data; repository hygiene policy should be explicit.
 
 ## Fast-Start Queue (Recommended First 10 Items)
@@ -659,7 +659,7 @@ Primary files:
 
 Implementation expectations:
 - Introduce shared test helpers/assert wrappers compatible with Kujo runtime.
-- Reduce RUFRUN001 noise where feasible.
+- Reduce KUJORUN001 noise where feasible.
 - Keep tests self-contained and deterministic.
 
 Acceptance criteria:
@@ -948,13 +948,13 @@ Completion notes:
 - Tests run: `KUJO_BIN=/path/to/kujo/target/debug/kujo /path/to/kujo/target/debug/kujo run tests/test_non_interpreter_bridge.kujo --interpreter` (pass); `KUJO_BIN=/path/to/kujo/target/debug/kujo /path/to/kujo/target/debug/kujo run scripts/run_tests.kujo --interpreter` (pass); `KUJO_BIN=/path/to/kujo/target/debug/kujo /path/to/kujo/target/debug/kujo run scripts/run_main_auto.kujo --interpreter query --question "What is Kujo optimized for?" --namespace auto_bridge_smoke` (pass with fallback mode)
 - README updated: yes (documented execution bridge usage and non-interpreter bridge test coverage).
 
-### [x] PRD-007: Improve test signal quality by reducing RUFRUN001 warning noise
+### [x] PRD-007: Improve test signal quality by reducing KUJORUN001 warning noise
 
 Why:
 - Large undefined-function warning counts reduce confidence in test diagnostics.
 
 Implementation expectations:
-- Eliminate avoidable RUFRUN001 warnings in core test paths.
+- Eliminate avoidable KUJORUN001 warnings in core test paths.
 - Keep wrappers that report warning counts for regression tracking.
 
 Acceptance criteria:
@@ -967,7 +967,7 @@ Completion notes:
 - Completed on: 2026-05-21
 - Agent: GitHub Copilot (GPT-5.3-Codex)
 - PR/Commit: 47c861b
-- Summary: Added warning-budget baseline controls to `scripts/run_tests.kujo` and introduced `config/test_warning_budget.json` to enforce non-increasing RUFRUN001 warning totals; wrapper output now includes budget status and actual-vs-max comparison metadata.
+- Summary: Added warning-budget baseline controls to `scripts/run_tests.kujo` and introduced `config/test_warning_budget.json` to enforce non-increasing KUJORUN001 warning totals; wrapper output now includes budget status and actual-vs-max comparison metadata.
 - Tests run: `KUJO_BIN=/path/to/kujo/target/debug/kujo /path/to/kujo/target/debug/kujo run scripts/run_tests.kujo --interpreter` (pass); `KUJO_BIN=/path/to/kujo/target/debug/kujo /path/to/kujo/target/debug/kujo run scripts/run_tests.kujo --interpreter | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d.get("ok"), d.get("warning_budget_ok"), d.get("total_warning_count"), d.get("total_undefined_function_warning_count"))'` (pass: `True True 393 393`)
 - README updated: yes (documented warning baseline gate and budget config file).
 

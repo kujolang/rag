@@ -236,7 +236,7 @@ if type(fatal_error) == "null" {
 			stdout := res.stdout
 			stderr := res.stderr
 		}
-		warning_count := count_occurrences(stderr, "RUFRUN001")
+		warning_count := count_occurrences(stderr, "KUJORUN001")
 		undefined_function_warning_count := count_occurrences(stderr, "Undefined Function")
 		total_warning_count = total_warning_count + warning_count
 		total_undefined_function_warning_count = total_undefined_function_warning_count + undefined_function_warning_count
