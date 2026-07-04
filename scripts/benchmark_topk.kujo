@@ -83,7 +83,7 @@ if new_ms > 0 {
 	ratio = to_float(old_ms) / to_float(new_ms)
 }
 
-print(to_json({
+payload := {
 	"ok": rankings_match,
 	"size": size,
 	"top_k": top_k,
@@ -91,7 +91,8 @@ print(to_json({
 	"new_ms": new_ms,
 	"speedup_ratio": ratio,
 	"same_ranking": rankings_match
-}))
+}
+print(to_json(payload))
 
 if rankings_match == false {
 	exit(1)

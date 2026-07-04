@@ -283,7 +283,7 @@ if type(fatal_error) != "null" {
 	all_ok = false
 }
 
-print(to_json({
+payload := {
 	"ok": all_ok,
 	"kujo_bin": kujo_bin,
 	"configured_test_count": len(tests),
@@ -298,7 +298,8 @@ print(to_json({
 	"total_warning_count": total_warning_count,
 	"total_undefined_function_warning_count": total_undefined_function_warning_count,
 	"results": results
-}))
+}
+print(to_json(payload))
 
 if all_ok == false {
 	exit(1)
