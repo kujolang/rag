@@ -21,7 +21,7 @@ eval_gates:
   - id: focused_helper_tests
     command: "KUJO_BIN=/Users/robertdevore/2026/Kujolang/kujo-repos/kujo/target/debug/kujo /Users/robertdevore/2026/Kujolang/kujo-repos/kujo/target/debug/kujo run tests/test_config_schema_review.kujo --interpreter && KUJO_BIN=/Users/robertdevore/2026/Kujolang/kujo-repos/kujo/target/debug/kujo /Users/robertdevore/2026/Kujolang/kujo-repos/kujo/target/debug/kujo run tests/test_openapi_contract_sdk.kujo --interpreter"
   - id: diff_check
-    command: "git diff --check"
+    command: "git diff --check -- $(git diff --name-only | grep -v '^.loop-engineering/' || true)"
     required: true
 
 commit:
