@@ -30,10 +30,7 @@ func ensure_dir(path_value) {
 }
 
 func write_replace_file(path_value, content) {
-	if file_exists(path_value) {
-		delete_file(path_value)
-	}
-	write_file(path_value, content)
+	write_file_atomic(path_value, content, true)
 	return true
 }
 
