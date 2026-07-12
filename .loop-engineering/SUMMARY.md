@@ -10,9 +10,9 @@ blocked
 
 ## Verification
 
-- passed: focused_helper_tests, diff_check, focused_helper_tests, diff_check, focused_helper_tests, diff_check
+- passed: kujo_checks, focused_helper_tests, kujo_checks, focused_helper_tests, kujo_checks, focused_helper_tests
 - blocked: none
-- failed: kujo_checks, kujo_checks, kujo_checks
+- failed: diff_check, diff_check, diff_check
 
 ## Commits
 
