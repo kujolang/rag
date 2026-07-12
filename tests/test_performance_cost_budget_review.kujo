@@ -4,13 +4,6 @@ from src.tests_helpers import assert_true
 kujo_bin := env_or("KUJO_BIN", "/path/to/kujo/target/debug/kujo")
 suffix := to_string(current_timestamp())
 
-func write_text(path, text) {
-	if file_exists(path) {
-		delete_file(path)
-	}
-	write_file(path, text)
-}
-
 benchmark_report_path := "/tmp/kujo_rag_perf_cost_report_" + suffix + ".json"
 policy_path := "/tmp/kujo_rag_perf_cost_policy_" + suffix + ".json"
 policy_fail_path := "/tmp/kujo_rag_perf_cost_policy_fail_" + suffix + ".json"
@@ -21,7 +14,7 @@ trend_path := "/tmp/kujo_rag_perf_cost_trend_" + suffix + ".json"
 output_valid_path := "/tmp/kujo_rag_perf_cost_status_valid_" + suffix + ".json"
 output_fail_path := "/tmp/kujo_rag_perf_cost_status_fail_" + suffix + ".json"
 
-write_text(benchmark_report_path, to_json({
+write_file_atomic(benchmark_report_path, to_json({
 	"ok": true,
 	"generated_at_unix_ms": current_timestamp(),
 	"profiles": [
@@ -32,9 +25,9 @@ write_text(benchmark_report_path, to_json({
 			"dataset": {"materialized_docs": 100}
 		}
 	]
-}))
+}), true)
 
-write_text(policy_path, to_json({
+write_file_atomic(policy_path, to_json({
 	"history_limit": 5,
 	"cost_model": {
 		"cpu_utilization_factor": 1.0,
@@ -58,9 +51,9 @@ write_text(policy_path, to_json({
 			"max_estimated_cost_per_1k_queries_usd": 1000.0
 		}
 	}
-}))
+}), true)
 
-write_text(policy_fail_path, to_json({
+write_file_atomic(policy_fail_path, to_json({
 	"history_limit": 5,
 	"cost_model": {
 		"cpu_utilization_factor": 1.0,
@@ -84,12 +77,12 @@ write_text(policy_fail_path, to_json({
 			"max_estimated_cost_per_1k_queries_usd": 0.01
 		}
 	}
-}))
+}), true)
 
-write_text(doc_path, "# Performance and Cost Budget Gates\n\nRun kujo run scripts/run_performance_cost_budget_review.kujo --interpreter by workload class.\n")
-write_text(release_doc_path, "# Release Process\n\nrun_performance_cost_budget_review.kujo\ndocs/performance-cost-budget-gates.md\n")
-write_text(workflow_path, "name: performance-cost-budget-review\non:\n  schedule:\n    - cron: '0 14 * * 1'\njobs:\n  review:\n    steps:\n      - run: kujo run scripts/run_performance_cost_budget_review.kujo --interpreter\n")
-write_text(trend_path, to_json({"history": []}))
+write_file_atomic(doc_path, "# Performance and Cost Budget Gates\n\nRun kujo run scripts/run_performance_cost_budget_review.kujo --interpreter by workload class.\n", true)
+write_file_atomic(release_doc_path, "# Release Process\n\nrun_performance_cost_budget_review.kujo\ndocs/performance-cost-budget-gates.md\n", true)
+write_file_atomic(workflow_path, "name: performance-cost-budget-review\non:\n  schedule:\n    - cron: '0 14 * * 1'\njobs:\n  review:\n    steps:\n      - run: kujo run scripts/run_performance_cost_budget_review.kujo --interpreter\n", true)
+write_file_atomic(trend_path, to_json({"history": []}), true)
 
 cmd_valid := "KUJO_RAG_PERF_COST_POLICY_PATH=" + policy_path + " KUJO_RAG_PERF_COST_BENCHMARK_REPORT_PATH=" + benchmark_report_path + " KUJO_RAG_PERF_COST_DOC_PATH=" + doc_path + " KUJO_RAG_PERF_COST_RELEASE_PROCESS_DOC_PATH=" + release_doc_path + " KUJO_RAG_PERF_COST_WORKFLOW_PATH=" + workflow_path + " KUJO_RAG_PERF_COST_OUTPUT_PATH=" + output_valid_path + " KUJO_RAG_PERF_COST_TREND_PATH=" + trend_path + " " + kujo_bin + " run scripts/run_performance_cost_budget_review.kujo --interpreter"
 valid_res := execute_status(cmd_valid, {"timeout_ms": 240000})

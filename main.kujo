@@ -12,12 +12,8 @@ func print_lines(lines) {
 	}
 }
 
-func print_json(payload) {
-	print(to_json(payload))
-}
-
 func exit_with_json(payload, status_code) {
-	print_json(payload)
+	print(to_json(payload))
 	exit(status_code)
 }
 
@@ -65,7 +61,7 @@ func command_ingest(parsed, cfg) {
 	active_namespace := dict_get_or(ns_result, "namespace", dict_get_or(cfg, "namespace", "default"))
 
 	result := build_rag_index(path, active_cfg, recursive)
-	print_json({
+	print(to_json({
 		"ok": true,
 		"command": "ingest",
 		"namespace": active_namespace,
@@ -75,7 +71,7 @@ func command_ingest(parsed, cfg) {
 		"summary": dict_get_or(result, "summary", {}),
 		"stats": dict_get_or(dict_get_or(result, "ingest", {}), "stats", {}),
 		"errors": dict_get_or(dict_get_or(result, "ingest", {}), "errors", [])
-	})
+	}))
 }
 
 func command_query(parsed, cfg) {
@@ -106,7 +102,7 @@ func command_query(parsed, cfg) {
 	index := load_or_initialize_index(active_cfg)
 	result := query_rag(index, question, active_cfg, null, null)
 	result["namespace"] := active_namespace
-	print_json(result)
+	print(to_json(result))
 }
 
 func command_demo(cfg) {
@@ -119,13 +115,13 @@ func command_demo(cfg) {
 	index_result := build_rag_index(demo_path, active_cfg, true)
 	index := dict_get_or(index_result, "index", {})
 	result := query_rag(index, question, active_cfg, null, null)
-	print_json({
+	print(to_json({
 		"demo": true,
 		"namespace": active_namespace,
 		"question": question,
 		"answer": dict_get_or(result, "answer", ""),
 		"citations": dict_get_or(result, "citations", [])
-	})
+	}))
 }
 
 func command_serve(parsed, cfg) {
@@ -150,7 +146,7 @@ func command_bootstrap(parsed) {
 	flags := parsed["flags"]
 	target := dict_get_or(flags, "target", "./results/bootstrap_repo")
 	result := bootstrap_repository(target)
-	print_json(result)
+	print(to_json(result))
 }
 
 # Entry point

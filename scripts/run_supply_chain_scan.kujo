@@ -29,17 +29,8 @@ func ensure_dir(path_value) {
 	return true
 }
 
-func write_replace_file(path_value, content) {
-	write_file_atomic(path_value, content, true)
-	return true
-}
-
-func print_json(payload) {
-	print(to_json(payload))
-}
-
 func exit_json(payload) {
-	print_json(payload)
+	print(to_json(payload))
 	exit(1)
 }
 
@@ -356,9 +347,9 @@ output_dir := dirname(output_path)
 if output_dir != "" && output_dir != "." {
 	ensure_dir(output_dir)
 }
-write_replace_file(output_path, to_json(result))
+write_file_atomic(output_path, to_json(result), true)
 
-print_json(result)
+print(to_json(result))
 
 if high_count > 0 {
 	exit(1)

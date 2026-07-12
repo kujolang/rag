@@ -4,13 +4,6 @@ from src.tests_helpers import assert_true
 kujo_bin := env_or("KUJO_BIN", "/path/to/kujo/target/debug/kujo")
 suffix := to_string(current_timestamp())
 
-func write_text(path, text) {
-	if file_exists(path) {
-		delete_file(path)
-	}
-	write_file(path, text)
-}
-
 root_dir := "/tmp/kujo_rag_arch_fitness_" + suffix
 src_dir := root_dir + "/src"
 docs_dir := root_dir + "/docs"
@@ -38,12 +31,12 @@ workflow_path := root_dir + "/architecture-fitness-review.yml"
 output_valid_path := root_dir + "/architecture_fitness_status_valid.json"
 output_invalid_path := root_dir + "/architecture_fitness_status_invalid.json"
 
-write_text(retrieval_path, "from src.common import dict_get_or\n")
-write_text(ingestion_path, "from src.common import normalize_text\n")
-write_text(vector_store_path, "from src.common import write_json_file\n")
-write_text(parsers_path, "export get_parser_registry := func() { return {} }\n")
-write_text(embeddings_path, "export get_embedding_provider_registry := func() { return {} }\n")
-write_text(extension_doc_path, "# Extension Guide\n\nUse registry contracts to add a new parser/provider.\n")
+write_file_atomic(retrieval_path, "from src.common import dict_get_or\n", true)
+write_file_atomic(ingestion_path, "from src.common import normalize_text\n", true)
+write_file_atomic(vector_store_path, "from src.common import write_json_file\n", true)
+write_file_atomic(parsers_path, "export get_parser_registry := func() { return {} }\n", true)
+write_file_atomic(embeddings_path, "export get_embedding_provider_registry := func() { return {} }\n", true)
+write_file_atomic(extension_doc_path, "# Extension Guide\n\nUse registry contracts to add a new parser/provider.\n", true)
 
 valid_rules := {
 	"forbidden_dependencies": [
@@ -75,11 +68,11 @@ valid_rules := {
 		}
 	]
 }
-write_text(rules_path, to_json(valid_rules))
+write_file_atomic(rules_path, to_json(valid_rules), true)
 
-write_text(doc_path, "# Architecture Fitness Functions and Guardrails\n\nThis gate validates forbidden dependencies and extension points.\n\nkujo run scripts/run_architecture_fitness_review.kujo --interpreter\n")
-write_text(release_doc_path, "# Release Process\n\nrun_architecture_fitness_review.kujo\ndocs/architecture-fitness-functions.md\n")
-write_text(workflow_path, "name: architecture-fitness-review\non:\n  schedule:\n    - cron: '0 13 * * 2'\njobs:\n  review:\n    steps:\n      - run: kujo run scripts/run_architecture_fitness_review.kujo --interpreter\n")
+write_file_atomic(doc_path, "# Architecture Fitness Functions and Guardrails\n\nThis gate validates forbidden dependencies and extension points.\n\nkujo run scripts/run_architecture_fitness_review.kujo --interpreter\n", true)
+write_file_atomic(release_doc_path, "# Release Process\n\nrun_architecture_fitness_review.kujo\ndocs/architecture-fitness-functions.md\n", true)
+write_file_atomic(workflow_path, "name: architecture-fitness-review\non:\n  schedule:\n    - cron: '0 13 * * 2'\njobs:\n  review:\n    steps:\n      - run: kujo run scripts/run_architecture_fitness_review.kujo --interpreter\n", true)
 
 valid_cmd := "KUJO_RAG_ARCH_FITNESS_RULES_PATH=" + rules_path + " KUJO_RAG_ARCH_FITNESS_DOC_PATH=" + doc_path + " KUJO_RAG_ARCH_FITNESS_RELEASE_PROCESS_DOC_PATH=" + release_doc_path + " KUJO_RAG_ARCH_FITNESS_WORKFLOW_PATH=" + workflow_path + " KUJO_RAG_ARCH_FITNESS_OUTPUT_PATH=" + output_valid_path + " " + kujo_bin + " run scripts/run_architecture_fitness_review.kujo --interpreter"
 valid_res := execute_status(valid_cmd, {"timeout_ms": 240000})
@@ -92,7 +85,7 @@ valid_gates := dict_get_or(valid_payload, "gates", {})
 assert_true(to_bool(dict_get_or(valid_gates, "forbidden_dependencies_enforced", false) == true))
 assert_true(to_bool(dict_get_or(valid_gates, "required_extension_points_enforced", false) == true))
 
-write_text(retrieval_path, "from src.query_api import handle_query\n")
+write_file_atomic(retrieval_path, "from src.query_api import handle_query\n", true)
 
 invalid_cmd := "KUJO_RAG_ARCH_FITNESS_RULES_PATH=" + rules_path + " KUJO_RAG_ARCH_FITNESS_DOC_PATH=" + doc_path + " KUJO_RAG_ARCH_FITNESS_RELEASE_PROCESS_DOC_PATH=" + release_doc_path + " KUJO_RAG_ARCH_FITNESS_WORKFLOW_PATH=" + workflow_path + " KUJO_RAG_ARCH_FITNESS_OUTPUT_PATH=" + output_invalid_path + " " + kujo_bin + " run scripts/run_architecture_fitness_review.kujo --interpreter"
 invalid_res := execute_status(invalid_cmd, {"timeout_ms": 240000})

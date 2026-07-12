@@ -8,12 +8,8 @@ func shell_quote(value) {
 	return "'" + escaped + "'"
 }
 
-func print_json(payload) {
-	print(to_json(payload))
-}
-
 func exit_json(payload) {
-	print_json(payload)
+	print(to_json(payload))
 	exit(1)
 }
 
@@ -62,23 +58,23 @@ native_cmd := kujo_bin + " run main.kujo " + arg_str
 native_result := run_command(native_cmd)
 
 if dict_get_or(native_result, "ok", false) == true {
-	print_json({
+	print(to_json({
 		"ok": true,
 		"mode": "native",
 		"result": native_result
-	})
+	}))
 	exit(0)
 }
 
 interp_cmd := kujo_bin + " run main.kujo --interpreter " + arg_str
 interp_result := run_command(interp_cmd)
 
-print_json({
+print(to_json({
 	"ok": dict_get_or(interp_result, "ok", false),
 	"mode": "interpreter",
 	"native_result": native_result,
 	"result": interp_result
-})
+}))
 
 if dict_get_or(interp_result, "ok", false) == false {
 	exit(1)

@@ -2,12 +2,8 @@ func default_backup_dir() {
 	return "results/backups/backup-" + to_string(current_timestamp())
 }
 
-func print_json(payload) {
-	print(to_json(payload))
-}
-
 func exit_json(payload) {
-	print_json(payload)
+	print(to_json(payload))
 	exit(1)
 }
 
@@ -102,13 +98,13 @@ func main() {
 	}
 
 	write_file(manifest_path, to_json(manifest))
-	print_json({
+	print(to_json({
 		"ok": true,
 		"backup_dir": output_dir,
 		"manifest": manifest_path,
 		"index_backup": index_backup,
 		"config_backup": config_backup
-	})
+	}))
 }
 
 main()

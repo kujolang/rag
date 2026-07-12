@@ -281,32 +281,17 @@ func write_checksums_file(path_value, manifest, manifest_path) {
 	manifest_hash := sha256(read_file(manifest_path))
 	lines = push(lines, manifest_hash + "  " + manifest_path)
 
-	if file_exists(path_value) {
-		delete_file(path_value)
-	}
-	write_file(path_value, join(lines, "\n") + "\n")
+	write_file_atomic(path_value, join(lines, "\n") + "\n", true)
 	return true
-}
-
-func write_replace_file(path_value, content) {
-	if file_exists(path_value) {
-		delete_file(path_value)
-	}
-	write_file(path_value, content)
-	return true
-}
-
-func print_json(payload) {
-	print(to_json(payload))
 }
 
 func fail_json(error_code, message, details) {
-	print_json({
+	print(to_json({
 		"ok": false,
 		"error": error_code,
 		"message": message,
 		"details": details
-	})
+	}))
 	exit(1)
 }
 
@@ -371,12 +356,12 @@ if len(files) == 0 {
 
 manifest := build_manifest(version, notes_path, files)
 sbom := build_cyclonedx_sbom(version, manifest)
-write_replace_file(manifest_path, to_json(manifest))
-write_replace_file(sbom_path, to_json(sbom))
+write_file_atomic(manifest_path, to_json(manifest), true)
+write_file_atomic(sbom_path, to_json(sbom), true)
 write_checksums_file(checksums_path, manifest, manifest_path)
-write_replace_file(notes_copy_path, read_file(notes_path))
+write_file_atomic(notes_copy_path, read_file(notes_path), true)
 
-print_json({
+print(to_json({
 	"ok": true,
 	"release_version": version,
 	"release_tag": release_tag,
@@ -388,4 +373,4 @@ print_json({
 	"release_notes_artifact_path": notes_copy_path,
 	"file_count": len(dict_get_or(manifest, "files", [])),
 	"created_at_unix_ms": dict_get_or(manifest, "created_at_unix_ms", 0)
-})
+}))

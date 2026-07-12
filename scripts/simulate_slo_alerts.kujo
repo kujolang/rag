@@ -1,11 +1,7 @@
 from src.common import dict_get_or
 
-func print_json(payload) {
-	print(to_json(payload))
-}
-
 func exit_json(payload) {
-	print_json(payload)
+	print(to_json(payload))
 	exit(1)
 }
 
@@ -168,11 +164,11 @@ func main() {
 		overall = "alert"
 	}
 
-	print_json({
+	print(to_json({
 		"ok": true,
 		"overall": overall,
 		"alerts": alerts
-	})
+	}))
 }
 
 main()

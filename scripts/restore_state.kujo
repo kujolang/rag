@@ -1,11 +1,7 @@
 from src.common import dict_get_or
 
-func print_json(payload) {
-	print(to_json(payload))
-}
-
 func exit_json(payload) {
-	print_json(payload)
+	print(to_json(payload))
 	exit(1)
 }
 
@@ -112,14 +108,14 @@ func main() {
 	write_file(target_index, read_file(index_backup))
 	write_file(target_config, read_file(config_backup))
 
-	print_json({
+	print(to_json({
 		"ok": true,
 		"restored": {
 			"index": target_index,
 			"config": target_config
 		},
 		"verified": true
-	})
+	}))
 }
 
 main()
