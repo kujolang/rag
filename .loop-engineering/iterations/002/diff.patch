@@ -1,63 +1,139 @@
 diff --git a/.loop-engineering/iterations/001/context.md b/.loop-engineering/iterations/001/context.md
-index 53ba35e..ee4c7c2 100644
+index ee4c7c2..41ee6d7 100644
 --- a/.loop-engineering/iterations/001/context.md
 +++ b/.loop-engineering/iterations/001/context.md
 @@ -1,6 +1,6 @@
  # Context
  
  - objective: Audit HLP-011 and HLP-015 RAG configuration and JSON output helpers, replacing pure serialization wrappers while retaining policy-bearing normalization and file helpers.
--- git_head: 3b20437
-+- git_head: d6e5616
+-- git_head: d6e5616
++- git_head: 0ceea34
  - changed_files:
    - none
 diff --git a/.loop-engineering/iterations/001/diff.patch b/.loop-engineering/iterations/001/diff.patch
-index e69de29..8e6093f 100644
+index 8e6093f..6ad8825 100644
 --- a/.loop-engineering/iterations/001/diff.patch
 +++ b/.loop-engineering/iterations/001/diff.patch
-@@ -0,0 +1,12 @@
-+diff --git a/.loop-engineering/iterations/001/context.md b/.loop-engineering/iterations/001/context.md
-+index 53ba35e..ee4c7c2 100644
-+--- a/.loop-engineering/iterations/001/context.md
-++++ b/.loop-engineering/iterations/001/context.md
-+@@ -1,6 +1,6 @@
-+ # Context
-+ 
-+ - objective: Audit HLP-011 and HLP-015 RAG configuration and JSON output helpers, replacing pure serialization wrappers while retaining policy-bearing normalization and file helpers.
-+-- git_head: 3b20437
-++- git_head: d6e5616
-+ - changed_files:
-+   - none
+@@ -1,12 +1,29 @@
+ diff --git a/.loop-engineering/iterations/001/context.md b/.loop-engineering/iterations/001/context.md
+-index 53ba35e..ee4c7c2 100644
++index ee4c7c2..41ee6d7 100644
+ --- a/.loop-engineering/iterations/001/context.md
+ +++ b/.loop-engineering/iterations/001/context.md
+ @@ -1,6 +1,6 @@
+  # Context
+  
+  - objective: Audit HLP-011 and HLP-015 RAG configuration and JSON output helpers, replacing pure serialization wrappers while retaining policy-bearing normalization and file helpers.
+--- git_head: 3b20437
+-+- git_head: d6e5616
++-- git_head: d6e5616
+++- git_head: 0ceea34
+  - changed_files:
+    - none
++diff --git a/.loop-engineering/iterations/001/diff.patch b/.loop-engineering/iterations/001/diff.patch
++index 8e6093f..e69de29 100644
++--- a/.loop-engineering/iterations/001/diff.patch
+++++ b/.loop-engineering/iterations/001/diff.patch
++@@ -1,12 +0,0 @@
++-diff --git a/.loop-engineering/iterations/001/context.md b/.loop-engineering/iterations/001/context.md
++-index 53ba35e..ee4c7c2 100644
++---- a/.loop-engineering/iterations/001/context.md
++-+++ b/.loop-engineering/iterations/001/context.md
++-@@ -1,6 +1,6 @@
++- # Context
++- 
++- - objective: Audit HLP-011 and HLP-015 RAG configuration and JSON output helpers, replacing pure serialization wrappers while retaining policy-bearing normalization and file helpers.
++--- git_head: 3b20437
++-+- git_head: d6e5616
++- - changed_files:
++-   - none
 diff --git a/.loop-engineering/iterations/002/context.md b/.loop-engineering/iterations/002/context.md
-index 53ba35e..45e58f9 100644
+index 45e58f9..b0a4c9e 100644
 --- a/.loop-engineering/iterations/002/context.md
 +++ b/.loop-engineering/iterations/002/context.md
-@@ -1,6 +1,7 @@
+@@ -1,7 +1,7 @@
  # Context
  
  - objective: Audit HLP-011 and HLP-015 RAG configuration and JSON output helpers, replacing pure serialization wrappers while retaining policy-bearing normalization and file helpers.
--- git_head: 3b20437
-+- git_head: d6e5616
+-- git_head: d6e5616
++- git_head: 0ceea34
  - changed_files:
--  - none
-+  - .loop-engineering/iterations/001/context.md
-+  - .loop-engineering/iterations/001/diff.patch
+   - .loop-engineering/iterations/001/context.md
+   - .loop-engineering/iterations/001/diff.patch
 diff --git a/.loop-engineering/iterations/002/diff.patch b/.loop-engineering/iterations/002/diff.patch
-index d1c2beb..e69de29 100644
+index 2d4a921..e69de29 100644
 --- a/.loop-engineering/iterations/002/diff.patch
 +++ b/.loop-engineering/iterations/002/diff.patch
-@@ -1,7 +0,0 @@
+@@ -1,64 +0,0 @@
+-diff --git a/.loop-engineering/iterations/001/context.md b/.loop-engineering/iterations/001/context.md
+-index 53ba35e..ee4c7c2 100644
+---- a/.loop-engineering/iterations/001/context.md
+-+++ b/.loop-engineering/iterations/001/context.md
+-@@ -1,6 +1,6 @@
+- # Context
+- 
+- - objective: Audit HLP-011 and HLP-015 RAG configuration and JSON output helpers, replacing pure serialization wrappers while retaining policy-bearing normalization and file helpers.
+--- git_head: 3b20437
+-+- git_head: d6e5616
+- - changed_files:
+-   - none
+-diff --git a/.loop-engineering/iterations/001/diff.patch b/.loop-engineering/iterations/001/diff.patch
+-index e69de29..8e6093f 100644
+---- a/.loop-engineering/iterations/001/diff.patch
+-+++ b/.loop-engineering/iterations/001/diff.patch
+-@@ -0,0 +1,12 @@
+-+diff --git a/.loop-engineering/iterations/001/context.md b/.loop-engineering/iterations/001/context.md
+-+index 53ba35e..ee4c7c2 100644
+-+--- a/.loop-engineering/iterations/001/context.md
+-++++ b/.loop-engineering/iterations/001/context.md
+-+@@ -1,6 +1,6 @@
+-+ # Context
+-+ 
+-+ - objective: Audit HLP-011 and HLP-015 RAG configuration and JSON output helpers, replacing pure serialization wrappers while retaining policy-bearing normalization and file helpers.
+-+-- git_head: 3b20437
+-++- git_head: d6e5616
+-+ - changed_files:
+-+   - none
+-diff --git a/.loop-engineering/iterations/002/context.md b/.loop-engineering/iterations/002/context.md
+-index 53ba35e..45e58f9 100644
+---- a/.loop-engineering/iterations/002/context.md
+-+++ b/.loop-engineering/iterations/002/context.md
+-@@ -1,6 +1,7 @@
+- # Context
+- 
+- - objective: Audit HLP-011 and HLP-015 RAG configuration and JSON output helpers, replacing pure serialization wrappers while retaining policy-bearing normalization and file helpers.
+--- git_head: 3b20437
+-+- git_head: d6e5616
+- - changed_files:
+--  - none
+-+  - .loop-engineering/iterations/001/context.md
+-+  - .loop-engineering/iterations/001/diff.patch
+-diff --git a/.loop-engineering/iterations/002/diff.patch b/.loop-engineering/iterations/002/diff.patch
+-index d1c2beb..e69de29 100644
+---- a/.loop-engineering/iterations/002/diff.patch
+-+++ b/.loop-engineering/iterations/002/diff.patch
+-@@ -1,7 +0,0 @@
+--diff --git a/.loop-engineering/ledger.tsv b/.loop-engineering/ledger.tsv
+--index dafd866..4c16fa3 100644
+----- a/.loop-engineering/ledger.tsv
+--+++ b/.loop-engineering/ledger.tsv
+--@@ -1 +1,2 @@
+-- iteration	action	verdict	progress	evidence	justification
+--+001	configured-gates	failed	0	iterations/001/eval.log	required gate failed
 -diff --git a/.loop-engineering/ledger.tsv b/.loop-engineering/ledger.tsv
--index dafd866..4c16fa3 100644
+-index 58d34e4..e44f278 100644
 ---- a/.loop-engineering/ledger.tsv
 -+++ b/.loop-engineering/ledger.tsv
--@@ -1 +1,2 @@
-- iteration	action	verdict	progress	evidence	justification
+-@@ -2,3 +2,4 @@ iteration	action	verdict	progress	evidence	justification
+- 001	configured-gates	failed	0	iterations/001/eval.log	required gate failed
+- 002	configured-gates	failed	0	iterations/002/eval.log	required gate failed
+- 003	configured-gates	failed	0	iterations/003/eval.log	required gate failed
 -+001	configured-gates	failed	0	iterations/001/eval.log	required gate failed
 diff --git a/.loop-engineering/ledger.tsv b/.loop-engineering/ledger.tsv
-index 58d34e4..e44f278 100644
+index 3bfd30d..73e4200 100644
 --- a/.loop-engineering/ledger.tsv
 +++ b/.loop-engineering/ledger.tsv
-@@ -2,3 +2,4 @@ iteration	action	verdict	progress	evidence	justification
+@@ -5,3 +5,4 @@ iteration	action	verdict	progress	evidence	justification
  001	configured-gates	failed	0	iterations/001/eval.log	required gate failed
  002	configured-gates	failed	0	iterations/002/eval.log	required gate failed
  003	configured-gates	failed	0	iterations/003/eval.log	required gate failed
