@@ -17,7 +17,7 @@ blocked_actions:
 
 eval_gates:
   - id: kujo_checks
-    command: "for f in main.kujo src/*.kujo scripts/*.kujo tests/test_config_schema_review.kujo tests/test_openapi_contract_sdk.kujo tests/test_architecture_fitness_review.kujo tests/test_performance_cost_budget_review.kujo; do /Users/robertdevore/2026/Kujolang/kujo-repos/kujo/target/debug/kujo check \"$f\" >/dev/null || exit 1; done"
+    command: "for f in main.kujo src/*.kujo scripts/*.kujo tests/test_config_schema_review.kujo tests/test_openapi_contract_sdk.kujo tests/test_architecture_fitness_review.kujo tests/test_performance_cost_budget_review.kujo; do /Users/robertdevore/2026/Kujolang/kujo-repos/kujo/target/debug/kujo check $f >/dev/null || exit 1; done"
   - id: focused_helper_tests
     command: "KUJO_BIN=/Users/robertdevore/2026/Kujolang/kujo-repos/kujo/target/debug/kujo /Users/robertdevore/2026/Kujolang/kujo-repos/kujo/target/debug/kujo run tests/test_config_schema_review.kujo --interpreter && KUJO_BIN=/Users/robertdevore/2026/Kujolang/kujo-repos/kujo/target/debug/kujo /Users/robertdevore/2026/Kujolang/kujo-repos/kujo/target/debug/kujo run tests/test_openapi_contract_sdk.kujo --interpreter"
   - id: diff_check
