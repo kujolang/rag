@@ -24,7 +24,7 @@ success
 
 ## External Blockers
 
-- none
+- typed-env-default-contract: Define optional/default typed-env primitives or a documented fallback contract, then migrate the remaining config normalization with compatibility fixtures.
 
 ## Next Start
 
