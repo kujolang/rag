@@ -2,25 +2,25 @@
 
 ## Verdict
 
-not-run
+blocked
 
 ## Completed
 
-- none
+- configured loop run completed through iteration 3
 
 ## Verification
 
-- passed: none
+- passed: focused_helper_tests, diff_check, focused_helper_tests, diff_check, focused_helper_tests, diff_check
 - blocked: none
-- failed: none
+- failed: kujo_checks, kujo_checks, kujo_checks
 
 ## Commits
 
-- none
+- Loop engineering: Audit HLP-011 and HLP-015 RAG configuration and JSON output helpers, replacing pure serialization wrappers while retaining policy-bearing normalization and file helpers.
 
 ## Remaining
 
-- configure objective/checklist_file in loop.yml
+- none
 
 ## External Blockers
 
@@ -28,4 +28,4 @@ not-run
 
 ## Next Start
 
-- scripts/run-workflow.sh --config .loop-engineering/loop.yml
+- repeated-failure: required gate failed 3 times
