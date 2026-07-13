@@ -1,63 +1,80 @@
 diff --git a/.loop-engineering/iterations/001/context.md b/.loop-engineering/iterations/001/context.md
-index c818bf7..499893e 100644
+index 499893e..bd04308 100644
 --- a/.loop-engineering/iterations/001/context.md
 +++ b/.loop-engineering/iterations/001/context.md
 @@ -1,6 +1,6 @@
  # Context
  
  - objective: Audit HLP-011 and HLP-015 RAG configuration and JSON output helpers, replacing pure serialization wrappers while retaining policy-bearing normalization and file helpers.
--- git_head: 4fbc285
-+- git_head: 727836f
+-- git_head: 727836f
++- git_head: e5156ba
  - changed_files:
    - none
 diff --git a/.loop-engineering/iterations/001/diff.patch b/.loop-engineering/iterations/001/diff.patch
-index acdbb16..e69de29 100644
+index 20262af..e69de29 100644
 --- a/.loop-engineering/iterations/001/diff.patch
 +++ b/.loop-engineering/iterations/001/diff.patch
-@@ -1,46 +0,0 @@
+@@ -1,63 +0,0 @@
 -diff --git a/.loop-engineering/iterations/001/context.md b/.loop-engineering/iterations/001/context.md
--index 41ee6d7..c818bf7 100644
+-index c818bf7..499893e 100644
 ---- a/.loop-engineering/iterations/001/context.md
 -+++ b/.loop-engineering/iterations/001/context.md
 -@@ -1,6 +1,6 @@
 - # Context
 - 
 - - objective: Audit HLP-011 and HLP-015 RAG configuration and JSON output helpers, replacing pure serialization wrappers while retaining policy-bearing normalization and file helpers.
---- git_head: 0ceea34
--+- git_head: 4fbc285
+--- git_head: 4fbc285
+-+- git_head: 727836f
 - - changed_files:
 -   - none
 -diff --git a/.loop-engineering/iterations/001/diff.patch b/.loop-engineering/iterations/001/diff.patch
--index 6ad8825..e69de29 100644
+-index acdbb16..e69de29 100644
 ---- a/.loop-engineering/iterations/001/diff.patch
 -+++ b/.loop-engineering/iterations/001/diff.patch
--@@ -1,29 +0,0 @@
+-@@ -1,46 +0,0 @@
 --diff --git a/.loop-engineering/iterations/001/context.md b/.loop-engineering/iterations/001/context.md
---index ee4c7c2..41ee6d7 100644
+--index 41ee6d7..c818bf7 100644
 ----- a/.loop-engineering/iterations/001/context.md
 --+++ b/.loop-engineering/iterations/001/context.md
 --@@ -1,6 +1,6 @@
 -- # Context
 -- 
 -- - objective: Audit HLP-011 and HLP-015 RAG configuration and JSON output helpers, replacing pure serialization wrappers while retaining policy-bearing normalization and file helpers.
----- git_head: d6e5616
---+- git_head: 0ceea34
+---- git_head: 0ceea34
+--+- git_head: 4fbc285
 -- - changed_files:
 --   - none
 --diff --git a/.loop-engineering/iterations/001/diff.patch b/.loop-engineering/iterations/001/diff.patch
---index 8e6093f..e69de29 100644
+--index 6ad8825..e69de29 100644
 ----- a/.loop-engineering/iterations/001/diff.patch
 --+++ b/.loop-engineering/iterations/001/diff.patch
---@@ -1,12 +0,0 @@
+--@@ -1,29 +0,0 @@
 ---diff --git a/.loop-engineering/iterations/001/context.md b/.loop-engineering/iterations/001/context.md
----index 53ba35e..ee4c7c2 100644
+---index ee4c7c2..41ee6d7 100644
 ------ a/.loop-engineering/iterations/001/context.md
 ---+++ b/.loop-engineering/iterations/001/context.md
 ---@@ -1,6 +1,6 @@
 --- # Context
 --- 
 --- - objective: Audit HLP-011 and HLP-015 RAG configuration and JSON output helpers, replacing pure serialization wrappers while retaining policy-bearing normalization and file helpers.
------ git_head: 3b20437
----+- git_head: d6e5616
+----- git_head: d6e5616
+---+- git_head: 0ceea34
 --- - changed_files:
 ---   - none
+---diff --git a/.loop-engineering/iterations/001/diff.patch b/.loop-engineering/iterations/001/diff.patch
+---index 8e6093f..e69de29 100644
+------ a/.loop-engineering/iterations/001/diff.patch
+---+++ b/.loop-engineering/iterations/001/diff.patch
+---@@ -1,12 +0,0 @@
+----diff --git a/.loop-engineering/iterations/001/context.md b/.loop-engineering/iterations/001/context.md
+----index 53ba35e..ee4c7c2 100644
+------- a/.loop-engineering/iterations/001/context.md
+----+++ b/.loop-engineering/iterations/001/context.md
+----@@ -1,6 +1,6 @@
+---- # Context
+---- 
+---- - objective: Audit HLP-011 and HLP-015 RAG configuration and JSON output helpers, replacing pure serialization wrappers while retaining policy-bearing normalization and file helpers.
+------ git_head: 3b20437
+----+- git_head: d6e5616
+---- - changed_files:
+----   - none
