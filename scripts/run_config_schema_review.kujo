@@ -46,18 +46,6 @@ func text_has_token(text, token) {
 	return count_occurrences(text, token) > 0
 }
 
-func env_bool_default(name, default_value) {
-	raw := env(name)
-	if type(raw) == "null" || trim(to_string(raw)) == "" {
-		return default_value
-	}
-	try {
-		return env_bool(name)
-	} except err {
-		return default_value
-	}
-}
-
 func sort_strings_asc(values) {
 	arr := []
 	index := 0
@@ -295,7 +283,7 @@ examples_path := env_or("KUJO_RAG_CONFIG_VALIDATION_EXAMPLES_PATH", "./config/co
 release_process_doc_path := env_or("KUJO_RAG_CONFIG_SCHEMA_RELEASE_PROCESS_DOC_PATH", "./docs/release-process.md")
 workflow_path := env_or("KUJO_RAG_CONFIG_SCHEMA_WORKFLOW_PATH", "./.github/workflows/config-schema-review.yml")
 output_path := env_or("KUJO_RAG_CONFIG_SCHEMA_OUTPUT_PATH", "./results/config/config_schema_review_status.json")
-regenerate := env_bool_default("KUJO_RAG_CONFIG_SCHEMA_REGENERATE", false)
+regenerate := env_bool("KUJO_RAG_CONFIG_SCHEMA_REGENERATE", false)
 
 _ = ensure_parent_dir(schema_json_path)
 _ = ensure_parent_dir(schema_doc_path)

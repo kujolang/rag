@@ -45,18 +45,6 @@ func text_has_token(text, token) {
 	return count_occurrences(text, token) > 0
 }
 
-func env_bool_default(name, default_value) {
-	raw := env(name)
-	if type(raw) == "null" || trim(to_string(raw)) == "" {
-		return default_value
-	}
-	try {
-		return env_bool(name)
-	} except err {
-		return default_value
-	}
-}
-
 func get_operation(paths_obj, path_value, method_value) {
 	path_obj := dict_get_or(paths_obj, path_value, {})
 	if type(path_obj) != "dict" {
@@ -146,7 +134,7 @@ output_path := env_or("KUJO_RAG_OPENAPI_OUTPUT_PATH", "./results/api/openapi_con
 workflow_doc_path := env_or("KUJO_RAG_OPENAPI_WORKFLOW_DOC_PATH", "./docs/openapi-contract-sdk.md")
 release_process_doc_path := env_or("KUJO_RAG_RELEASE_PROCESS_DOC_PATH", "./docs/release-process.md")
 workflow_path := env_or("KUJO_RAG_OPENAPI_WORKFLOW_PATH", "./.github/workflows/openapi-contract-review.yml")
-regenerate_sdk := env_bool_default("KUJO_RAG_OPENAPI_REGENERATE", false)
+regenerate_sdk := env_bool("KUJO_RAG_OPENAPI_REGENERATE", false)
 
 _ = ensure_parent_dir(output_path)
 _ = ensure_parent_dir(sdk_path)
