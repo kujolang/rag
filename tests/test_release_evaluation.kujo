@@ -2,6 +2,10 @@ from src.release_eval import run_release_evaluation
 from src.common import dict_get_or
 from src.tests_helpers import assert_true
 
+if file_exists("./results/test_release_eval_index.json") {
+	delete_file("./results/test_release_eval_index.json")
+}
+
 result := run_release_evaluation({
 	"golden_queries_path": "./config/release_eval_golden_queries.json",
 	"thresholds_path": "./config/release_eval_thresholds.json",
