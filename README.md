@@ -1,6 +1,6 @@
 # RAG Starter Kit
 
-[![Version](https://img.shields.io/badge/version-1.0.0-black)](https://github.com/kujolang/rag)
+[![Version](https://img.shields.io/badge/version-0.1.0-black)](https://github.com/kujolang/rag)
 [![License](https://img.shields.io/badge/license-MIT-lightgrey)](LICENSE)
 [![built with Kujo](https://img.shields.io/badge/built%20with-Kujo-white.svg)](https://github.com/kujolang/kujo)
 
@@ -28,7 +28,7 @@ No Python runtime or Python package tooling is required.
 
 ## Enterprise Readiness Posture
 
-Kujo RAG is designed as a local-first, production-oriented starter kit rather than a one-size-fits-all managed service. The repository includes strict production configuration checks, bearer/JWT-proxy auth modes, namespace isolation, RBAC, audit logging, redaction, rate limiting, retention/legal-hold controls, backup/restore workflows, OpenAPI/SDK validation, release gates, and operational runbooks.
+Kujo RAG is designed as a local-first, production-conscious starter kit rather than a one-size-fits-all managed service. The repository includes strict production configuration checks, bearer/JWT-proxy auth modes, namespace isolation, RBAC, audit logging, redaction, rate limiting, retention/legal-hold controls, backup/restore workflows, OpenAPI/SDK validation, release gates, and operational runbooks.
 
 For production deployments, enable strict mode with `KUJO_RAG_STRICT_CONFIG=true` or `KUJO_RAG_ENV=production`, set a non-default namespace and index path, configure authentication, scope ingest roots, and enable at-rest encryption. Deployment teams should still validate workload-specific latency/cost budgets, external vector backend behavior, compliance controls, and release gates before exposing the API beyond a trusted network.
 

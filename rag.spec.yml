@@ -1,0 +1,65 @@
+# Spec - RAG launch readiness review
+
+name: "RAG launch readiness review"
+goal: "Keep Kujo RAG locally release-ready as an offline-first retrieval starter kit with deterministic ingestion, query, API, security, and release-evaluation gates."
+version: "0.1.0"
+background: "RAG is part of the Kujo prelaunch ecosystem review. Its proven scope is local/offline starter-kit behavior and production-conscious controls; target-environment deployment remains external."
+scope: "Repository-local CLI behavior, offline ingest/query demo, test runner, release evaluation, OpenAPI contract review, security checks, metadata parity, and launch evidence capture."
+non_goals:
+  - "Publishing packages or public releases"
+  - "Deploying hosted RAG services"
+  - "Claiming production or enterprise readiness without target-environment validation"
+relevant_systems:
+  - "Kujo runtime"
+  - "RAG CLI"
+  - "offline hash embeddings"
+  - "local JSON vector index"
+  - "prelaunch launch evidence packet"
+likely_files:
+  - "README.md"
+  - "main.kujo"
+  - "src/"
+  - "scripts/run_tests.kujo"
+  - "docs/release-process.md"
+acceptance_criteria:
+  - "README version and readiness wording match repository metadata and proof scope."
+  - "Offline ingest/query flow works without live provider credentials."
+  - "Unit, integration, security, API contract, and release evaluation gates pass locally."
+  - "Eval launch suite proves help, metadata, and deterministic offline behavior."
+  - "Production deployment proof is recorded as target-environment work."
+eval_requirements:
+  - description: "Run core local tests."
+    check_type: "command"
+    params:
+      command: "kujo run tests/test_unit.kujo --interpreter && kujo run tests/test_integration.kujo --interpreter && kujo run tests/test_security.kujo --interpreter && kujo run tests/test_api_contract.kujo --interpreter"
+  - description: "Run aggregate test runner."
+    check_type: "command"
+    params:
+      command: "kujo run scripts/run_tests.kujo --interpreter"
+  - description: "Run release evaluation and OpenAPI contract review."
+    check_type: "command"
+    params:
+      command: "kujo run scripts/run_release_evaluation.kujo --interpreter && kujo run scripts/run_openapi_contract_review.kujo --interpreter"
+risks:
+  - risk: "Production readiness can be overstated if local offline gates are treated as deployment proof."
+    mitigation: "Keep readiness wording limited to local/CI proof and require target-environment validation for production claims."
+    severity: "high"
+  - risk: "Live AI provider/vector backend behavior can drift from offline hash/local JSON proof."
+    mitigation: "Keep provider/backend proof external unless credentials and target infrastructure are available."
+    severity: "medium"
+dependencies:
+  - "kujo on PATH"
+  - "Offline hash embeddings and local JSON backend"
+  - "Live provider credentials only for external provider proof"
+review_expectations:
+  - "Review release gate outputs, OpenAPI artifacts, and security controls before sign-off."
+  - "Review deployment-specific auth, TLS, rate limiting, storage, and observability in the target environment."
+human_approval_points:
+  - "Before publishing packages or public releases"
+  - "Before hosted deployment or production readiness claims"
+  - "Before validating live provider credentials"
+priority: "high"
+tags:
+  - "kujo"
+  - "rag"
+  - "launch-readiness"

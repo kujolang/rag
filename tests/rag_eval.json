@@ -1,0 +1,34 @@
+{
+  "name": "rag-launch-readiness",
+  "version": "0.1.0",
+  "tests": [
+    {
+      "name": "RAG help command succeeds",
+      "check": "command_succeeds",
+      "params": {
+        "command": "cd /Users/robertdevore/2026/Kujolang/kujo-repos/rag && kujo run main.kujo --interpreter help"
+      }
+    },
+    {
+      "name": "RAG demo succeeds offline",
+      "check": "command_succeeds",
+      "params": {
+        "command": "cd /Users/robertdevore/2026/Kujolang/kujo-repos/rag && kujo run main.kujo --interpreter demo"
+      }
+    },
+    {
+      "name": "RAG package metadata exists",
+      "check": "file_exists",
+      "params": {
+        "path": "kennel.toml"
+      }
+    },
+    {
+      "name": "RAG project metadata exists",
+      "check": "file_exists",
+      "params": {
+        "path": "kujo.toml"
+      }
+    }
+  ]
+}
