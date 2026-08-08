@@ -1,6 +1,6 @@
 # RAG Starter Kit
 
-[![Version](https://img.shields.io/badge/version-0.1.0-black)](https://github.com/kujolang/rag)
+[![Version](https://img.shields.io/badge/version-1.0.0-black)](https://github.com/kujolang/rag)
 [![License](https://img.shields.io/badge/license-MIT-lightgrey)](LICENSE)
 [![built with Kujo](https://img.shields.io/badge/built%20with-Kujo-white.svg)](https://github.com/kujolang/kujo)
 
@@ -813,7 +813,7 @@ KUJO_BIN=/absolute/path/to/kujo kujo run scripts/run_connector_ingest.kujo --int
 
 ## Readiness Status
 
-Current status: verified locally with enforced release gates and offline fallback behavior.
+Current status: stable 1.0 local-first retrieval with enforced release gates and offline fallback behavior.
 
 Runtime support declarations are tracked in `docs/runtime-support-matrix.md`, including supported and unsupported execution combinations and CI validation expectations.
 

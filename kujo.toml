@@ -2,7 +2,7 @@
 
 [project]
 name = "rag"
-version = "0.1.0"
+version = "1.0.0"
 description = "Local-first Kujo RAG starter kit with offline indexing, retrieval, and API proof gates."
 
 [kujo]
