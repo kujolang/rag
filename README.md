@@ -684,7 +684,7 @@ Test harness notes:
 - release-gate coverage lives in `tests/test_release_evaluation.kujo` (golden-query quality/latency/error thresholds)
 - `scripts/run_tests.kujo` reports per-suite warning counts to make runtime/type-checking noise easier to track over time
 - `scripts/run_tests.kujo` enforces warning-budget baselines from `config/test_warning_budget.json`
-- `scripts/run_tests.kujo` includes a CI-ready release gate stage via `tests/test_release_evaluation.kujo`
+- `scripts/run_tests.kujo` runs every tracked `tests/test_*.kujo` suite by default, including the CI-ready release gate stage in `tests/test_release_evaluation.kujo`
 - `scripts/run_tests.kujo` preflight-validates `KUJO_BIN` and fails fast with structured `fatal_error` output when the binary does not support `run`
 - `scripts/run_tests.kujo` supports targeted subsets with `KUJO_RAG_TEST_FILES=<comma-separated-test-paths>` for faster local loops
 
