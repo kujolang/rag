@@ -78,7 +78,7 @@
         ".env.example"
       ],
       "process": [
-        "docs/audit-logging.md"
+        "docs/structured-logs.md"
       ],
       "evidence": [
         "tests/test_audit_logging.kujo"
@@ -136,7 +136,7 @@
       ],
       "process": [
         "docs/supply-chain-security.md",
-        "docs/connectors-enterprise-roadmap.md"
+        "docs/connectors-framework.md"
       ],
       "evidence": [
         "tests/test_supply_chain_scan.kujo",
@@ -163,8 +163,7 @@
         "config/compliance_control_matrix.json"
       ],
       "process": [
-        "docs/compliance-control-mapping.md",
-        "docs/compliance-evidence-review-workflow.md"
+        "docs/compliance-control-mapping.md"
       ],
       "evidence": [
         "tests/test_compliance_control_mapping_baseline.kujo",

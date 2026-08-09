@@ -37,7 +37,7 @@ write_file(valid_matrix_path, to_json({
 			"evidence": ["tests/test_supply_chain_scan.kujo"],
 			"gap_summary": "Awaiting annual vendor attestations",
 			"gap_owner": "Compliance Lead",
-			"target_date": "2026-07-01"
+			"target_date": "2099-07-01"
 		}
 	]
 }))

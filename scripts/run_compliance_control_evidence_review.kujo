@@ -122,7 +122,7 @@ func is_unresolved_status(status) {
 
 matrix_path := env_or("KUJO_RAG_COMPLIANCE_MATRIX_PATH", "./config/compliance_control_matrix.json")
 output_path := env_or("KUJO_RAG_COMPLIANCE_REVIEW_OUTPUT_PATH", "./results/compliance/compliance_evidence_review.json")
-workflow_doc_path := "./docs/compliance-evidence-review-workflow.md"
+workflow_doc_path := "./docs/compliance-control-mapping.md"
 workflow_ci_path := "./.github/workflows/compliance-evidence-review.yml"
 
 _ = ensure_parent_dir(output_path)
