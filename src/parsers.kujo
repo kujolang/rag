@@ -304,8 +304,8 @@ func parse_log_text(path, raw) {
 }
 
 func parse_html_text(path, raw) {
-	text := regex_replace(raw, "<script[\\s\\S]*?</script>", " ")
-	text := regex_replace(text, "<style[\\s\\S]*?</style>", " ")
+	text := regex_replace(raw, "(?i)<script\\b[^>]*>[\\s\\S]*?</script\\s*>", " ")
+	text := regex_replace(text, "(?i)<style\\b[^>]*>[\\s\\S]*?</style\\s*>", " ")
 	text := regex_replace(text, "<[^>]+>", " ")
 	text := regex_replace(text, "\\s+", " ")
 	meta := {
@@ -390,6 +390,17 @@ func structured_value_text(value) {
 	return to_string(value)
 }
 
+func unique_structured_field_name(raw_name, existing) {
+	base := normalize_structured_field_name(raw_name)
+	candidate := base
+	suffix := 2
+	while has_key(existing, candidate) == 1 {
+		candidate = base + "_" + to_string(suffix)
+		suffix = suffix + 1
+	}
+	return candidate
+}
+
 func parse_json_rows(raw) {
 	err := null
 	parsed := null
@@ -413,7 +424,8 @@ func parse_json_rows(raw) {
 		pk := 0
 		while pk < len(parsed_keys) {
 			key := parsed_keys[pk]
-			normalized_row[normalize_structured_field_name(key)] := parsed[key]
+			normalized_key := unique_structured_field_name(key, normalized_row)
+			normalized_row[normalized_key] := parsed[key]
 			pk = pk + 1
 		}
 		rows = push(rows, normalized_row)
@@ -427,7 +439,8 @@ func parse_json_rows(raw) {
 				ik := 0
 				while ik < len(item_keys) {
 					key := item_keys[ik]
-					normalized_row[normalize_structured_field_name(key)] := item[key]
+					normalized_key := unique_structured_field_name(key, normalized_row)
+					normalized_row[normalized_key] := item[key]
 					ik = ik + 1
 				}
 				rows = push(rows, normalized_row)
@@ -489,30 +502,70 @@ func row_to_structured_line(row, fields, row_index) {
 	return join(parts, " | ")
 }
 
-func split_csv_line(raw_line) {
-	parts := split(raw_line, ",")
-	out := []
+func parse_csv_records(raw) {
+	records := []
+	row := []
+	field := ""
+	in_quotes := false
 	i := 0
-	while i < len(parts) {
-		out = push(out, trim(parts[i]))
-		i = i + 1
-	}
-	return out
-}
-
-func parse_csv_rows(raw) {
-	raw_lines := split(raw, "\n")
-	lines := []
-	i := 0
-	while i < len(raw_lines) {
-		line := trim(raw_lines[i])
-		if line != "" {
-			lines = push(lines, raw_lines[i])
+	while i < len(raw) {
+		ch := substring(raw, i, i + 1)
+		if ch == "\"" {
+			if in_quotes {
+				if i + 1 < len(raw) && substring(raw, i + 1, i + 2) == "\"" {
+					field = field + "\""
+					i = i + 1
+				} else {
+					in_quotes = false
+				}
+			} else if trim(field) == "" {
+				field = ""
+				in_quotes = true
+			} else {
+				field = field + ch
+			}
+		} else if ch == "," && in_quotes == false {
+			row = push(row, trim(field))
+			field = ""
+		} else if (ch == "\n" || ch == "\r") && in_quotes == false {
+			row = push(row, trim(field))
+			field = ""
+			if len(row) > 1 || trim(to_string(row[0])) != "" {
+				records = push(records, row)
+			}
+			row = []
+			if ch == "\r" && i + 1 < len(raw) && substring(raw, i + 1, i + 2) == "\n" {
+				i = i + 1
+			}
+		} else {
+			field = field + ch
 		}
 		i = i + 1
 	}
 
-	if len(lines) == 0 {
+	if in_quotes {
+		return {
+			"ok": false,
+			"records": []
+		}
+	}
+
+	if field != "" || len(row) > 0 {
+		row = push(row, trim(field))
+		if len(row) > 1 || trim(to_string(row[0])) != "" {
+			records = push(records, row)
+		}
+	}
+
+	return {
+		"ok": true,
+		"records": records
+	}
+}
+
+func parse_csv_rows(raw) {
+	parsed_records := parse_csv_records(raw)
+	if dict_get_or(parsed_records, "ok", false) == false {
 		return {
 			"ok": false,
 			"rows": [],
@@ -520,18 +573,30 @@ func parse_csv_rows(raw) {
 		}
 	}
 
-	headers_raw := split_csv_line(lines[0])
+	records := dict_get_or(parsed_records, "records", [])
+	if len(records) == 0 {
+		return {
+			"ok": false,
+			"rows": [],
+			"fields": []
+		}
+	}
+
+	headers_raw := records[0]
 	fields := []
+	field_set := {}
 	hi := 0
 	while hi < len(headers_raw) {
-		fields = push(fields, normalize_structured_field_name(headers_raw[hi]))
+		field := unique_structured_field_name(headers_raw[hi], field_set)
+		fields = push(fields, field)
+		field_set[field] := true
 		hi = hi + 1
 	}
 
 	rows := []
 	li := 1
-	while li < len(lines) {
-		values := split_csv_line(lines[li])
+	while li < len(records) {
+		values := records[li]
 		row := {}
 		fi := 0
 		while fi < len(fields) {
