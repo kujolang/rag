@@ -131,6 +131,7 @@ default_tests := [
 	"tests/test_backend_contract.kujo",
 	"tests/test_backup_restore_integrity.kujo",
 	"tests/test_bootstrap.kujo",
+	"tests/test_bug_regressions.kujo",
 	"tests/test_canary_release_replay.kujo",
 	"tests/test_chaos_fault_injection_review.kujo",
 	"tests/test_chunking_preset_ab_evaluation.kujo",

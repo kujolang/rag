@@ -1,0 +1,110 @@
+from src.common import dict_get_or
+from src.config import cfg_with_namespace
+from src.embeddings import clear_embedding_cache, embed_texts, embedding_cache_metrics
+from src.parsers import parse_file
+from src.query_api import validate_api_ingest_path, validate_api_query_text, validate_api_recursive
+from src.tests_helpers import assert_true
+
+suffix := to_string(current_timestamp())
+parser_cfg := {
+	"parser_sandbox_max_bytes": 5000000
+}
+
+csv_path := "/tmp/kujo_rag_bug_csv_" + suffix + ".csv"
+write_file(csv_path, "name,description,notes\nWidget,\"alpha,beta\",\"said \"\"hello\"\"\"\nMulti,\"first line\nsecond line\",ok")
+csv_doc := parse_file(csv_path, parser_cfg)
+csv_content := dict_get_or(csv_doc, "content", "")
+assert_true(to_bool(contains(csv_content, "description: alpha,beta")))
+assert_true(to_bool(contains(csv_content, "notes: said \"hello\"")))
+assert_true(to_bool(contains(csv_content, "description: first line\nsecond line")))
+
+csv_collision_path := "/tmp/kujo_rag_bug_csv_collision_" + suffix + ".csv"
+write_file(csv_collision_path, "first-name,first name\nalpha,beta")
+csv_collision_doc := parse_file(csv_collision_path, parser_cfg)
+csv_collision_content := dict_get_or(csv_collision_doc, "content", "")
+assert_true(to_bool(contains(csv_collision_content, "first_name: alpha")))
+assert_true(to_bool(contains(csv_collision_content, "first_name_2: beta")))
+
+json_collision_path := "/tmp/kujo_rag_bug_json_collision_" + suffix + ".json"
+write_file(json_collision_path, "{\"first-name\":\"alpha\",\"first name\":\"beta\"}")
+json_collision_doc := parse_file(json_collision_path, parser_cfg)
+json_collision_content := dict_get_or(json_collision_doc, "content", "")
+assert_true(to_bool(contains(json_collision_content, "first_name")))
+assert_true(to_bool(contains(json_collision_content, "first_name_2")))
+assert_true(to_bool(contains(json_collision_content, "alpha")))
+assert_true(to_bool(contains(json_collision_content, "beta")))
+
+html_path := "/tmp/kujo_rag_bug_html_" + suffix + ".html"
+write_file(html_path, "<HTML><BODY>visible<SCRIPT type=\"text/javascript\">secretCode()</SCRIPT><STYLE>.secret{}</STYLE></BODY></HTML>")
+html_doc := parse_file(html_path, parser_cfg)
+html_content := dict_get_or(html_doc, "content", "")
+assert_true(to_bool(contains(html_content, "visible")))
+assert_true(to_bool(contains(html_content, "secretCode")) == false)
+assert_true(to_bool(contains(html_content, ".secret")) == false)
+
+base_cfg := {
+	"index_path": "./data/rag_index.json",
+	"namespace": "team_a",
+	"namespace_index_isolation": true
+}
+first_namespace := cfg_with_namespace(base_cfg, "team_a")
+second_namespace := cfg_with_namespace(dict_get_or(first_namespace, "cfg", {}), "team_a")
+assert_true(to_bool(dict_get_or(dict_get_or(first_namespace, "cfg", {}), "index_path", "") == "./data/rag_index__team_a.json"))
+assert_true(to_bool(dict_get_or(dict_get_or(second_namespace, "cfg", {}), "index_path", "") == "./data/rag_index__team_a.json"))
+
+scope_cfg := {
+	"project_root": "/tmp",
+	"api_ingest_allowed_roots": ["/tmp/kujo_rag_allowed_" + suffix]
+}
+invalid_path_type := validate_api_ingest_path(42, scope_cfg)
+assert_true(to_bool(dict_get_or(invalid_path_type, "ok", true) == false))
+assert_true(to_bool(dict_get_or(invalid_path_type, "error", "") == "invalid_ingest_path"))
+
+allowed_root := "/tmp/kujo_rag_allowed_" + suffix
+outside_root := "/tmp/kujo_rag_outside_" + suffix
+create_dir(allowed_root)
+create_dir(outside_root)
+allowed_path := validate_api_ingest_path(allowed_root, scope_cfg)
+assert_true(to_bool(dict_get_or(allowed_path, "ok", false) == true))
+write_file(outside_root + "/secret.txt", "outside allowed root")
+link_path := allowed_root + "/escape"
+link_result := execute_status("ln -s " + outside_root + " " + link_path, {"timeout_ms": 5000})
+assert_true(to_bool(link_result.success == true))
+symlink_escape := validate_api_ingest_path(link_path + "/secret.txt", scope_cfg)
+assert_true(to_bool(dict_get_or(symlink_escape, "ok", true) == false))
+assert_true(to_bool(dict_get_or(symlink_escape, "error", "") == "ingest_path_symlink_forbidden"))
+
+invalid_query_type := validate_api_query_text({"unexpected": true})
+assert_true(to_bool(dict_get_or(invalid_query_type, "ok", true) == false))
+assert_true(to_bool(dict_get_or(invalid_query_type, "error", "") == "invalid_query"))
+
+invalid_recursive_type := validate_api_recursive("false")
+assert_true(to_bool(dict_get_or(invalid_recursive_type, "ok", true) == false))
+assert_true(to_bool(dict_get_or(invalid_recursive_type, "error", "") == "invalid_recursive"))
+
+_ = clear_embedding_cache()
+cache_cfg := {
+	"embedding_provider": "hash",
+	"embedding_dims": 32,
+	"embedding_cache_enabled": true,
+	"embedding_cache_max_entries": 16
+}
+_ = embed_texts(["cached"], cache_cfg)
+_ = embed_texts(["cached", "uncached"], cache_cfg)
+cache_metrics := embedding_cache_metrics()
+assert_true(to_bool(dict_get_or(cache_metrics, "hits", -1) == 1))
+assert_true(to_bool(dict_get_or(cache_metrics, "misses", -1) == 2))
+_ = clear_embedding_cache()
+
+for path in [csv_path, csv_collision_path, json_collision_path, html_path] {
+	if file_exists(path) {
+		delete_file(path)
+	}
+}
+_ = execute_status("rm -f " + link_path, {"timeout_ms": 5000})
+if file_exists(outside_root + "/secret.txt") {
+	delete_file(outside_root + "/secret.txt")
+}
+_ = execute_status("rmdir " + allowed_root + " " + outside_root, {"timeout_ms": 5000})
+
+print("test_bug_regressions: ok")
