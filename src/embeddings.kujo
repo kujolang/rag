@@ -345,13 +345,13 @@ export embed_texts := func(texts, cfg) {
 	requested_provider := dict_get_or(provider_info, "requested", "hash")
 	resolved_provider := dict_get_or(provider_info, "resolved", "hash")
 	registry := embedding_provider_registry()
+	cache_hits := 0
 
 	if embedding_cache_enabled(cfg) {
 		cache_state := load_embedding_cache_state()
 		stats := dict_get_or(cache_state, "stats", {})
 		dims := dict_get_or(cfg, "embedding_dims", 256)
 		cached_vectors := []
-		hits := 0
 		all_hit := true
 		i := 0
 		while i < len(texts) {
@@ -360,16 +360,15 @@ export embed_texts := func(texts, cfg) {
 			cached := embedding_cache_lookup(cache_state, cache_key)
 			if dict_get_or(cached, "ok", false) {
 				cached_vectors = push(cached_vectors, dict_get_or(cached, "vector", []))
-				hits = hits + 1
+				cache_hits = cache_hits + 1
 			} else {
 				all_hit = false
-				break
 			}
 			i = i + 1
 		}
 
 		if all_hit {
-			stats["hits"] := dict_get_or(stats, "hits", 0) + hits
+			stats["hits"] := dict_get_or(stats, "hits", 0) + cache_hits
 			cache_state["stats"] := stats
 			save_embedding_cache_state(cache_state)
 			cached_result := {
@@ -416,7 +415,8 @@ export embed_texts := func(texts, cfg) {
 			cache_state = embedding_cache_store(cache_state, cache_key, vectors[i], cfg)
 			i = i + 1
 		}
-		stats["misses"] := dict_get_or(stats, "misses", 0) + len(texts)
+		stats["hits"] := dict_get_or(stats, "hits", 0) + cache_hits
+		stats["misses"] := dict_get_or(stats, "misses", 0) + (len(texts) - cache_hits)
 		cache_state["stats"] := stats
 		save_embedding_cache_state(cache_state)
 	}

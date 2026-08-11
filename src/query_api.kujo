@@ -2967,6 +2967,34 @@ func path_within_root(path_value, root) {
 	return starts_with(path_value, prefix)
 }
 
+func first_symlink_component_within(path_value, root) {
+	normalized := normalize_path(path_value)
+	normalized_root := normalize_path(root)
+	if normalized == normalized_root {
+		return ""
+	}
+	prefix := normalized_root
+	if ends_with(prefix, "/") == false {
+		prefix = prefix + "/"
+	}
+	relative := substring(normalized, len(prefix), len(normalized))
+	parts := split(relative, "/")
+	current := normalized_root
+	for part in parts {
+		if part != "" && part != "." {
+			if current == "/" {
+				current = current + part
+			} else {
+				current = current + "/" + part
+			}
+			if path_exists(current) && path_is_symlink(current) {
+				return current
+			}
+		}
+	}
+	return ""
+}
+
 func resolve_allowed_roots(cfg) {
 	project_root := dict_get_or(cfg, "project_root", ".")
 	raw_roots := dict_get_or(cfg, "api_ingest_allowed_roots", ["."])
@@ -2986,14 +3014,28 @@ func resolve_allowed_roots(cfg) {
 }
 
 export validate_api_ingest_path := func(requested_path, cfg) {
+	if type(requested_path) != "string" || trim(requested_path) == "" {
+		return {
+			"ok": false,
+			"status": 400,
+			"error": "invalid_ingest_path",
+			"message": "Ingest path must be a non-empty string",
+			"details": {
+				"actual_type": type(requested_path)
+			}
+		}
+	}
+
 	project_root := dict_get_or(cfg, "project_root", ".")
 	resolved_path := resolve_path(requested_path, project_root)
 	allowed_roots := resolve_allowed_roots(cfg)
 
 	allowed := false
+	matched_root := ""
 	for root in allowed_roots {
 		if path_within_root(resolved_path, root) {
 			allowed = true
+			matched_root = root
 			break
 		}
 	}
@@ -3001,6 +3043,7 @@ export validate_api_ingest_path := func(requested_path, cfg) {
 	if allowed == false {
 		return {
 			"ok": false,
+			"status": 403,
 			"error": "ingest_path_forbidden",
 			"message": "Requested ingest path is outside allowed roots",
 			"details": {
@@ -3011,10 +3054,67 @@ export validate_api_ingest_path := func(requested_path, cfg) {
 		}
 	}
 
+	symlink_component := first_symlink_component_within(resolved_path, matched_root)
+	if symlink_component != "" {
+		return {
+			"ok": false,
+			"status": 403,
+			"error": "ingest_path_symlink_forbidden",
+			"message": "Requested ingest path traverses a symbolic link",
+			"details": {
+				"requested_path": requested_path,
+				"resolved_path": resolved_path,
+				"symlink_component": symlink_component
+			}
+		}
+	}
+
 	return {
 		"ok": true,
 		"path": resolved_path,
 		"allowed_roots": allowed_roots
+	}
+}
+
+export validate_api_recursive := func(raw_value) {
+	if type(raw_value) != "bool" {
+		return {
+			"ok": false,
+			"error": "invalid_recursive",
+			"message": "Optional 'recursive' must be a boolean",
+			"details": {
+				"actual_type": type(raw_value)
+			}
+		}
+	}
+	return {
+		"ok": true,
+		"value": raw_value
+	}
+}
+
+export validate_api_query_text := func(raw_value) {
+	if type(raw_value) != "string" {
+		return {
+			"ok": false,
+			"error": "invalid_query",
+			"message": "Request body 'query' must be a string",
+			"details": {
+				"actual_type": type(raw_value)
+			}
+		}
+	}
+	if trim(raw_value) == "" {
+		return {
+			"ok": false,
+			"error": "missing_query",
+			"message": "Request body must include a non-empty 'query' string",
+			"details": {}
+		}
+	}
+	return {
+		"ok": true,
+		"value": raw_value
 	}
 }
 
@@ -3795,13 +3895,23 @@ export start_api_server := func(cfg) {
 		if path_scope["ok"] == false {
 			state = increment_metric_counter(state, "ingest_errors")
 			state = increment_latency_metric(state, "ingest_latency_ms", current_timestamp() - started_at)
-			audit_emit(cfg, "ingest_operation", "failure", {"code": dict_get_or(path_scope, "error", "ingest_path_forbidden"), "status": 403, "stage": "path_scope"})
-			log_access(access_log, req, 403, {"code": dict_get_or(path_scope, "error", "ingest_path_forbidden")})
-			return json_err(req, cfg, 403, dict_get_or(path_scope, "error", "ingest_path_forbidden"), dict_get_or(path_scope, "message", "Forbidden ingest path"), dict_get_or(path_scope, "details", {}))
+			status := dict_get_or(path_scope, "status", 403)
+			audit_emit(cfg, "ingest_operation", "failure", {"code": dict_get_or(path_scope, "error", "ingest_path_forbidden"), "status": status, "stage": "path_scope"})
+			log_access(access_log, req, status, {"code": dict_get_or(path_scope, "error", "ingest_path_forbidden")})
+			return json_err(req, cfg, status, dict_get_or(path_scope, "error", "ingest_path_forbidden"), dict_get_or(path_scope, "message", "Forbidden ingest path"), dict_get_or(path_scope, "details", {}))
 		}
 
 		resolved_path := dict_get_or(path_scope, "path", path)
-		recursive := dict_get_or(data, "recursive", true)
+		recursive_result := validate_api_recursive(dict_get_or(data, "recursive", true))
+		if dict_get_or(recursive_result, "ok", false) == false {
+			state = increment_metric_counter(state, "ingest_errors")
+			state = increment_latency_metric(state, "ingest_latency_ms", current_timestamp() - started_at)
+			code := dict_get_or(recursive_result, "error", "invalid_recursive")
+			audit_emit(cfg, "ingest_operation", "failure", {"code": code, "status": 400, "stage": "validation"})
+			log_access(access_log, req, 400, {"code": code})
+			return json_err(req, cfg, 400, code, dict_get_or(recursive_result, "message", "Invalid recursive value"), dict_get_or(recursive_result, "details", {}))
+		}
+		recursive := dict_get_or(recursive_result, "value", true)
 		build_started := current_timestamp()
 		result := build_rag_index(resolved_path, namespace_cfg, recursive)
 		trace_emit(cfg, req, "ingest.build_index", "index", "ok", build_started, {"namespace": namespace, "path": resolved_path, "chunks": dict_get_or(result, "chunks", 0)})
@@ -3923,13 +4033,21 @@ export start_api_server := func(cfg) {
 		path := dict_get_or(data, "path", ".")
 		path_scope := validate_api_ingest_path(path, namespace_cfg)
 		if path_scope["ok"] == false {
-			audit_emit(cfg, "ingest_operation", "failure", {"code": dict_get_or(path_scope, "error", "ingest_path_forbidden"), "status": 403, "stage": "path_scope"})
-			log_access(access_log, req, 403, {"code": dict_get_or(path_scope, "error", "ingest_path_forbidden")})
-			return json_err(req, cfg, 403, dict_get_or(path_scope, "error", "ingest_path_forbidden"), dict_get_or(path_scope, "message", "Forbidden ingest path"), dict_get_or(path_scope, "details", {}))
+			status := dict_get_or(path_scope, "status", 403)
+			audit_emit(cfg, "ingest_operation", "failure", {"code": dict_get_or(path_scope, "error", "ingest_path_forbidden"), "status": status, "stage": "path_scope"})
+			log_access(access_log, req, status, {"code": dict_get_or(path_scope, "error", "ingest_path_forbidden")})
+			return json_err(req, cfg, status, dict_get_or(path_scope, "error", "ingest_path_forbidden"), dict_get_or(path_scope, "message", "Forbidden ingest path"), dict_get_or(path_scope, "details", {}))
 		}
 
 		resolved_path := dict_get_or(path_scope, "path", path)
-		recursive := dict_get_or(data, "recursive", true)
+		recursive_result := validate_api_recursive(dict_get_or(data, "recursive", true))
+		if dict_get_or(recursive_result, "ok", false) == false {
+			code := dict_get_or(recursive_result, "error", "invalid_recursive")
+			audit_emit(cfg, "ingest_operation", "failure", {"code": code, "status": 400, "stage": "validation"})
+			log_access(access_log, req, 400, {"code": code})
+			return json_err(req, cfg, 400, code, dict_get_or(recursive_result, "message", "Invalid recursive value"), dict_get_or(recursive_result, "details", {}))
+		}
+		recursive := dict_get_or(recursive_result, "value", true)
 		state = prune_ingest_idempotency(state, cfg)
 
 		raw_idempotency_key := raw_ingest_idempotency_key(req, data, cfg)
@@ -4257,14 +4375,16 @@ export start_api_server := func(cfg) {
 			return json_err(req, cfg, status, code, message, dict_get_or(rbac, "details", {}))
 		}
 
-		query := dict_get_or(data, "query", "")
-		if trim(query) == "" {
+		query_result := validate_api_query_text(dict_get_or(data, "query", ""))
+		if dict_get_or(query_result, "ok", false) == false {
 			state = increment_metric_counter(state, "query_errors")
 			state = increment_latency_metric(state, "query_latency_ms", current_timestamp() - started_at)
-			log_access(access_log, req, 400, {"code": "missing_query"})
-			audit_emit(cfg, "query_operation", "failure", {"code": "missing_query", "status": 400, "namespace": namespace})
-			return json_err(req, cfg, 400, "missing_query", "Request body must include a non-empty 'query' string", {})
+			code := dict_get_or(query_result, "error", "invalid_query")
+			log_access(access_log, req, 400, {"code": code})
+			audit_emit(cfg, "query_operation", "failure", {"code": code, "status": 400, "namespace": namespace})
+			return json_err(req, cfg, 400, code, dict_get_or(query_result, "message", "Invalid query"), dict_get_or(query_result, "details", {}))
 		}
+		query := dict_get_or(query_result, "value", "")
 
 		filters := dict_get_or(data, "filters", null)
 		if type(filters) != "null" && type(filters) != "dict" {

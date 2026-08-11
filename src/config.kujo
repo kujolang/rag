@@ -155,6 +155,10 @@ func namespaced_index_path(index_path, namespace_value, isolate) {
 	}
 	ext_with_dot := "." + ext
 	base := substring(index_path, 0, len(index_path) - len(ext_with_dot))
+	namespace_suffix := "__" + namespace_value
+	if ends_with(base, namespace_suffix) {
+		return index_path
+	}
 	return base + "__" + namespace_value + ext_with_dot
 }
 
