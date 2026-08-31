@@ -40,6 +40,7 @@ jobs:
           git -C /tmp/kujo-runtime checkout --detach "$KUJO_RUNTIME_REF"
           cargo build --release --locked --manifest-path /tmp/kujo-runtime/Cargo.toml
           echo "/tmp/kujo-runtime/target/release" >> "$GITHUB_PATH"
+          echo "KUJO_MODULE_PATH=/tmp/kujo-runtime/modules" >> "$GITHUB_ENV"
 
       - name: Resolve release version and notes path
         id: release_meta
