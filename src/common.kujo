@@ -240,9 +240,13 @@ export stable_chunk_id := func(path, line_start, line_end, text) {
 	return substring(hash, 0, 20)
 }
 
-export read_json_file_or := func(path, default_value) {
+export read_json_file_result := func(path) {
 	if file_exists(path) == false {
-		return default_value
+		return {
+			"ok": true,
+			"data": null,
+			"missing": true
+		}
 	}
 	err := null
 	data := null
@@ -252,9 +256,31 @@ export read_json_file_or := func(path, default_value) {
 		err := e
 	}
 	if type(err) != "null" {
+		return {
+			"ok": false,
+			"error": {
+				"code": "json_file_load_failed",
+				"message": "JSON file could not be loaded",
+				"details": {
+					"path": path,
+					"reason": to_string(err)
+				}
+			}
+		}
+	}
+	return {
+		"ok": true,
+		"data": data,
+		"missing": false
+	}
+}
+
+export read_json_file_or := func(path, default_value) {
+	loaded := read_json_file_result(path)
+	if dict_get_or(loaded, "ok", false) == false || dict_get_or(loaded, "missing", false) {
 		return default_value
 	}
-	return data
+	return dict_get_or(loaded, "data", default_value)
 }
 
 export write_json_file := func(path, value) {

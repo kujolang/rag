@@ -771,7 +771,7 @@ KUJO_BIN=/absolute/path/to/kujo kujo run scripts/run_connector_ingest.kujo --int
 - Vector backend adapter selection is configurable (`KUJO_RAG_VECTOR_BACKEND`, `KUJO_RAG_VECTOR_BACKEND_MEMORY_KEY`, `KUJO_RAG_VECTOR_BACKEND_QDRANT_URL`, `KUJO_RAG_VECTOR_BACKEND_QDRANT_COLLECTION`, `KUJO_RAG_VECTOR_BACKEND_QDRANT_SYNC_ENABLED`, `KUJO_RAG_VECTOR_BACKEND_QDRANT_TIMEOUT_MS`, `KUJO_RAG_VECTOR_BACKEND_QDRANT_FAIL_OPEN`, `KUJO_RAG_VECTOR_BACKEND_QDRANT_MIRROR_PATH`)
 - Query output now includes deterministic provenance/confidence calibration for both citation-level and response-level trust metadata
 - Index persistence uses schema versioning (latest schema: `2.0`) with automatic migration from legacy `1.0` indexes
-- Unsupported index schema versions load safely with actionable error metadata under index `meta.load_error`
+- Unsupported, unreadable, or malformed index JSON loads safely with actionable error metadata under index `meta.load_error`
 - Citation line ranges are strategy-aware: fixed chunks use character-to-line mapping and line-overlap chunks keep non-inverted line boundaries
 - Citation ranges are approximate at chunk boundaries (especially around newline boundary overlaps), but guaranteed non-negative and non-inverted
 - CLI integer flags (for example `--port`) are validated strictly and return structured errors for invalid values

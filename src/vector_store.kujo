@@ -1,4 +1,4 @@
-from src.common import bool_or, dict_get_or, read_json_file_or, str_or, write_json_file, term_frequency, tokenize
+from src.common import bool_or, dict_get_or, read_json_file_result, str_or, write_json_file, term_frequency, tokenize
 
 export latest_schema_version := func() {
 	return 2
@@ -450,7 +450,15 @@ func decrypt_envelope_index(envelope, path, cfg) {
 }
 
 export load_index_with_config := func(path, cfg) {
-	index := read_json_file_or(path, null)
+	loaded := read_json_file_result(path)
+	if dict_get_or(loaded, "ok", false) == false {
+		return fallback_with_load_error(dict_get_or(loaded, "error", {
+			"code": "json_file_load_failed",
+			"message": "Index JSON file could not be loaded",
+			"details": {"path": path}
+		}))
+	}
+	index := dict_get_or(loaded, "data", null)
 	if type(index) != "dict" {
 		return empty_index()
 	}
