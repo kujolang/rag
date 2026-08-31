@@ -772,6 +772,8 @@ KUJO_BIN=/absolute/path/to/kujo kujo run scripts/run_connector_ingest.kujo --int
 - Query output now includes deterministic provenance/confidence calibration for both citation-level and response-level trust metadata
 - Index persistence uses schema versioning (latest schema: `2.0`) with automatic migration from legacy `1.0` indexes
 - Unsupported, unreadable, or malformed index JSON loads safely with actionable error metadata under index `meta.load_error`
+- Local JSON index replacement is atomic and read-after-write validated; an unreadable or oversized candidate fails ingest without deleting the last readable index
+- Kujo currently bounds a single JSON/file operation at 8 MiB; RAG does not silently shard one namespace, so larger indexes must use deterministic namespace isolation or an external vector backend
 - Citation line ranges are strategy-aware: fixed chunks use character-to-line mapping and line-overlap chunks keep non-inverted line boundaries
 - Citation ranges are approximate at chunk boundaries (especially around newline boundary overlaps), but guaranteed non-negative and non-inverted
 - CLI integer flags (for example `--port`) are validated strictly and return structured errors for invalid values
