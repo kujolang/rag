@@ -30,6 +30,7 @@ jobs:
           cargo build --release --locked --manifest-path /tmp/kujo-runtime/Cargo.toml
           echo "/tmp/kujo-runtime/target/release" >> "$GITHUB_PATH"
           echo "KUJO_MODULE_PATH=/tmp/kujo-runtime/modules" >> "$GITHUB_ENV"
+          echo "KUJO_BIN=/tmp/kujo-runtime/target/release/kujo" >> "$GITHUB_ENV"
 
       - name: Verify Kujo runtime
         run: kujo --version
