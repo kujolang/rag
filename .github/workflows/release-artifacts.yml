@@ -21,7 +21,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 25
     env:
-      KUJO_RUNTIME_REF: "7819d1475e909ec88f510c9927445791ea928836"
+      KUJO_RUNTIME_REF: "f0b7c6af753ed350e0957c4a873613fb7d88937d"
 
     steps:
       - name: Checkout repository
