@@ -61,6 +61,19 @@ func command_ingest(parsed, cfg) {
 	active_namespace := dict_get_or(ns_result, "namespace", dict_get_or(cfg, "namespace", "default"))
 
 	result := build_rag_index(path, active_cfg, recursive)
+	if dict_get_or(result, "ok", true) == false {
+		exit_with_json({
+			"ok": false,
+			"command": "ingest",
+			"namespace": active_namespace,
+			"index_path": dict_get_or(active_cfg, "index_path", ""),
+			"error": dict_get_or(result, "error", {
+				"code": "index_persistence_failed",
+				"message": "Index persistence failed",
+				"details": {}
+			})
+		}, 1)
+	}
 	print(to_json({
 		"ok": true,
 		"command": "ingest",
@@ -113,6 +126,9 @@ func command_demo(cfg) {
 	active_namespace := dict_get_or(ns_result, "namespace", dict_get_or(cfg, "namespace", "default"))
 
 	index_result := build_rag_index(demo_path, active_cfg, true)
+	if dict_get_or(index_result, "ok", true) == false {
+		exit_with_json({"ok": false, "command": "demo", "error": dict_get_or(index_result, "error", {})}, 1)
+	}
 	index := dict_get_or(index_result, "index", {})
 	result := query_rag(index, question, active_cfg, null, null)
 	print(to_json({

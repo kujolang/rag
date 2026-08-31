@@ -3,7 +3,7 @@ from src.ingestion import ingest_documents
 from src.chunking import chunk_documents
 from src.embeddings import embed_chunks
 from src.vector_store import build_index, index_summary
-from src.vector_backend import load_index_with_backend, save_index_with_backend
+from src.vector_backend import load_index_with_backend, persist_index_with_backend
 from src.retrieval import hybrid_search_with_stage_timings
 
 func concat_arrays(left, right) {
@@ -614,16 +614,31 @@ export build_rag_index := func(root_path, cfg, recursive) {
 	meta["incremental"] := incremental
 	index["meta"] := meta
 
-	_ = save_index_with_backend(cfg, index)
+	persistence := persist_index_with_backend(cfg, index)
+	if dict_get_or(persistence, "ok", false) == false {
+		return {
+			"ok": false,
+			"error": dict_get_or(persistence, "error", {
+				"code": "index_persistence_failed",
+				"message": "Index persistence failed",
+				"details": {}
+			}),
+			"persistence": persistence,
+			"ingest": ingest,
+			"chunks": len(all_chunks)
+		}
+	}
 
 	summary := index_summary(index)
 	summary["incremental"] := incremental
 
 	return {
+		"ok": true,
 		"index": index,
 		"ingest": ingest,
 		"chunks": len(all_chunks),
-		"summary": summary
+		"summary": summary,
+		"persistence": persistence
 	}
 }
 

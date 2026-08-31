@@ -1,4 +1,5 @@
 from src.config import load_config, ensure_runtime_dirs
+from src.common import dict_get_or
 from src.rag_engine import build_rag_index, query_rag
 
 cfg := load_config({})
@@ -14,6 +15,10 @@ if len(all_args) > 0 {
 }
 
 result := build_rag_index("./examples/kujo_docs", cfg, true)
+if dict_get_or(result, "ok", true) == false {
+	print(to_json({"ok": false, "error": dict_get_or(result, "error", {})}))
+	exit(1)
+}
 index := result["index"]
 answer := query_rag(index, question, cfg, null, null)
 print(to_json(answer))

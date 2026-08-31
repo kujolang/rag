@@ -1,5 +1,5 @@
 from src.common import dict_get_or, bool_or, num_or
-from src.vector_store import load_index_with_config, save_index_with_config
+from src.vector_store import load_index_with_config, persist_index_with_config, save_index_with_config
 
 func normalize_backend_name(cfg) {
 	backend_name := to_lower(trim(to_string(dict_get_or(cfg, "vector_backend", "local_json"))))
@@ -409,6 +409,27 @@ export save_index_with_backend := func(cfg, index) {
 		return qdrant_save(cfg, index)
 	}
 	return local_json_save(cfg, index)
+}
+
+export persist_index_with_backend := func(cfg, index) {
+	backend_name := normalize_backend_name(cfg)
+	if backend_name == "local_json" {
+		path := dict_get_or(cfg, "index_path", "./data/rag_index.json")
+		return persist_index_with_config(path, index, cfg)
+	}
+
+	saved := save_index_with_backend(cfg, index)
+	if saved == true {
+		return {"ok": true, "backend": backend_name}
+	}
+	return {
+		"ok": false,
+		"error": {
+			"code": "index_backend_persistence_failed",
+			"message": "Vector backend did not persist the index",
+			"details": {"backend": backend_name}
+		}
+	}
 }
 
 export active_backend_summary := func(cfg) {

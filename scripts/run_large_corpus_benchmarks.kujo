@@ -250,6 +250,10 @@ func benchmark_profile(profile, source_files, queries, dataset_budgets, dataset_
 	} except e {
 		ingest_error = to_string(e)
 	}
+	if ingest_error == "" && dict_get_or(ingest_result, "ok", true) == false {
+		persistence_error := dict_get_or(ingest_result, "error", {})
+		ingest_error = dict_get_or(persistence_error, "code", "index_persistence_failed") + ": " + dict_get_or(persistence_error, "message", "Index persistence failed")
+	}
 	ingest_elapsed_ms := current_timestamp() - ingest_started
 	if ingest_elapsed_ms < 0 {
 		ingest_elapsed_ms = 0

@@ -1,0 +1,88 @@
+from src.common import dict_get_or
+from src.tests_helpers import assert_true
+from src.vector_store import load_index_with_config, persist_index_with_config, save_index_with_config
+
+func fixture_index(marker, payload) {
+	return {
+		"chunks": [{"chunk_id": marker, "doc_id": marker, "path": marker + ".md", "text": payload}],
+		"vectors": [],
+		"lexical": [],
+		"meta": {"documents": 1, "chunks": 1, "provider": "hash", "marker": marker}
+	}
+}
+
+func load_error_code(index) {
+	return dict_get_or(dict_get_or(dict_get_or(index, "meta", {}), "load_error", {}), "code", "")
+}
+
+if path_exists("./results") == false {
+	create_dir("./results")
+}
+
+small_path := "./results/test_index_persistence_small.json"
+medium_path := "./results/test_index_persistence_medium.json"
+large_path := "./results/test_index_persistence_large.json"
+invalid_path := "./results/test_index_persistence_invalid.json"
+oversized_path := "./results/test_index_persistence_oversized.json"
+encrypted_path := "./results/test_index_persistence_encrypted.json"
+
+paths := [small_path, medium_path, large_path, invalid_path, oversized_path, encrypted_path]
+for path in paths {
+	if file_exists(path) {
+		delete_file(path)
+	}
+}
+
+# Below 1 MiB: persist and reload normally.
+small_result := persist_index_with_config(small_path, fixture_index("small", repeat("s", 262144)), {})
+assert_true(to_bool(dict_get_or(small_result, "ok", false) == true))
+small_loaded := load_index_with_config(small_path, {})
+assert_true(to_bool(dict_get_or(dict_get_or(small_loaded, "meta", {}), "marker", "") == "small"))
+
+# Between 1 MiB and 8 MiB: current aligned JSON/file contract remains readable.
+medium_result := persist_index_with_config(medium_path, fixture_index("medium", repeat("m", 2097152)), {})
+assert_true(to_bool(dict_get_or(medium_result, "ok", false) == true))
+medium_loaded := load_index_with_config(medium_path, {})
+assert_true(to_bool(dict_get_or(dict_get_or(medium_loaded, "meta", {}), "marker", "") == "medium"))
+
+# Above 8 MiB: fail explicitly and retain the previously readable index.
+assert_true(to_bool(save_index_with_config(large_path, fixture_index("previous", "readable"), {}) == true))
+large_result := persist_index_with_config(large_path, fixture_index("oversized", repeat("L", 8388608)), {})
+assert_true(to_bool(dict_get_or(large_result, "ok", true) == false))
+large_error := dict_get_or(large_result, "error", {})
+assert_true(to_bool(dict_get_or(large_error, "code", "") == "index_serialization_invalid" || dict_get_or(large_error, "code", "") == "index_persistence_failed"))
+large_loaded := load_index_with_config(large_path, {})
+assert_true(to_bool(dict_get_or(dict_get_or(large_loaded, "meta", {}), "marker", "") == "previous"))
+
+# Malformed and externally oversized files are distinct from a missing empty index.
+write_file_atomic(invalid_path, "{not-json", true)
+invalid_loaded := load_index_with_config(invalid_path, {})
+assert_true(to_bool(load_error_code(invalid_loaded) == "json_file_load_failed"))
+
+oversized_command := "dd if=/dev/zero of=" + oversized_path + " bs=1048576 count=9 2>/dev/null"
+oversized_write := execute_status(oversized_command, {"timeout_ms": 30000})
+assert_true(to_bool(oversized_write.success == true))
+oversized_loaded := load_index_with_config(oversized_path, {})
+assert_true(to_bool(load_error_code(oversized_loaded) == "json_file_load_failed"))
+
+# Encrypted indexes use the same atomic write and read-back validation path.
+encrypted_cfg := {
+	"at_rest_encryption_enabled": true,
+	"at_rest_encryption_key": "test-only-index-persistence-key"
+}
+encrypted_result := persist_index_with_config(encrypted_path, fixture_index("encrypted", "secret payload"), encrypted_cfg)
+assert_true(to_bool(dict_get_or(encrypted_result, "ok", false) == true))
+encrypted_loaded := load_index_with_config(encrypted_path, encrypted_cfg)
+assert_true(to_bool(dict_get_or(dict_get_or(encrypted_loaded, "meta", {}), "marker", "") == "encrypted"))
+encrypted_large_result := persist_index_with_config(encrypted_path, fixture_index("encrypted-oversized", repeat("E", 8388608)), encrypted_cfg)
+assert_true(to_bool(dict_get_or(encrypted_large_result, "ok", true) == false))
+encrypted_after_failure := load_index_with_config(encrypted_path, encrypted_cfg)
+assert_true(to_bool(dict_get_or(dict_get_or(encrypted_after_failure, "meta", {}), "marker", "") == "encrypted"))
+
+for path in paths {
+	if file_exists(path) {
+		delete_file(path)
+	}
+}
+
+print("test_index_persistence: ok")

@@ -1640,6 +1640,17 @@ func evaluate_query_guardrails(cfg, namespace, query, filters, session_history) 
 }
 
 func evaluate_ingest_result_guardrail(result) {
+	if dict_get_or(result, "ok", true) == false {
+		persistence_error := dict_get_or(result, "error", {})
+		return {
+			"ok": false,
+			"status": 507,
+			"error": dict_get_or(persistence_error, "code", "index_persistence_failed"),
+			"message": dict_get_or(persistence_error, "message", "Index persistence failed"),
+			"details": dict_get_or(persistence_error, "details", {})
+		}
+	}
+
 	guardrail := dict_get_or(result, "guardrail", {})
 	if type(guardrail) != "dict" || len(keys(guardrail)) == 0 {
 		ingest := dict_get_or(result, "ingest", {})

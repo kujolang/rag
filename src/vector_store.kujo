@@ -1,4 +1,4 @@
-from src.common import bool_or, dict_get_or, read_json_file_result, str_or, write_json_file, term_frequency, tokenize
+from src.common import bool_or, dict_get_or, dict_without_key, read_json_file_result, str_or, term_frequency, tokenize
 
 export latest_schema_version := func() {
 	return 2
@@ -495,25 +495,101 @@ export load_index := func(path) {
 	return load_index_with_config(path, {})
 }
 
-export save_index_with_config := func(path, index, cfg) {
+func persistence_failure(code, message, path, runtime_error) {
+	return {
+		"ok": false,
+		"error": {
+			"code": code,
+			"message": message,
+			"details": {
+				"path": path,
+				"runtime_error": substring(to_string(runtime_error), 0, 512)
+			}
+		}
+	}
+}
+
+export persist_index_with_config := func(path, index, cfg) {
 	index["schema_version"] := latest_schema_version()
 	index["version"] := schema_version_label(latest_schema_version())
 	meta := dict_get_or(index, "meta", {})
+	meta = dict_without_key(meta, "load_error")
 	meta["schema_version"] := latest_schema_version()
 	index["meta"] := meta
 	index["updated_at"] := current_timestamp()
 
+	stored_value := index
 	if encryption_enabled(cfg) {
-		encrypted := run_encrypt_payload(to_json(index), path, cfg)
-		if dict_get_or(encrypted, "ok", false) == false {
-			return false
+		encrypted := null
+		encryption_err := null
+		try {
+			encrypted = run_encrypt_payload(to_json(index), path, cfg)
+		} except e {
+			encryption_err = e
 		}
-		write_json_file(path, encrypted_index_envelope(encrypted))
-		return true
+		if type(encryption_err) != "null" {
+			return persistence_failure("encrypted_index_encrypt_failed", "Failed to encrypt index payload; the previous index was preserved", path, encryption_err)
+		}
+		if dict_get_or(encrypted, "ok", false) == false {
+			return {
+				"ok": false,
+				"error": dict_get_or(encrypted, "error", {
+					"code": "encrypted_index_encrypt_failed",
+					"message": "Failed to encrypt index payload",
+					"details": {"path": path}
+				})
+			}
+		}
+		stored_value = encrypted_index_envelope(encrypted)
 	}
 
-	write_json_file(path, index)
-	return true
+	payload := to_json(stored_value)
+	validation_err := null
+	validated := null
+	try {
+		validated = parse_json(payload)
+	} except e {
+		validation_err = e
+	}
+	if type(validation_err) != "null" || type(validated) != "dict" {
+		return persistence_failure("index_serialization_invalid", "Serialized index is not a valid JSON object", path, validation_err)
+	}
+
+	write_err := null
+	written := false
+	try {
+		written = write_file_atomic(path, payload, true)
+	} except e {
+		write_err = e
+	}
+	if type(write_err) != "null" || written != true {
+		return persistence_failure("index_persistence_failed", "Index could not be persisted atomically; the previous index was preserved", path, write_err)
+	}
+
+	reloaded := load_index_with_config(path, cfg)
+	load_error := dict_get_or(dict_get_or(reloaded, "meta", {}), "load_error", null)
+	if type(load_error) == "dict" {
+		return {
+			"ok": false,
+			"error": {
+				"code": "index_read_after_write_failed",
+				"message": "Persisted index failed immediate read-back validation",
+				"details": {"path": path, "load_error": load_error}
+			}
+		}
+	}
+
+	return {
+		"ok": true,
+		"path": path,
+		"serialized_chars": len(payload),
+		"sha256": sha256(payload)
+	}
+}
+
+export save_index_with_config := func(path, index, cfg) {
+	result := persist_index_with_config(path, index, cfg)
+	return dict_get_or(result, "ok", false)
 }
 
 export save_index := func(path, index) {

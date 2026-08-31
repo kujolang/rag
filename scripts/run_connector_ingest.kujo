@@ -59,10 +59,14 @@ if num_or(dict_get_or(connector_pipeline, "ok_count", 0), 0) > 0 {
 	})
 	_ = ensure_runtime_dirs(runtime_cfg)
 	build := build_rag_index(staging_root, runtime_cfg, true)
-	index := load_or_initialize_index(runtime_cfg)
-	build_summary = dict_get_or(build, "summary", {})
-	index_meta = dict_get_or(index, "meta", {})
-	build_ok = true
+	build_ok = dict_get_or(build, "ok", true)
+	if build_ok {
+		index := load_or_initialize_index(runtime_cfg)
+		build_summary = dict_get_or(build, "summary", {})
+		index_meta = dict_get_or(index, "meta", {})
+	} else {
+		index_meta = {"persistence_error": dict_get_or(build, "error", {})}
+	}
 }
 
 connector_ok := bool_or(dict_get_or(connector_pipeline, "ok", false), false)

@@ -476,6 +476,15 @@ export run_release_evaluation := func(eval_cfg) {
 	_ := ensure_runtime_dirs(runtime_cfg)
 
 	build := build_rag_index(corpus_path, runtime_cfg, recursive)
+	if dict_get_or(build, "ok", true) == false {
+		build_error := dict_get_or(build, "error", {})
+		return {
+			"ok": false,
+			"error": dict_get_or(build_error, "code", "index_persistence_failed"),
+			"error_message": dict_get_or(build_error, "message", "Index persistence failed"),
+			"error_details": dict_get_or(build_error, "details", {})
+		}
+	}
 	index := load_or_initialize_index(runtime_cfg)
 
 	raw_cases_payload := read_json_file_or(golden_queries_path, {
