@@ -16,7 +16,7 @@ jobs:
           - bridge
           - native
     env:
-      KUJO_RUNTIME_REF: "3a625ea22b10909df0d9758804a267cb920fd971"
+      KUJO_RUNTIME_REF: "7819d1475e909ec88f510c9927445791ea928836"
 
     steps:
       - name: Checkout repository
@@ -76,7 +76,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     env:
-      KUJO_RUNTIME_REF: "3a625ea22b10909df0d9758804a267cb920fd971"
+      KUJO_RUNTIME_REF: "7819d1475e909ec88f510c9927445791ea928836"
 
     steps:
       - name: Checkout repository
@@ -124,7 +124,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 40
     env:
-      KUJO_RUNTIME_REF: "3a625ea22b10909df0d9758804a267cb920fd971"
+      KUJO_RUNTIME_REF: "7819d1475e909ec88f510c9927445791ea928836"
 
     steps:
       - name: Checkout repository
