@@ -637,12 +637,26 @@ unsupported_index := load_index(unsupported_index_path)
 assert_true(to_bool(dict_get_or(dict_get_or(dict_get_or(unsupported_index, "meta", {}), "load_error", {}), "code", "") == "unsupported_index_schema"))
 assert_true(to_bool(dict_get_or(unsupported_index, "schema_version", 0) == 2))
 
+invalid_index_path := "results/test_index_invalid.json"
+if file_exists(invalid_index_path) {
+	delete_file(invalid_index_path)
+}
+write_file(invalid_index_path, "{\"schema_version\":")
+
+invalid_index := load_index(invalid_index_path)
+assert_true(to_bool(dict_get_or(dict_get_or(dict_get_or(invalid_index, "meta", {}), "load_error", {}), "code", "") == "json_file_load_failed"))
+assert_true(to_bool(dict_get_or(invalid_index, "schema_version", 0) == 2))
+
 if file_exists(v1_index_path) {
 	delete_file(v1_index_path)
 }
 
 if file_exists(unsupported_index_path) {
 	delete_file(unsupported_index_path)
+}
+
+if file_exists(invalid_index_path) {
+	delete_file(invalid_index_path)
 }
 
 # API ingest path scope enforcement tests

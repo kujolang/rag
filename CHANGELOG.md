@@ -5,6 +5,8 @@ All notable changes to Kujo RAG are documented here.
 ## [Unreleased]
 
 - Added launch-readiness Spec, Eval suite, Kujo/Kennel metadata, and README readiness/version wording alignment for prelaunch review gates.
+- Preserve actionable `meta.load_error` diagnostics when an index exists but its
+  JSON cannot be read or parsed instead of silently returning an empty index.
 
 ## [1.0.0] - 2026-08-08
 

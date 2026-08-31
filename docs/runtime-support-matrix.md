@@ -13,9 +13,9 @@ This matrix applies to:
 
 | Runtime source | Execution mode | Support level | CI validation | Notes |
 |---|---|---|---|---|
-| Pinned Kujo runtime commit (7819d1475e909ec88f510c9927445791ea928836) | Interpreter (`kujo run ... --interpreter`) | supported | required | Primary reliability mode for multi-module flows. |
-| Pinned Kujo runtime commit (7819d1475e909ec88f510c9927445791ea928836) | Bridge (`scripts/run_main_auto.kujo`) | supported | required | Native-first bridge with automatic interpreter fallback. |
-| Pinned Kujo runtime commit (7819d1475e909ec88f510c9927445791ea928836) | Direct native core parity (`kujo run main.kujo ingest/query ...`) | supported-for-core-flows | required | Core ingest/query parity is validated through `tests/test_native_mode_parity.kujo`. |
+| Pinned Kujo runtime commit (3a625ea22b10909df0d9758804a267cb920fd971) | Interpreter (`kujo run ... --interpreter`) | supported | required | Primary reliability mode for multi-module flows. |
+| Pinned Kujo runtime commit (3a625ea22b10909df0d9758804a267cb920fd971) | Bridge (`scripts/run_main_auto.kujo`) | supported | required | Native-first bridge with automatic interpreter fallback. |
+| Pinned Kujo runtime commit (3a625ea22b10909df0d9758804a267cb920fd971) | Direct native core parity (`kujo run main.kujo ingest/query ...`) | supported-for-core-flows | required | Core ingest/query parity is validated through `tests/test_native_mode_parity.kujo`. |
 
 ## Non-Goals / Unsupported Combinations
 
