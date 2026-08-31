@@ -44,8 +44,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          kujo run scripts/run_tests.kujo --interpreter > runtime-mode-interpreter.json
+          status=0
+          kujo run scripts/run_tests.kujo --interpreter > runtime-mode-interpreter.json || status=$?
           cat runtime-mode-interpreter.json
+          exit "$status"
 
       - name: Validate bridge supported mode
         if: matrix.mode == 'bridge'
@@ -151,8 +153,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          kujo run scripts/run_tests.kujo --interpreter > release-gates-run-tests.json
+          status=0
+          kujo run scripts/run_tests.kujo --interpreter > release-gates-run-tests.json || status=$?
           cat release-gates-run-tests.json
+          exit "$status"
 
       - name: Run standalone production evaluation gate
         shell: bash
