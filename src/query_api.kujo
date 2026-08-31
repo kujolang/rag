@@ -3658,7 +3658,7 @@ export start_api_server := func(cfg) {
 		"rbac_enabled": dict_get_or(cfg, "api_rbac_enabled", false)
 	})
 
-	server := http_server(port)
+	server := http_listen(host, port)
 
 	server := server.route("OPTIONS", "/health", func(req) {
 		return cors_preflight_response(req, cfg)

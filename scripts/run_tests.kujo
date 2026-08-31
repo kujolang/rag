@@ -122,6 +122,7 @@ default_tests := [
 	"tests/test_abuse_protection.kujo",
 	"tests/test_ai_provider_model_drift_check.kujo",
 	"tests/test_api_config_versioning_review.kujo",
+	"tests/test_api_bind_contract.kujo",
 	"tests/test_api_contract.kujo",
 	"tests/test_architecture_fitness_review.kujo",
 	"tests/test_async_ingest_workers.kujo",

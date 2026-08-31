@@ -340,6 +340,10 @@ kujo run main.kujo --interpreter query --question "How does Kujo handle module i
 kujo run main.kujo --interpreter serve --host 127.0.0.1 --port 8787
 ```
 
+`--host` is the socket bind address, not display-only metadata. Keep the default
+loopback address unless the API is intentionally placed on a protected private
+interface; use `0.0.0.0` only when all-interface exposure is explicitly required.
+
 4) Run demo assistant:
 
 ```bash
@@ -677,6 +681,7 @@ Test harness notes:
 
 - shared assertions live in `tests_helpers.kujo` and are used by both unit and integration suites
 - API contract coverage lives in `tests/test_api_contract.kujo` (health, ingest, query/filter contracts, malformed payloads, size limits, rate limiting)
+- bind-address regression coverage lives in `tests/test_api_bind_contract.kujo` (configured host wiring in interpreter and VM modes)
 - security regression coverage lives in `tests/test_security.kujo` (path restrictions, auth, body-type safety, PDF extractor hardening)
 - backend adapter contract coverage lives in `tests/test_backend_contract.kujo` (local JSON + memory adapter load/save contract)
 - bootstrap adoption smoke coverage lives in `tests/test_bootstrap.kujo` (template generation + ingest/query e2e)
