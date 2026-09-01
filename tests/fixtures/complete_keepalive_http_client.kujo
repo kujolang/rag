@@ -1,0 +1,25 @@
+port := to_int(env_or("KUJO_RAG_KEEPALIVE_TEST_PORT", "0"))
+if port <= 0 {
+	exit(1)
+}
+
+client := tcp_connect("127.0.0.1", port)
+if type(client) != "tcpstream" {
+	exit(1)
+}
+_ = tcp_set_timeouts(client, 2500, 5000)
+request := "POST /query HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Type: application/json\r\nContent-Length: 2\r\nConnection: keep-alive\r\n\r\n{}"
+started_at := current_timestamp()
+sent := tcp_send(client, request)
+if sent <= 0 {
+	tcp_close(client)
+	exit(1)
+}
+response := tcp_receive(client, 4096)
+elapsed_ms := current_timestamp() - started_at
+tcp_close(client)
+if trim(response) == "" || elapsed_ms >= 2500 {
+	print("elapsed_ms=" + to_string(elapsed_ms) + " response=" + response)
+	exit(1)
+}
+print("complete_keepalive_http_client: ok")

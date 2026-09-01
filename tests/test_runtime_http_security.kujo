@@ -58,6 +58,7 @@ func exercise_mode(mode_flag, port, suffix) {
 	forged_elapsed_ms := current_timestamp() - forged_started_at
 	forged_response := dict_get_or(forged, "stdout", "")
 	forged_denied := contains(forged_response, "untrusted_proxy_peer")
+	complete_keepalive := run_cmd("KUJO_RAG_KEEPALIVE_TEST_PORT=" + to_string(port) + " " + kujo_bin + " run tests/fixtures/complete_keepalive_http_client.kujo --interpreter", 10000)
 	slow_client := run_cmd("KUJO_RAG_SLOW_TEST_PORT=" + to_string(port) + " " + kujo_bin + " run tests/fixtures/slow_http_client.kujo --interpreter", 20000)
 
 	stop_server(pid)
@@ -79,6 +80,7 @@ func exercise_mode(mode_flag, port, suffix) {
 	expect(contains(forged_response, "Bearer forged") == 0, suffix + " auth failure must not reflect bearer credentials")
 	expect(contains(forged_response, "test-proxy-secret") == 0, suffix + " auth failure must not reflect proxy attestation")
 	expect(forged_elapsed_ms < 8000, suffix + " complete request body should not wait for the read deadline")
+	expect(dict_get_or(complete_keepalive, "ok", false), suffix + " declared complete keep-alive body should receive an immediate response")
 	expect(dict_get_or(slow_client, "ok", false), suffix + " incomplete slow body should receive 408")
 	expect(dict_get_or(oversized_created, "ok", false), suffix + " oversized request fixture should be created")
 	expect(oversized_denied, suffix + " oversized body should fail before application handling")
