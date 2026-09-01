@@ -7,10 +7,10 @@
 ## Review metadata
 
 - Review ID: `TM-2026-08-RAG-DRAFT`
-- Prepared: 2026-08-31
+- Prepared: 2026-09-01
 - Repository: `kujolang/rag`
 - Branch: `main`
-- Commit reviewed: `954fbfb56ffff32fe21628380154cf398afe29a2`
+- Commit reviewed: `86d8a32a772d445e13e748f2018c147f23ca5072`
 - Required reviewer: Security Team
 - Approval status: awaiting accountable human review
 - Scope: HTTP API exposure, authentication, authorization, remote ingestion,
@@ -73,7 +73,7 @@ logs, and the integrity of persisted indexes.
 |---|---|---|---|
 | TM-01 | A deployment intended for loopback accidentally listens on every interface, exposing unauthenticated or privileged routes. | Fixed at the reviewed commit: configured `api_host` is passed to `http_listen`; default is `127.0.0.1`. | Verify the deployed listener and firewall rules. Treat explicit `0.0.0.0` as a security-sensitive configuration choice. |
 | TM-02 | A client bypasses the trusted proxy and forges `x-kujo-claim-*` headers. JWT signature verification does not occur inside RAG, so forged issuer, audience, expiry, role, or namespace values could be accepted. | Documentation requires an upstream verifier that strips client-supplied claim headers; strict mode requires issuer and audience. | Prove the backend is unreachable except through the stripping proxy, or require an in-process signed-token verifier before direct exposure. |
-| TM-03 | With RBAC enabled but without role-bearing auth context, a bearer-authenticated client supplies `x-kujo-role: admin` or `x-kujo-namespace: *`. Current resolution deliberately trusts request headers before the configured default role. | RBAC policy checks actions after resolving the caller-provided role and scope. Existing tests confirm header-based role selection. | Decide whether header-derived RBAC identity is permitted only in an explicitly trusted-proxy mode. Otherwise bind roles to authenticated identities or document static bearer credentials as shared administrative credentials. This is not resolved by enabling RBAC alone. |
+| TM-03 | With RBAC enabled but without role-bearing auth context, a bearer-authenticated client supplies `x-kujo-role: admin` or `x-kujo-namespace: *`. | Fixed at the reviewed commit: bearer and unauthenticated development contexts ignore caller-supplied RBAC headers and use the configured default role and namespace; only `jwt_proxy` contexts may consume proxy-provided identity headers. Composed bearer regressions cover role and namespace escalation, while existing JWT-proxy and global job-control behavior remains covered. | Verify the deployed default bearer role and namespace are least-privilege, and prove the JWT proxy strips untrusted identity headers before adding verified claims. |
 | TM-04 | Development defaults are promoted or exposed without credentials, encryption, or RBAC. Bearer mode with no configured token behaves as authentication disabled. | Loopback default and strict/production validation. | Verify production always sets `runtime_environment=production` or `strict_config=true`; add deployment policy enforcement if configuration can bypass startup validation. |
 | TM-05 | An authorized ingest request reads sensitive local files or traverses a path boundary. | Allowed-root canonicalization, component-wise symlink rejection, file-size and extension limits. | Review the actual service account permissions and allowed roots; ensure writable attacker-controlled parents cannot be swapped after validation. |
 | TM-06 | Privacy export or deletion-receipt artifacts expose full namespace contents after the API request completes. | Admin authorization, namespace scoping, deterministic artifact paths, optional at-rest encryption for indexes. | Define permissions, encryption, retention, backup, and publication rules for `results/privacy`; verify these artifacts are never uploaded as generic CI output. |
@@ -88,9 +88,11 @@ logs, and the integrity of persisted indexes.
 The preparer proposes the following for Security Team consideration; none is an
 approved disposition yet:
 
-- Treat TM-02 and TM-03 as release-blocking for any deployment reachable by
-  untrusted clients until the trusted-header boundary is proven or the contract
-  is hardened.
+- Treat TM-02 as release-blocking for any deployment reachable by untrusted
+  clients until the trusted-header boundary is proven or in-process signed-token
+  verification is added.
+- Treat TM-03 as remediated in source, pending deployment verification of the
+  configured bearer defaults and trusted JWT-proxy header stripping.
 - Treat TM-01 as remediated in source, pending hosted CI and deployment listener
   verification.
 - Require production strict mode, loopback/private binding, TLS termination,
@@ -120,6 +122,8 @@ Local evidence at preparation time:
 - `kujo check main.kujo`: passed.
 - Bind contract: passed in interpreter and VM modes.
 - API integration contract: passed.
+- Bearer RBAC escalation regression: passed in interpreter and VM modes with
+  the published Kujo v1.2.0 runtime.
 - Full repository runner: 65/65 suites passed with zero undefined-function
   warnings and within the existing warning budget.
 - Cadence validation: all gates pass except `review_not_overdue`; this is the
