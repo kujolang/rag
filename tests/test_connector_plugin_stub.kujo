@@ -103,7 +103,7 @@ assert_true(to_bool(len(fail_results) >= 1))
 first_fail_result := fail_results[0]
 assert_true(to_bool(dict_get_or(first_fail_result, "ok", true) == false))
 fail_error := str_or(dict_get_or(first_fail_result, "error", ""), "")
-assert_true(to_bool(contains(fail_error, "plugin_") == 1))
+assert_true(to_bool(contains(fail_error, "plugin_")))
 
 if file_exists(pass_config_path) {
 	delete_file(pass_config_path)

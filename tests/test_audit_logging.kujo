@@ -1,7 +1,10 @@
 from src.common import dict_get_or
 from src.config import load_config
 from src.audit_log import append_audit_event, verify_audit_chain
+from src.query_api import validate_audit_startup
 from src.tests_helpers import assert_true
+
+kujo_bin := env_or("KUJO_BIN", "kujo")
 
 audit_path := "./results/test_security_audit_" + to_string(current_timestamp()) + ".log"
 state_path := audit_path + ".state.json"
@@ -16,7 +19,8 @@ if file_exists(state_path) {
 cfg := load_config({
 	"api_audit_enabled": true,
 	"api_audit_path": audit_path,
-	"api_audit_external_sink_mode": "append_file"
+	"api_audit_external_sink_mode": "append_file",
+	"api_audit_integrity_key": "test-only-audit-integrity-key"
 })
 
 ev1 := append_audit_event(cfg, "auth_decision", "allow", {
@@ -36,6 +40,8 @@ assert_true(to_bool(file_exists(state_path) == true))
 verified := verify_audit_chain(cfg)
 assert_true(to_bool(dict_get_or(verified, "ok", false) == true))
 assert_true(to_bool(dict_get_or(verified, "events", 0) == 2))
+startup_verified := validate_audit_startup(cfg)
+assert_true(to_bool(dict_get_or(startup_verified, "ok", false) == true))
 
 raw := read_file(audit_path)
 lines := split(raw, "\n")
@@ -51,6 +57,25 @@ if len(lines) >= 1 && trim(lines[0]) != "" {
 tampered := verify_audit_chain(cfg)
 assert_true(to_bool(dict_get_or(tampered, "ok", true) == false))
 assert_true(to_bool(dict_get_or(dict_get_or(tampered, "error", {}), "code", "") == "audit_hash_mismatch"))
+tampered_startup := validate_audit_startup(cfg)
+assert_true(to_bool(dict_get_or(tampered_startup, "ok", true) == false))
+
+delete_file(audit_path)
+missing_log := verify_audit_chain(cfg)
+assert_true(to_bool(dict_get_or(missing_log, "ok", true) == false))
+assert_true(to_bool(dict_get_or(dict_get_or(missing_log, "error", {}), "code", "") == "audit_log_missing"))
+
+write_file(audit_path, raw)
+delete_file(state_path)
+missing_state := verify_audit_chain(cfg)
+assert_true(to_bool(dict_get_or(missing_state, "ok", true) == false))
+assert_true(to_bool(dict_get_or(dict_get_or(missing_state, "error", {}), "code", "") == "audit_state_missing"))
+
+fail_closed_cmd := "KUJO_BIN=" + kujo_bin + " " + kujo_bin + " run tests/fixtures/audit_fail_closed_server.kujo --interpreter"
+fail_closed_res := execute_status(fail_closed_cmd, {"timeout_ms": 30000})
+assert_true(to_bool(type(fail_closed_res) == "struct"))
+assert_true(to_bool(fail_closed_res.success == false))
+assert_true(to_bool(contains(to_string(fail_closed_res.stdout), "audit_write_failed")))
 
 if file_exists(audit_path) {
 	delete_file(audit_path)

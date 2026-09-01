@@ -240,7 +240,7 @@ func resolve_openssl_binary(cfg) {
 
 func tmp_file_path(prefix, suffix, seed) {
 	id := substring(sha256(prefix + ":" + suffix + ":" + seed + ":" + to_string(current_timestamp())), 0, 16)
-	return "./results/.tmp_" + prefix + "_" + id + suffix
+	return "/tmp/kujo_rag_" + prefix + "_" + id + suffix
 }
 
 func remove_file_if_exists(path_value) {
@@ -290,6 +290,7 @@ func run_encrypt_payload(plain_text, seed_path, cfg) {
 
 	write_file(plain_path, plain_text)
 	write_file(key_path, dict_get_or(key_result, "key", ""))
+	_ = execute_status("chmod 600 " + shell_quote(plain_path) + " " + shell_quote(key_path), {"timeout_ms": 5000})
 
 	binary := dict_get_or(binary_result, "binary", "openssl")
 	cmd := binary + " enc -aes-256-cbc -pbkdf2 -salt -a -A -pass file:" + shell_quote(key_path) + " -in " + shell_quote(plain_path) + " -out " + shell_quote(cipher_path)
@@ -322,11 +323,12 @@ func run_encrypt_payload(plain_text, seed_path, cfg) {
 	return {
 		"ok": true,
 		"ciphertext": ciphertext,
+		"integrity": hmac_sha256(dict_get_or(key_result, "key", ""), ciphertext),
 		"key_source": dict_get_or(key_result, "source", "unknown")
 	}
 }
 
-func run_decrypt_payload(ciphertext, seed_path, cfg) {
+func run_decrypt_payload(ciphertext, integrity, seed_path, cfg) {
 	key_result := resolve_encryption_key(cfg)
 	if dict_get_or(key_result, "ok", false) == false {
 		return key_result
@@ -335,6 +337,27 @@ func run_decrypt_payload(ciphertext, seed_path, cfg) {
 	binary_result := resolve_openssl_binary(cfg)
 	if dict_get_or(binary_result, "ok", false) == false {
 		return binary_result
+	}
+	strict_integrity := dict_get_or(cfg, "strict_config", false) == true || dict_get_or(cfg, "runtime_environment", "development") == "production"
+	if trim(to_string(integrity)) == "" && strict_integrity {
+		return {
+			"ok": false,
+			"error": {
+				"code": "encrypted_payload_integrity_missing",
+				"message": "Encrypted payload is missing its keyed integrity tag",
+				"details": {}
+			}
+		}
+	}
+	if trim(to_string(integrity)) != "" && hmac_sha256_verify(dict_get_or(key_result, "key", ""), ciphertext, to_string(integrity)) == false {
+		return {
+			"ok": false,
+			"error": {
+				"code": "encrypted_index_decrypt_failed",
+				"message": "Encrypted payload integrity verification failed",
+				"details": {}
+			}
+		}
 	}
 
 	if path_exists("./results") == false {
@@ -347,6 +370,7 @@ func run_decrypt_payload(ciphertext, seed_path, cfg) {
 
 	write_file(in_path, ciphertext)
 	write_file(key_path, dict_get_or(key_result, "key", ""))
+	_ = execute_status("chmod 600 " + shell_quote(in_path) + " " + shell_quote(key_path), {"timeout_ms": 5000})
 
 	binary := dict_get_or(binary_result, "binary", "openssl")
 	cmd := binary + " enc -d -aes-256-cbc -pbkdf2 -salt -a -A -pass file:" + shell_quote(key_path) + " -in " + shell_quote(in_path) + " -out " + shell_quote(out_path)
@@ -385,9 +409,93 @@ func run_decrypt_payload(ciphertext, seed_path, cfg) {
 func encrypted_index_envelope(payload) {
 	return {
 		"format": "kujo_rag_encrypted_index_v1",
-		"algorithm": "openssl_aes_256_cbc_pbkdf2_base64",
+		"algorithm": "openssl_aes_256_cbc_pbkdf2_base64_etm_hmac_sha256",
 		"encrypted_at": current_timestamp(),
-		"ciphertext": dict_get_or(payload, "ciphertext", "")
+		"ciphertext": dict_get_or(payload, "ciphertext", ""),
+		"integrity": dict_get_or(payload, "integrity", "")
+	}
+}
+
+export protect_json_at_rest := func(value, seed_path, cfg) {
+	if encryption_enabled(cfg) == false {
+		return {
+			"ok": true,
+			"encrypted": false,
+			"value": value
+		}
+	}
+
+	encrypted := run_encrypt_payload(to_json(value), seed_path, cfg)
+	if dict_get_or(encrypted, "ok", false) == false {
+		return encrypted
+	}
+	return {
+		"ok": true,
+		"encrypted": true,
+		"value": {
+			"format": "kujo_rag_encrypted_artifact_v1",
+			"algorithm": "openssl_aes_256_cbc_pbkdf2_base64_etm_hmac_sha256",
+			"encrypted_at": current_timestamp(),
+			"ciphertext": dict_get_or(encrypted, "ciphertext", ""),
+			"integrity": dict_get_or(encrypted, "integrity", "")
+		}
+	}
+}
+
+export unprotect_json_at_rest := func(value, seed_path, cfg) {
+	if type(value) != "dict" || dict_get_or(value, "format", "") != "kujo_rag_encrypted_artifact_v1" {
+		if encryption_enabled(cfg) {
+			return {
+				"ok": false,
+				"error": {
+					"code": "encrypted_artifact_required",
+					"message": "At-rest encryption is enabled but the artifact is plaintext or has an unsupported format",
+					"details": {"path": seed_path}
+				}
+			}
+		}
+		return {
+			"ok": true,
+			"encrypted": false,
+			"value": value
+		}
+	}
+	ciphertext := trim(str_or(dict_get_or(value, "ciphertext", ""), ""))
+	if ciphertext == "" {
+		return {
+			"ok": false,
+			"error": {
+				"code": "encrypted_artifact_payload_invalid",
+				"message": "Encrypted artifact is missing ciphertext",
+				"details": {"path": seed_path}
+			}
+		}
+	}
+	decrypted := run_decrypt_payload(ciphertext, dict_get_or(value, "integrity", ""), seed_path, cfg)
+	if dict_get_or(decrypted, "ok", false) == false {
+		return decrypted
+	}
+	parsed := null
+	parse_error := null
+	try {
+		parsed = parse_json(dict_get_or(decrypted, "plain_text", ""))
+	} except e {
+		parse_error = e
+	}
+	if type(parse_error) != "null" || type(parsed) != "dict" {
+		return {
+			"ok": false,
+			"error": {
+				"code": "encrypted_artifact_plaintext_invalid",
+				"message": "Decrypted artifact is not a JSON object",
+				"details": {"path": seed_path}
+			}
+		}
+	}
+	return {
+		"ok": true,
+		"encrypted": true,
+		"value": parsed
 	}
 }
 
@@ -419,7 +527,7 @@ func decrypt_envelope_index(envelope, path, cfg) {
 		}
 	}
 
-	decrypted := run_decrypt_payload(ciphertext, path, cfg)
+	decrypted := run_decrypt_payload(ciphertext, dict_get_or(envelope, "integrity", ""), path, cfg)
 	if dict_get_or(decrypted, "ok", false) == false {
 		return decrypted
 	}
@@ -461,6 +569,13 @@ export load_index_with_config := func(path, cfg) {
 	index := dict_get_or(loaded, "data", null)
 	if type(index) != "dict" {
 		return empty_index()
+	}
+	if encryption_enabled(cfg) && is_encrypted_envelope(index) == false {
+		return fallback_with_load_error({
+			"code": "encrypted_index_required",
+			"message": "At-rest encryption is enabled but the persisted index is plaintext or has an unsupported format",
+			"details": {"path": path}
+		})
 	}
 
 	if is_encrypted_envelope(index) {

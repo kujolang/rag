@@ -75,7 +75,7 @@ for entry in first_fields {
 	}
 }
 assert_true(to_bool(owner_found == true))
-assert_true(to_bool(contains(to_lower(str_or(dict_get_or(field_citations[0], "snippet", ""), "")), "owner:") == 1))
+assert_true(to_bool(contains(to_lower(str_or(dict_get_or(field_citations[0], "snippet", ""), "")), "owner:")))
 
 csv_filtered := query_rag(index, "open platform ticket severity high", cfg, {
 	"structured_schema": "tickets",
@@ -85,7 +85,7 @@ assert_true(to_bool(num_or(dict_get_or(csv_filtered, "count", 0), 0) >= 1))
 csv_citations := dict_get_or(csv_filtered, "citations", [])
 assert_true(to_bool(len(csv_citations) >= 1))
 assert_true(to_bool(str_or(dict_get_or(csv_citations[0], "structured_schema", ""), "") == "tickets"))
-assert_true(to_bool(contains(to_lower(str_or(dict_get_or(csv_citations[0], "snippet", ""), "")), "severity:") == 1))
+assert_true(to_bool(contains(to_lower(str_or(dict_get_or(csv_citations[0], "snippet", ""), "")), "severity:")))
 
 if file_exists(index_path) {
 	delete_file(index_path)

@@ -1,6 +1,7 @@
 from src.common import dict_get_or
 from src.config import cfg_with_namespace
 from src.embeddings import clear_embedding_cache, embed_texts, embedding_cache_metrics
+from src.ingestion import discover_files
 from src.parsers import parse_file
 from src.query_api import validate_api_ingest_path, validate_api_query_text, validate_api_recursive
 from src.tests_helpers import assert_true
@@ -73,6 +74,10 @@ assert_true(to_bool(link_result.success == true))
 symlink_escape := validate_api_ingest_path(link_path + "/secret.txt", scope_cfg)
 assert_true(to_bool(dict_get_or(symlink_escape, "ok", true) == false))
 assert_true(to_bool(dict_get_or(symlink_escape, "error", "") == "ingest_path_symlink_forbidden"))
+discovered_with_symlink := discover_files(allowed_root, {
+	"ingest_extensions": ["txt"]
+}, true)
+assert_true(to_bool(len(discovered_with_symlink) == 0))
 
 invalid_query_type := validate_api_query_text({"unexpected": true})
 assert_true(to_bool(dict_get_or(invalid_query_type, "ok", true) == false))

@@ -15,6 +15,13 @@ func load_error_code(index) {
 	return dict_get_or(dict_get_or(dict_get_or(index, "meta", {}), "load_error", {}), "code", "")
 }
 
+func expect(condition, label) {
+	if to_bool(condition) == false {
+		print("test_index_persistence failed: " + label)
+		exit(1)
+	}
+}
+
 if path_exists("./results") == false {
 	create_dir("./results")
 }
@@ -35,9 +42,9 @@ for path in paths {
 
 # Below 1 MiB: persist and reload normally.
 small_result := persist_index_with_config(small_path, fixture_index("small", repeat("s", 262144)), {})
-assert_true(to_bool(dict_get_or(small_result, "ok", false) == true))
+expect(dict_get_or(small_result, "ok", false) == true, "small persist")
 small_loaded := load_index_with_config(small_path, {})
-assert_true(to_bool(dict_get_or(dict_get_or(small_loaded, "meta", {}), "marker", "") == "small"))
+expect(dict_get_or(dict_get_or(small_loaded, "meta", {}), "marker", "") == "small", "small reload")
 
 # Between 1 MiB and 8 MiB: current aligned JSON/file contract remains readable.
 medium_result := persist_index_with_config(medium_path, fixture_index("medium", repeat("m", 2097152)), {})

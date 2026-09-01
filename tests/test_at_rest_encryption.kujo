@@ -30,7 +30,8 @@ saved := save_index_with_backend(base_cfg, index)
 assert_true(to_bool(saved == true))
 
 raw := read_file(index_path)
-assert_true(to_bool(contains(raw, "\"format\":\"kujo_rag_encrypted_index_v1\"") == 1))
+assert_true(to_bool(contains(raw, "\"format\":\"kujo_rag_encrypted_index_v1\"")))
+assert_true(to_bool(contains(raw, "\"integrity\":")))
 assert_true(to_bool(contains(raw, "\"chunks\"") == 0))
 assert_true(to_bool(contains(raw, "\"vectors\"") == 0))
 
@@ -48,6 +49,14 @@ wrong_key_cfg := load_config({
 wrong_key_loaded := load_index_with_backend(wrong_key_cfg)
 wrong_key_error := dict_get_or(dict_get_or(wrong_key_loaded, "meta", {}), "load_error", {})
 assert_true(to_bool(dict_get_or(wrong_key_error, "code", "") == "encrypted_index_decrypt_failed"))
+
+delete_file(index_path)
+write_file(index_path, to_json({"chunks": [], "vectors": [], "lexical": [], "meta": {}}))
+plaintext_downgrade := load_index_with_backend(base_cfg)
+plaintext_error := dict_get_or(dict_get_or(plaintext_downgrade, "meta", {}), "load_error", {})
+assert_true(to_bool(dict_get_or(plaintext_error, "code", "") == "encrypted_index_required"))
+
+assert_true(to_bool(save_index_with_backend(base_cfg, index) == true))
 
 write_file(key_file_path, "unit-key-2")
 key_file_cfg := load_config({

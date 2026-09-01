@@ -53,7 +53,7 @@ func stop_server(pid) {
 	if pid == "" {
 		return true
 	}
-	_ := run_cmd("kill " + pid + " >/dev/null 2>&1 || true")
+	_ := run_cmd("kill -KILL " + pid + " >/dev/null 2>&1 || true")
 	_ := run_cmd("wait " + pid + " >/dev/null 2>&1 || true")
 	return true
 }
@@ -100,7 +100,7 @@ assert_true(to_bool(dict_get_or(invalid_namespace_parsed, "ok", false) == true))
 invalid_namespace_err := dict_get_or(dict_get_or(invalid_namespace_parsed, "data", {}), "error", {})
 assert_true(to_bool(dict_get_or(invalid_namespace_err, "code", "") == "invalid_namespace"))
 assert_true(to_bool(contains(invalid_namespace_raw, "top-secret-value") == 0))
-assert_true(to_bool(contains(invalid_namespace_raw, "REDACTED") == 1))
+assert_true(to_bool(contains(invalid_namespace_raw, "REDACTED")))
 
 _ := stop_server(pid)
 

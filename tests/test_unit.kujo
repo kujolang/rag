@@ -151,7 +151,7 @@ path_results := hybrid_search(filter_index, "kujo query", {
 })
 assert_true(to_bool(len(path_results) == 2))
 for item in path_results {
-	assert_true(to_bool(contains(dict_get_or(item, "path", ""), "docs/") == 1))
+	assert_true(to_bool(contains(dict_get_or(item, "path", ""), "docs/")))
 }
 
 ext_results := hybrid_search(filter_index, "kujo query", {
@@ -337,7 +337,7 @@ namespace_team := cfg_with_namespace(namespace_base_cfg, "Team_A")
 assert_true(to_bool(dict_get_or(namespace_team, "ok", false) == true))
 assert_true(to_bool(dict_get_or(namespace_team, "namespace", "") == "team_a"))
 team_cfg := dict_get_or(namespace_team, "cfg", {})
-assert_true(to_bool(contains(dict_get_or(team_cfg, "index_path", ""), "__team_a.json") == 1))
+assert_true(to_bool(contains(dict_get_or(team_cfg, "index_path", ""), "__team_a.json")))
 
 namespace_invalid := cfg_with_namespace(namespace_base_cfg, "../../secrets")
 assert_true(to_bool(dict_get_or(namespace_invalid, "ok", true) == false))
@@ -590,8 +590,8 @@ discovered_files := discover_files(discover_root, {
 assert_true(to_bool(len(discovered_files) == 3))
 assert_true(to_bool(discovered_files[0] < discovered_files[1]))
 assert_true(to_bool(discovered_files[1] < discovered_files[2]))
-assert_true(to_bool(contains(discovered_files[0], "alpha.txt") == 1))
-assert_true(to_bool(contains(discovered_files[2], "zeta.txt") == 1))
+assert_true(to_bool(contains(discovered_files[0], "alpha.txt")))
+assert_true(to_bool(contains(discovered_files[2], "zeta.txt")))
 
 # Index schema migration tests
 if path_exists("results") == false {

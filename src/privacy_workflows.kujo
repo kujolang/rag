@@ -1,4 +1,5 @@
 from src.common import dict_get_or
+from src.vector_store import protect_json_at_rest
 
 func normalize_namespace_for_path(namespace) {
 	norm := to_lower(trim(to_string(namespace)))
@@ -51,7 +52,7 @@ export summarize_namespace_index := func(index) {
 	}
 }
 
-export write_privacy_export_artifact := func(namespace, index, export_type) {
+export write_privacy_export_artifact := func(namespace, index, export_type, cfg) {
 	ensure_privacy_artifact_dir()
 	ns_slug := normalize_namespace_for_path(namespace)
 	type_slug := normalize_namespace_for_path(export_type)
@@ -66,13 +67,34 @@ export write_privacy_export_artifact := func(namespace, index, export_type) {
 		"index": index
 	}
 
-	if file_exists(path) {
-		delete_file(path)
+	protected := protect_json_at_rest(payload, path, cfg)
+	if dict_get_or(protected, "ok", false) == false {
+		return {
+			"ok": false,
+			"error": dict_get_or(protected, "error", {
+				"code": "privacy_artifact_encryption_failed",
+				"message": "Privacy artifact could not be protected",
+				"details": {"path": path}
+			})
+		}
 	}
-	write_file(path, to_json(payload))
+	stored_value := dict_get_or(protected, "value", payload)
+	written := write_file_atomic(path, to_json(stored_value), true)
+	if written != true {
+		return {
+			"ok": false,
+			"error": {
+				"code": "privacy_artifact_write_failed",
+				"message": "Privacy artifact could not be written atomically",
+				"details": {"path": path}
+			}
+		}
+	}
 
 	return {
+		"ok": true,
 		"path": path,
+		"encrypted": dict_get_or(protected, "encrypted", false),
 		"generated_at_ms": ts,
 		"summary": dict_get_or(payload, "summary", {})
 	}

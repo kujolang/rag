@@ -29,7 +29,37 @@ func should_include_file(path, cfg) {
 	return false
 }
 
+path_traverses_symlink := func(root_path, path_value) {
+	if path_is_symlink(root_path) {
+		return true
+	}
+	root_absolute := regex_replace(path_absolute(root_path), "\\\\", "/")
+	path_absolute_value := regex_replace(path_absolute(path_value), "\\\\", "/")
+	if path_absolute_value == root_absolute {
+		return false
+	}
+	root_prefix := root_absolute + "/"
+	if starts_with(path_absolute_value, root_prefix) == false {
+		return true
+	}
+	relative_path := substring(path_absolute_value, len(root_prefix), len(path_absolute_value))
+	parts := split(relative_path, "/")
+	current := root_absolute
+	for part in parts {
+		if part != "" && part != "." {
+			current = path_join(current, part)
+			if path_exists(current) && path_is_symlink(current) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 export discover_files := func(root_path, cfg, recursive) {
+	if path_traverses_symlink(root_path, root_path) {
+		return []
+	}
 	files := []
 	seen := {}
 	stack := [root_path]
@@ -38,7 +68,7 @@ export discover_files := func(root_path, cfg, recursive) {
 		current := stack[len(stack) - 1]
 		stack := slice(stack, 0, len(stack) - 1)
 
-		if path_is_dir(current) {
+		if path_is_dir(current) && path_traverses_symlink(root_path, current) == false {
 			entries := []
 			err := null
 			try {
@@ -52,8 +82,9 @@ export discover_files := func(root_path, cfg, recursive) {
 				for name in entries {
 					if should_skip_name(name) == false {
 						child := path_join(current, name)
+						child_is_symlink := path_traverses_symlink(root_path, child)
 						if path_is_file(child) {
-							if should_include_file(child, cfg) {
+							if child_is_symlink == false && should_include_file(child, cfg) {
 								if has_key(seen, child) == 0 {
 									seen[child] := true
 									files := push(files, child)
@@ -61,7 +92,7 @@ export discover_files := func(root_path, cfg, recursive) {
 							}
 						}
 						if recursive == true {
-							if path_is_dir(child) {
+							if child_is_symlink == false && path_is_dir(child) {
 								stack := push(stack, child)
 							}
 						}
@@ -69,7 +100,7 @@ export discover_files := func(root_path, cfg, recursive) {
 				}
 			}
 		}
-		if path_is_file(current) {
+		if path_is_file(current) && path_traverses_symlink(root_path, current) == false {
 			if should_include_file(current, cfg) {
 				if has_key(seen, current) == 0 {
 					seen[current] := true
@@ -129,10 +160,18 @@ export ingest_documents := func(root_path, cfg, recursive) {
 		size_ok := true
 		err := null
 		size := 0
-		try {
-			size := file_size(path)
-		} except e {
-			err := e
+		if path_traverses_symlink(root_path, path) {
+			size_ok = false
+			errors = push(errors, {
+				"path": path,
+				"error": "ingest_path_symlink_forbidden"
+			})
+		} else {
+			try {
+				size := file_size(path)
+			} except e {
+				err := e
+			}
 		}
 		if type(err) != "null" {
 			size_ok := false

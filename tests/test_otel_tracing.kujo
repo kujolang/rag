@@ -53,7 +53,7 @@ func stop_server(pid) {
 	if pid == "" {
 		return true
 	}
-	_ := run_cmd("kill " + pid + " >/dev/null 2>&1 || true")
+	_ := run_cmd("kill -KILL " + pid + " >/dev/null 2>&1 || true")
 	_ := run_cmd("wait " + pid + " >/dev/null 2>&1 || true")
 	return true
 }
@@ -89,6 +89,9 @@ correlation_id := "corr-otel-001"
 if file_exists(audit_path) {
 	delete_file(audit_path)
 }
+if file_exists(audit_path + ".state.json") {
+	delete_file(audit_path + ".state.json")
+}
 
 env_prefix := "KUJO_RAG_ENV=development KUJO_RAG_API_AUTH_PROVIDER=none KUJO_RAG_API_AUDIT_ENABLED=true KUJO_RAG_API_AUDIT_PATH=" + audit_path + " KUJO_RAG_OTEL_ENABLED=true KUJO_RAG_OTEL_EXPORT_MODE=audit KUJO_RAG_OTEL_SERVICE_NAME=kujo-rag-test KUJO_RAG_OTEL_OTLP_ENDPOINT=http://otel.example:4318"
 pid := start_server(port, env_prefix, "/tmp/kujo_rag_otel_tracing.log")
@@ -102,19 +105,25 @@ attempt := 0
 while attempt < 120 {
 	trace_log := run_cmd("cat " + audit_path + " 2>/dev/null | cat")
 	trace_text = dict_get_or(trace_log, "stdout", "")
-	if contains(trace_text, "trace_span") == 1 && contains(trace_text, "query.stage.synthesize") == 1 {
+	if contains(trace_text, "trace_span") && contains(trace_text, "query.stage.synthesize") {
 		break
 	}
 	attempt = attempt + 1
 }
-assert_true(to_bool(contains(trace_text, "trace_span") == 1))
-assert_true(to_bool(contains(trace_text, "query.retrieval") == 1))
-assert_true(to_bool(contains(trace_text, "query.stage.tokenize") == 1))
-assert_true(to_bool(contains(trace_text, "query.stage.synthesize") == 1))
-assert_true(to_bool(contains(trace_text, request_id) == 1))
-assert_true(to_bool(contains(trace_text, correlation_id) == 1))
-assert_true(to_bool(contains(trace_text, "kujo-rag-test") == 1))
+assert_true(to_bool(contains(trace_text, "trace_span")))
+assert_true(to_bool(contains(trace_text, "query.retrieval")))
+assert_true(to_bool(contains(trace_text, "query.stage.tokenize")))
+assert_true(to_bool(contains(trace_text, "query.stage.synthesize")))
+assert_true(to_bool(contains(trace_text, request_id)))
+assert_true(to_bool(contains(trace_text, correlation_id)))
+assert_true(to_bool(contains(trace_text, "kujo-rag-test")))
 
 _ := stop_server(pid)
+if file_exists(audit_path) {
+	delete_file(audit_path)
+}
+if file_exists(audit_path + ".state.json") {
+	delete_file(audit_path + ".state.json")
+}
 
 print("test_otel_tracing: ok")

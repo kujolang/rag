@@ -51,7 +51,7 @@ assert_true(to_bool(type(dict_get_or(dict_get_or(sbom, "metadata", {}), "compone
 assert_true(to_bool(len(dict_get_or(sbom, "components", [])) > 0))
 
 checksums_content := read_file(checksums_path)
-assert_true(to_bool(contains(checksums_content, "release-manifest.json") == 1))
-assert_true(to_bool(contains(checksums_content, "main.kujo") == 1))
+assert_true(to_bool(contains(checksums_content, "release-manifest.json")))
+assert_true(to_bool(contains(checksums_content, "main.kujo")))
 
 print("test_release_artifacts: ok")

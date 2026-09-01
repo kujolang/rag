@@ -1,0 +1,13 @@
+from src.config import load_config
+from src.query_api import start_api_server
+
+cfg := load_config({
+	"api_host": "127.0.0.1",
+	"api_port": 28991,
+	"api_audit_enabled": true,
+	"api_audit_path": "/dev/null/kujo-rag-audit.log",
+	"api_audit_fail_closed": true,
+	"api_audit_integrity_key": "test-only-audit-integrity-key"
+})
+
+start_api_server(cfg)

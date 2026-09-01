@@ -61,7 +61,7 @@ func stop_server(pid) {
 	if pid == "" {
 		return true
 	}
-	_ := run_cmd("kill " + pid + " >/dev/null 2>&1 || true")
+	_ := run_cmd("kill -KILL " + pid + " >/dev/null 2>&1 || true")
 	_ = run_cmd("wait " + pid + " >/dev/null 2>&1 || true")
 	return true
 }
@@ -85,7 +85,7 @@ func wait_for_health(port) {
 func test_privacy_export_delete_api_flow() {
 	base_port := 23000 + (current_timestamp() % 1000)
 	port := base_port
-	env_prefix := "KUJO_RAG_API_AUTH_PROVIDER=none KUJO_RAG_RETENTION_POLICY_ENABLED=true KUJO_RAG_RETENTION_LEGAL_HOLD_ENABLED=true"
+	env_prefix := "KUJO_RAG_API_AUTH_PROVIDER=none KUJO_RAG_AT_REST_ENCRYPTION_ENABLED=true KUJO_RAG_AT_REST_ENCRYPTION_KEY=test-only-privacy-key KUJO_RAG_RETENTION_POLICY_ENABLED=true KUJO_RAG_RETENTION_LEGAL_HOLD_ENABLED=true"
 	pid := start_server(port, env_prefix, "/tmp/kujo_rag_privacy_workflows.log")
 	expect(pid != "", "server pid should be available")
 	expect(wait_for_health(port) == true, "server health should become ready")
@@ -110,6 +110,14 @@ func test_privacy_export_delete_api_flow() {
 	export_path := to_string(dict_get_or(export_artifact, "path", ""))
 	expect(export_path != "", "privacy export should include artifact path")
 	expect(file_exists(export_path), "privacy export artifact should exist")
+	export_envelope := parse_json(read_file(export_path))
+	expect(dict_get_or(export_envelope, "format", "") == "kujo_rag_encrypted_artifact_v1", "privacy export should be encrypted at rest")
+	expect(has_key(export_envelope, "index") == 0, "privacy export must not expose plaintext index data")
+	runtime_state_path := "./results/api_state_" + to_string(port) + ".json"
+	expect(file_exists(runtime_state_path), "API runtime state should be persisted")
+	runtime_state_envelope := parse_json(read_file(runtime_state_path))
+	expect(dict_get_or(runtime_state_envelope, "format", "") == "kujo_rag_encrypted_artifact_v1", "content-bearing API runtime state should be encrypted at rest")
+	expect(has_key(runtime_state_envelope, "indexes") == 0, "runtime state must not expose plaintext indexes")
 
 	delete_payload := "{\"namespace\":\"" + namespace + "\",\"reason\":\"user_delete_request\"}"
 	delete_res := post_json(port, "/privacy/delete", delete_payload)
@@ -127,6 +135,8 @@ func test_privacy_export_delete_api_flow() {
 	receipt_path := to_string(dict_get_or(delete_receipt, "path", ""))
 	expect(receipt_path != "", "privacy delete should include deletion receipt path")
 	expect(file_exists(receipt_path), "privacy delete receipt artifact should exist")
+	receipt_envelope := parse_json(read_file(receipt_path))
+	expect(dict_get_or(receipt_envelope, "format", "") == "kujo_rag_encrypted_artifact_v1", "privacy delete receipt should be encrypted at rest")
 
 	hold_namespace := "privacyhold"
 	hold_ingest_payload := "{\"path\":\"./examples/kujo_docs\",\"recursive\":true,\"namespace\":\"" + hold_namespace + "\"}"

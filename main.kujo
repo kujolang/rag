@@ -155,6 +155,15 @@ func command_serve(parsed, cfg) {
 	if has_key(flags, "host") == 1 {
 		cfg["api_host"] := flags["host"]
 	}
+	serve_diagnostics := validate_config(cfg)
+	if dict_get_or(serve_diagnostics, "ok", false) == false {
+		exit_with_json({
+			"ok": false,
+			"error": "invalid_configuration",
+			"message": "Serve configuration validation failed after applying CLI overrides",
+			"diagnostics": serve_diagnostics
+		}, 1)
+	}
 	start_api_server(cfg)
 }
 

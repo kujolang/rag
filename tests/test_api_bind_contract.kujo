@@ -2,10 +2,16 @@ from src.tests_helpers import assert_true
 
 source := read_file("src/query_api.kujo")
 assert_true(to_bool(contains(source, "server := http_listen(host, port)")))
+assert_true(to_bool(contains(source, "dict_get_or(req, \"peer_ip\", dict_get_or(req, \"remote_addr\"")))
 if contains(source, "server := http_server(port)") {
 	print("test_api_bind_contract assertion failed: legacy wildcard listener remains")
 	exit(1)
 }
+main_source := read_file("main.kujo")
+assert_true(to_bool(contains(main_source, "serve_diagnostics := validate_config(cfg)")))
+compose_source := read_file("docker-compose.yml")
+assert_true(to_bool(contains(compose_source, "127.0.0.1:8787:8787")))
+assert_true(to_bool(contains(compose_source, "KUJO_RAG_API_ALLOW_NON_LOOPBACK")))
 print("source_contract: ok")
 
 print("test_api_bind_contract: ok")

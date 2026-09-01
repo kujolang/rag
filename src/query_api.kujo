@@ -1,9 +1,10 @@
 from src.common import dict_get_or, dict_without_key, num_or, read_json_file_or, write_json_file
-from src.audit_log import append_audit_event
-from src.config import cfg_with_namespace
+from src.audit_log import append_audit_event, verify_audit_chain
+from src.config import cfg_with_namespace, validate_config
 from src.embeddings import clear_embedding_cache, embedding_cache_metrics
 from src.rag_engine import build_rag_index, load_or_initialize_index, query_rag, query_rag_federated
 from src.vector_backend import save_index_with_backend
+from src.vector_store import protect_json_at_rest, unprotect_json_at_rest
 from src.retention_policy import apply_retention_policy, normalize_retention_ttl_days
 from src.privacy_workflows import summarize_namespace_index, write_privacy_export_artifact, build_deleted_namespace_index
 
@@ -16,7 +17,7 @@ func req_path(req) {
 }
 
 func req_ip(req) {
-	ip := dict_get_or(req, "remote_addr", "unknown")
+	ip := dict_get_or(req, "peer_ip", dict_get_or(req, "remote_addr", "unknown"))
 	if type(ip) != "string" || trim(ip) == "" {
 		ip := "unknown"
 	}
@@ -1887,8 +1888,23 @@ func log_access(enabled, req, status, extra) {
 }
 
 func audit_emit(cfg, event_type, status, details) {
-	_ = append_audit_event(cfg, event_type, status, details)
-	return null
+	audit_append_result := append_audit_event(cfg, event_type, status, details)
+	if dict_get_or(audit_append_result, "ok", false) == false && dict_get_or(cfg, "api_audit_fail_closed", false) == true {
+		print(to_json({
+			"ok": false,
+			"error": "audit_write_failed",
+			"message": "Security audit persistence failed; stopping service"
+		}))
+		exit(1)
+	}
+	return audit_append_result
+}
+
+export validate_audit_startup := func(cfg) {
+	if dict_get_or(cfg, "api_audit_enabled", false) == false {
+		return {"ok": true, "enabled": false}
+	}
+	return verify_audit_chain(cfg)
 }
 
 func trace_emit(cfg, req, span_name, stage, status, started_at, attributes) {
@@ -1909,7 +1925,7 @@ func trace_emit(cfg, req, span_name, stage, status, started_at, attributes) {
 		"duration_ms": current_timestamp() - started_at,
 		"attributes": attributes
 	}
-	_ = append_audit_event(cfg, "trace_span", status, details)
+	_ = audit_emit(cfg, "trace_span", status, details)
 	return null
 }
 
@@ -2062,7 +2078,35 @@ func load_api_runtime_state(state) {
 	if path == "" {
 		return state
 	}
-	persisted := read_json_file_or(path, {})
+	if file_exists(path) == false {
+		return state
+	}
+	raw := read_file(path)
+	persisted := null
+	parse_error := null
+	try {
+		persisted = parse_json(raw)
+	} except e {
+		parse_error = e
+	}
+	if type(parse_error) != "null" || type(persisted) != "dict" {
+		encryption_cfg := dict_get_or(state, "_runtime_encryption_cfg", {})
+		if dict_get_or(encryption_cfg, "strict_config", false) == true || dict_get_or(encryption_cfg, "runtime_environment", "development") == "production" {
+			print(to_json({"ok": false, "error": "runtime_state_read_failed", "message": "Runtime state could not be decoded; stopping service"}))
+			exit(1)
+		}
+		return state
+	}
+	encryption_cfg := dict_get_or(state, "_runtime_encryption_cfg", {})
+	unprotected := unprotect_json_at_rest(persisted, path, encryption_cfg)
+	if dict_get_or(unprotected, "ok", false) == false {
+		if dict_get_or(encryption_cfg, "strict_config", false) == true || dict_get_or(encryption_cfg, "runtime_environment", "development") == "production" {
+			print(to_json({"ok": false, "error": "runtime_state_integrity_failed", "message": "Runtime state could not be authenticated or decrypted; stopping service"}))
+			exit(1)
+		}
+		return state
+	}
+	persisted = dict_get_or(unprotected, "value", {})
 	if type(persisted) != "dict" {
 		return state
 	}
@@ -2084,7 +2128,21 @@ func persist_api_runtime_state(state) {
 			create_dir("results")
 		}
 	}
-	write_json_file(path, state)
+	encryption_cfg := dict_get_or(state, "_runtime_encryption_cfg", {})
+	persisted_state := dict_without_key(state, "_runtime_encryption_cfg")
+	protected := protect_json_at_rest(persisted_state, path, encryption_cfg)
+	if dict_get_or(protected, "ok", false) == false {
+		if dict_get_or(encryption_cfg, "strict_config", false) == true || dict_get_or(encryption_cfg, "runtime_environment", "development") == "production" {
+			print(to_json({"ok": false, "error": "runtime_state_encryption_failed", "message": "Runtime state could not be protected; stopping service"}))
+			exit(1)
+		}
+		return state
+	}
+	written := write_file_atomic(path, to_json(dict_get_or(protected, "value", persisted_state)), true)
+	if written != true && (dict_get_or(encryption_cfg, "strict_config", false) == true || dict_get_or(encryption_cfg, "runtime_environment", "development") == "production") {
+		print(to_json({"ok": false, "error": "runtime_state_write_failed", "message": "Runtime state could not be persisted; stopping service"}))
+		exit(1)
+	}
 	return state
 }
 
@@ -2611,6 +2669,53 @@ func token_in_list(token, values) {
 	return false
 }
 
+func peer_host(req) {
+	peer := to_lower(trim(req_ip(req)))
+	if peer == "" || peer == "unknown" {
+		return ""
+	}
+	if starts_with(peer, "[") {
+		close_index := index_of(peer, "]")
+		if close_index > 1 {
+			return substring(peer, 1, close_index)
+		}
+	}
+	if index_of(peer, ".") >= 0 {
+		parts := split(peer, ":")
+		if len(parts) > 0 {
+			return trim(parts[0])
+		}
+	}
+	return peer
+}
+
+func trusted_proxy_peer(req, cfg) {
+	allowed := dict_get_or(cfg, "api_trusted_proxy_ips", [])
+	if type(allowed) != "array" || len(allowed) == 0 {
+		return false
+	}
+	actual := peer_host(req)
+	for candidate in allowed {
+		if to_lower(trim(to_string(candidate))) == actual {
+			return true
+		}
+	}
+	return false
+}
+
+func trusted_proxy_secret_matches(req, cfg) {
+	expected := trim(to_string(dict_get_or(cfg, "api_trusted_proxy_secret", "")))
+	header_name := to_lower(trim(to_string(dict_get_or(cfg, "api_trusted_proxy_secret_header", "x-kujo-proxy-secret"))))
+	if expected == "" || header_name == "" {
+		return false
+	}
+	provided := trim(req_header(req, header_name))
+	if provided == "" {
+		return false
+	}
+	return sha256(provided) == sha256(expected)
+}
+
 export validate_api_auth := func(req, cfg) {
 	mode := auth_provider_mode(cfg)
 	if mode == "none" {
@@ -2718,6 +2823,26 @@ export validate_api_auth := func(req, cfg) {
 			}
 		}
 
+		if trusted_proxy_peer(req, cfg) == false {
+			return {
+				"ok": false,
+				"status": 403,
+				"error": "untrusted_proxy_peer",
+				"message": "JWT proxy claims are accepted only from an explicitly trusted peer",
+				"provider": "jwt_proxy"
+			}
+		}
+
+		if trusted_proxy_secret_matches(req, cfg) == false {
+			return {
+				"ok": false,
+				"status": 403,
+				"error": "invalid_proxy_attestation",
+				"message": "JWT proxy attestation is missing or invalid",
+				"provider": "jwt_proxy"
+			}
+		}
+
 		claim_issuer := trim(req_header(req, "x-kujo-claim-iss"))
 		claim_audience_raw := trim(req_header(req, "x-kujo-claim-aud"))
 		claim_exp_raw := trim(req_header(req, "x-kujo-claim-exp"))
@@ -2802,7 +2927,7 @@ func rbac_role_from_context(req, cfg, auth_ctx) {
 			return role
 		}
 	}
-	return to_lower(trim(to_string(dict_get_or(cfg, "api_rbac_default_role", "admin"))))
+	return to_lower(trim(to_string(dict_get_or(cfg, "api_rbac_default_role", "reader"))))
 }
 
 func rbac_namespace_scope_from_context(req, cfg, auth_ctx) {
@@ -2869,7 +2994,7 @@ export validate_api_rbac := func(req, cfg, auth_ctx, action, namespace) {
 
 	role := rbac_role_from_context(req, cfg, auth_ctx)
 	if role == "" {
-		role = "admin"
+		role = "reader"
 	}
 
 	if rbac_action_allowed(cfg, role, action_name) == false {
@@ -3507,6 +3632,19 @@ func process_queued_ingest_job(state, cfg, job_id) {
 		return state
 	}
 	namespace_cfg := dict_get_or(ns_cfg, "cfg", cfg)
+	path_scope := validate_api_ingest_path(resolved_path, namespace_cfg)
+	if dict_get_or(path_scope, "ok", false) == false {
+		state = set_ingest_job_status(state, job_id, "failed", {
+			"code": dict_get_or(path_scope, "error", "ingest_path_forbidden"),
+			"message": dict_get_or(path_scope, "message", "Queued ingest path failed execution-time validation"),
+			"details": dict_get_or(path_scope, "details", {}),
+			"worker_mode": "queue"
+		})
+		state = increment_metric_counter(state, "ingest_errors")
+		audit_emit(cfg, "ingest_operation", "failure", {"mode": "queue_worker", "namespace": namespace, "path": resolved_path, "job_id": job_id, "code": dict_get_or(path_scope, "error", "ingest_path_forbidden"), "stage": "path_scope_revalidation"})
+		return state
+	}
+	resolved_path = dict_get_or(path_scope, "path", resolved_path)
 
 	state = increment_metric_counter(state, "ingest_requests")
 	started_at := current_timestamp()
@@ -3614,6 +3752,12 @@ func run_ingest_worker_cycle(state, cfg) {
 }
 
 export start_api_server := func(cfg) {
+	startup_diagnostics := validate_config(cfg)
+	if dict_get_or(startup_diagnostics, "ok", false) == false {
+		print(to_json({"ok": false, "error": "invalid_configuration", "message": "API configuration validation failed before listen", "diagnostics": startup_diagnostics}))
+		exit(1)
+	}
+
 	host := dict_get_or(cfg, "api_host", "127.0.0.1")
 	port := dict_get_or(cfg, "api_port", 8787)
 	access_log := dict_get_or(cfg, "api_access_log", true)
@@ -3659,8 +3803,22 @@ export start_api_server := func(cfg) {
 		}
 	}
 	state["_runtime_state_path"] := "./results/api_state_" + to_string(port) + ".json"
+	state["_runtime_encryption_cfg"] := {
+		"at_rest_encryption_enabled": dict_get_or(cfg, "at_rest_encryption_enabled", false),
+		"at_rest_encryption_key": dict_get_or(cfg, "at_rest_encryption_key", ""),
+		"at_rest_encryption_key_file": dict_get_or(cfg, "at_rest_encryption_key_file", ""),
+		"at_rest_encryption_openssl_bin": dict_get_or(cfg, "at_rest_encryption_openssl_bin", "openssl"),
+		"strict_config": dict_get_or(cfg, "strict_config", false),
+		"runtime_environment": dict_get_or(cfg, "runtime_environment", "development")
+	}
 	if file_exists(dict_get_or(state, "_runtime_state_path", "")) {
 		delete_file(dict_get_or(state, "_runtime_state_path", ""))
+	}
+
+	audit_startup := validate_audit_startup(cfg)
+	if dict_get_or(audit_startup, "ok", false) == false {
+		print(to_json({"ok": false, "error": "audit_integrity_check_failed", "message": "Security audit chain validation failed; refusing to listen"}))
+		exit(1)
 	}
 
 	print("Kujo RAG API listening on http://" + host + ":" + to_string(port))
@@ -3872,10 +4030,7 @@ export start_api_server := func(cfg) {
 			trace_emit(cfg, req, "ingest.request", "auth", "error", started_at, {"code": code})
 			audit_emit(cfg, "ingest_operation", "failure", {"code": code, "status": status, "stage": "auth"})
 			log_access(access_log, req, status, {"code": code})
-			return json_err(req, cfg, status, code, message, {
-				"authorization": req_header(req, "authorization"),
-				"provider": dict_get_or(auth, "provider", "unknown")
-			})
+			return json_err(req, cfg, status, code, message, {"provider": dict_get_or(auth, "provider", "unknown")})
 		}
 
 		parsed := parse_api_json_body(req, cfg)
@@ -4020,10 +4175,7 @@ export start_api_server := func(cfg) {
 			message := dict_get_or(auth, "message", "Unauthorized")
 			audit_emit(cfg, "ingest_operation", "failure", {"code": code, "status": status, "stage": "auth"})
 			log_access(access_log, req, status, {"code": code})
-			return json_err(req, cfg, status, code, message, {
-				"authorization": req_header(req, "authorization"),
-				"provider": dict_get_or(auth, "provider", "unknown")
-			})
+			return json_err(req, cfg, status, code, message, {"provider": dict_get_or(auth, "provider", "unknown")})
 		}
 
 		parsed := parse_api_json_body(req, cfg)
@@ -4237,10 +4389,7 @@ export start_api_server := func(cfg) {
 			code := dict_get_or(auth, "error", "unauthorized")
 			message := dict_get_or(auth, "message", "Unauthorized")
 			log_access(access_log, req, status, {"code": code})
-			return json_err(req, cfg, status, code, message, {
-				"authorization": req_header(req, "authorization"),
-				"provider": dict_get_or(auth, "provider", "unknown")
-			})
+			return json_err(req, cfg, status, code, message, {"provider": dict_get_or(auth, "provider", "unknown")})
 		}
 
 		rbac := validate_api_rbac(req, cfg, auth, "ingest", "*")
@@ -4305,10 +4454,7 @@ export start_api_server := func(cfg) {
 			code := dict_get_or(auth, "error", "unauthorized")
 			message := dict_get_or(auth, "message", "Unauthorized")
 			log_access(access_log, req, status, {"code": code})
-			return json_err(req, cfg, status, code, message, {
-				"authorization": req_header(req, "authorization"),
-				"provider": dict_get_or(auth, "provider", "unknown")
-			})
+			return json_err(req, cfg, status, code, message, {"provider": dict_get_or(auth, "provider", "unknown")})
 		}
 
 		rbac := validate_api_rbac(req, cfg, auth, "admin", "*")
@@ -4362,10 +4508,7 @@ export start_api_server := func(cfg) {
 			message := dict_get_or(auth, "message", "Unauthorized")
 			trace_emit(cfg, req, "query.request", "auth", "error", started_at, {"code": code})
 			log_access(access_log, req, status, {"code": code})
-			return json_err(req, cfg, status, code, message, {
-				"authorization": req_header(req, "authorization"),
-				"provider": dict_get_or(auth, "provider", "unknown")
-			})
+			return json_err(req, cfg, status, code, message, {"provider": dict_get_or(auth, "provider", "unknown")})
 		}
 
 		parsed := parse_api_json_body(req, cfg)
@@ -4676,10 +4819,7 @@ export start_api_server := func(cfg) {
 			code := dict_get_or(auth, "error", "unauthorized")
 			message := dict_get_or(auth, "message", "Unauthorized")
 			log_access(access_log, req, status, {"code": code})
-			return json_err(req, cfg, status, code, message, {
-				"authorization": req_header(req, "authorization"),
-				"provider": dict_get_or(auth, "provider", "unknown")
-			})
+			return json_err(req, cfg, status, code, message, {"provider": dict_get_or(auth, "provider", "unknown")})
 		}
 
 		rbac := validate_api_rbac(req, cfg, auth, "admin", dict_get_or(cfg, "namespace", "default"))
@@ -4712,10 +4852,7 @@ export start_api_server := func(cfg) {
 			code := dict_get_or(auth, "error", "unauthorized")
 			message := dict_get_or(auth, "message", "Unauthorized")
 			log_access(access_log, req, status, {"code": code})
-			return json_err(req, cfg, status, code, message, {
-				"authorization": req_header(req, "authorization"),
-				"provider": dict_get_or(auth, "provider", "unknown")
-			})
+			return json_err(req, cfg, status, code, message, {"provider": dict_get_or(auth, "provider", "unknown")})
 		}
 
 		rbac := validate_api_rbac(req, cfg, auth, "admin", dict_get_or(cfg, "namespace", "default"))
@@ -4759,10 +4896,7 @@ export start_api_server := func(cfg) {
 			code := dict_get_or(auth, "error", "unauthorized")
 			message := dict_get_or(auth, "message", "Unauthorized")
 			log_access(access_log, req, status, {"code": code})
-			return json_err(req, cfg, status, code, message, {
-				"authorization": req_header(req, "authorization"),
-				"provider": dict_get_or(auth, "provider", "unknown")
-			})
+			return json_err(req, cfg, status, code, message, {"provider": dict_get_or(auth, "provider", "unknown")})
 		}
 
 		parsed := parse_api_json_body(req, cfg)
@@ -4850,10 +4984,7 @@ export start_api_server := func(cfg) {
 			code := dict_get_or(auth, "error", "unauthorized")
 			message := dict_get_or(auth, "message", "Unauthorized")
 			log_access(access_log, req, status, {"code": code})
-			return json_err(req, cfg, status, code, message, {
-				"authorization": req_header(req, "authorization"),
-				"provider": dict_get_or(auth, "provider", "unknown")
-			})
+			return json_err(req, cfg, status, code, message, {"provider": dict_get_or(auth, "provider", "unknown")})
 		}
 
 		if to_bool(dict_get_or(cfg, "retention_legal_hold_enabled", true)) == false {
@@ -4943,10 +5074,7 @@ export start_api_server := func(cfg) {
 			code := dict_get_or(auth, "error", "unauthorized")
 			message := dict_get_or(auth, "message", "Unauthorized")
 			log_access(access_log, req, status, {"code": code})
-			return json_err(req, cfg, status, code, message, {
-				"authorization": req_header(req, "authorization"),
-				"provider": dict_get_or(auth, "provider", "unknown")
-			})
+			return json_err(req, cfg, status, code, message, {"provider": dict_get_or(auth, "provider", "unknown")})
 		}
 
 		parsed := parse_api_json_body(req, cfg)
@@ -5031,10 +5159,7 @@ export start_api_server := func(cfg) {
 			code := dict_get_or(auth, "error", "unauthorized")
 			message := dict_get_or(auth, "message", "Unauthorized")
 			log_access(access_log, req, status, {"code": code})
-			return json_err(req, cfg, status, code, message, {
-				"authorization": req_header(req, "authorization"),
-				"provider": dict_get_or(auth, "provider", "unknown")
-			})
+			return json_err(req, cfg, status, code, message, {"provider": dict_get_or(auth, "provider", "unknown")})
 		}
 
 		parsed := parse_api_json_body(req, cfg)
@@ -5113,13 +5238,19 @@ export start_api_server := func(cfg) {
 		ttl_days := normalize_retention_ttl_days(dict_get_or(policy, "ttl_days", 365), 365)
 		retention_result := apply_retention_policy(index_payload, now_ms, ttl_days, false)
 		updated_index := dict_get_or(retention_result, "index", index_payload)
+		retention_persisted := save_index_with_backend(namespace_cfg, updated_index)
+		if retention_persisted != true {
+			audit_emit(cfg, "admin_operation", "failure", {"path": "/retention/purge", "namespace": namespace, "code": "retention_persistence_failed"})
+			return json_err(req, cfg, 500, "retention_persistence_failed", "Retention purge could not be persisted to the configured vector backend", {
+				"namespace": namespace
+			})
+		}
 
 		indexes := dict_get_or(state, "indexes", {})
 		indexes[namespace] = updated_index
 		state["indexes"] = indexes
 		state = invalidate_caches_after_ingest(state, namespace)
 		state = persist_api_runtime_state(state)
-		save_index_with_backend(namespace_cfg, updated_index)
 
 		response_data := {
 			"namespace": namespace,
@@ -5154,10 +5285,7 @@ export start_api_server := func(cfg) {
 			code := dict_get_or(auth, "error", "unauthorized")
 			message := dict_get_or(auth, "message", "Unauthorized")
 			log_access(access_log, req, status, {"code": code})
-			return json_err(req, cfg, status, code, message, {
-				"authorization": req_header(req, "authorization"),
-				"provider": dict_get_or(auth, "provider", "unknown")
-			})
+			return json_err(req, cfg, status, code, message, {"provider": dict_get_or(auth, "provider", "unknown")})
 		}
 
 		parsed := parse_api_json_body(req, cfg)
@@ -5197,7 +5325,14 @@ export start_api_server := func(cfg) {
 		state = dict_get_or(indexed, "state", state)
 		index_payload := dict_get_or(indexed, "index", {})
 		summary := summarize_namespace_index(index_payload)
-		artifact := write_privacy_export_artifact(namespace, index_payload, export_type)
+		artifact := write_privacy_export_artifact(namespace, index_payload, export_type, cfg)
+		if dict_get_or(artifact, "ok", false) == false {
+			audit_emit(cfg, "admin_operation", "failure", {"path": "/privacy/export", "namespace": namespace, "code": "privacy_artifact_write_failed"})
+			return json_err(req, cfg, 500, "privacy_artifact_write_failed", "Privacy export could not be protected and persisted", {
+				"namespace": namespace,
+				"error": dict_get_or(artifact, "error", {})
+			})
+		}
 
 		response_data := {
 			"namespace": namespace,
@@ -5229,10 +5364,7 @@ export start_api_server := func(cfg) {
 			code := dict_get_or(auth, "error", "unauthorized")
 			message := dict_get_or(auth, "message", "Unauthorized")
 			log_access(access_log, req, status, {"code": code})
-			return json_err(req, cfg, status, code, message, {
-				"authorization": req_header(req, "authorization"),
-				"provider": dict_get_or(auth, "provider", "unknown")
-			})
+			return json_err(req, cfg, status, code, message, {"provider": dict_get_or(auth, "provider", "unknown")})
 		}
 
 		parsed := parse_api_json_body(req, cfg)
@@ -5298,32 +5430,43 @@ export start_api_server := func(cfg) {
 			state = dict_get_or(indexed, "state", state)
 			current_index := dict_get_or(indexed, "index", {})
 			pre_delete_summary := summarize_namespace_index(current_index)
-			pre_delete_export := write_privacy_export_artifact(namespace, current_index, "delete_preflight")
+			pre_delete_export := write_privacy_export_artifact(namespace, current_index, "delete_preflight", cfg)
+			if dict_get_or(pre_delete_export, "ok", false) == false {
+				delete_error = "privacy_preflight_artifact_write_failed"
+			} else {
+				deleted_index := build_deleted_namespace_index(current_index, namespace)
+				delete_persisted := save_index_with_backend(namespace_cfg, deleted_index)
+				if delete_persisted != true {
+					delete_error = "privacy_delete_persistence_failed"
+				} else {
+					indexes := dict_get_or(state, "indexes", {})
+					indexes[namespace] := deleted_index
+					state["indexes"] := indexes
+					state = apply_namespace_privacy_delete(state, namespace)
+					state = persist_api_runtime_state(state)
 
-			deleted_index := build_deleted_namespace_index(current_index, namespace)
-			indexes := dict_get_or(state, "indexes", {})
-			indexes[namespace] := deleted_index
-			state["indexes"] := indexes
-			state = apply_namespace_privacy_delete(state, namespace)
-			state = persist_api_runtime_state(state)
-			save_index_with_backend(namespace_cfg, deleted_index)
-
-			post_delete_summary := summarize_namespace_index(deleted_index)
-			delete_receipt := write_privacy_export_artifact(namespace, deleted_index, "delete_receipt")
-			response_data := {
-				"namespace": namespace,
-				"index_path": dict_get_or(namespace_cfg, "index_path", ""),
-				"delete_reason": delete_reason,
-				"deleted": true,
-				"pre_delete_export": pre_delete_export,
-				"deletion_receipt": delete_receipt,
-				"summary_before": pre_delete_summary,
-				"summary_after": post_delete_summary,
-				"deleted_scopes": ["chunks", "vectors", "lexical", "documents_index", "sessions", "ingest_jobs", "ingest_queue", "ingest_idempotency", "query_cache", "retention_controls", "tenant_runtime_metrics"]
+					post_delete_summary := summarize_namespace_index(deleted_index)
+					delete_receipt := write_privacy_export_artifact(namespace, deleted_index, "delete_receipt", cfg)
+					if dict_get_or(delete_receipt, "ok", false) == false {
+						delete_error = "privacy_delete_receipt_write_failed"
+					} else {
+						response_data := {
+							"namespace": namespace,
+							"index_path": dict_get_or(namespace_cfg, "index_path", ""),
+							"delete_reason": delete_reason,
+							"deleted": true,
+							"pre_delete_export": pre_delete_export,
+							"deletion_receipt": delete_receipt,
+							"summary_before": pre_delete_summary,
+							"summary_after": post_delete_summary,
+							"deleted_scopes": ["chunks", "vectors", "lexical", "documents_index", "sessions", "ingest_jobs", "ingest_queue", "ingest_idempotency", "query_cache", "retention_controls", "tenant_runtime_metrics"]
+						}
+						audit_emit(cfg, "admin_operation", "success", {"path": "/privacy/delete", "namespace": namespace, "reason": delete_reason, "deleted_chunks": dict_get_or(pre_delete_summary, "chunk_count", 0), "receipt_path": dict_get_or(delete_receipt, "path", "")})
+						log_access(access_log, req, 200, {"privacy_delete": true, "namespace": namespace, "deleted_chunks": dict_get_or(pre_delete_summary, "chunk_count", 0)})
+						delete_response = json_ok(req, cfg, response_data)
+					}
+				}
 			}
-			audit_emit(cfg, "admin_operation", "success", {"path": "/privacy/delete", "namespace": namespace, "reason": delete_reason, "deleted_chunks": dict_get_or(pre_delete_summary, "chunk_count", 0), "receipt_path": dict_get_or(delete_receipt, "path", "")})
-			log_access(access_log, req, 200, {"privacy_delete": true, "namespace": namespace, "deleted_chunks": dict_get_or(pre_delete_summary, "chunk_count", 0)})
-			delete_response = json_ok(req, cfg, response_data)
 		} except e {
 			delete_error = e
 		}
@@ -5355,10 +5498,7 @@ export start_api_server := func(cfg) {
 			code := dict_get_or(auth, "error", "unauthorized")
 			message := dict_get_or(auth, "message", "Unauthorized")
 			log_access(access_log, req, status, {"code": code})
-			return json_err(req, cfg, status, code, message, {
-				"authorization": req_header(req, "authorization"),
-				"provider": dict_get_or(auth, "provider", "unknown")
-			})
+			return json_err(req, cfg, status, code, message, {"provider": dict_get_or(auth, "provider", "unknown")})
 		}
 
 		rbac := validate_api_rbac(req, cfg, auth, "admin", dict_get_or(cfg, "namespace", "default"))
@@ -5391,10 +5531,7 @@ export start_api_server := func(cfg) {
 			code := dict_get_or(auth, "error", "unauthorized")
 			message := dict_get_or(auth, "message", "Unauthorized")
 			log_access(access_log, req, status, {"code": code})
-			return json_err(req, cfg, status, code, message, {
-				"authorization": req_header(req, "authorization"),
-				"provider": dict_get_or(auth, "provider", "unknown")
-			})
+			return json_err(req, cfg, status, code, message, {"provider": dict_get_or(auth, "provider", "unknown")})
 		}
 
 		rbac := validate_api_rbac(req, cfg, auth, "admin", dict_get_or(cfg, "namespace", "default"))
@@ -5443,10 +5580,7 @@ export start_api_server := func(cfg) {
 			code := dict_get_or(auth, "error", "unauthorized")
 			message := dict_get_or(auth, "message", "Unauthorized")
 			log_access(access_log, req, status, {"code": code})
-			return json_err(req, cfg, status, code, message, {
-				"authorization": req_header(req, "authorization"),
-				"provider": dict_get_or(auth, "provider", "unknown")
-			})
+			return json_err(req, cfg, status, code, message, {"provider": dict_get_or(auth, "provider", "unknown")})
 		}
 
 		rbac := validate_api_rbac(req, cfg, auth, "admin", dict_get_or(cfg, "namespace", "default"))
@@ -5480,10 +5614,7 @@ export start_api_server := func(cfg) {
 			code := dict_get_or(auth, "error", "unauthorized")
 			message := dict_get_or(auth, "message", "Unauthorized")
 			log_access(access_log, req, status, {"code": code})
-			return json_err(req, cfg, status, code, message, {
-				"authorization": req_header(req, "authorization"),
-				"provider": dict_get_or(auth, "provider", "unknown")
-			})
+			return json_err(req, cfg, status, code, message, {"provider": dict_get_or(auth, "provider", "unknown")})
 		}
 
 		rbac := validate_api_rbac(req, cfg, auth, "admin", dict_get_or(cfg, "namespace", "default"))

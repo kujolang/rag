@@ -182,7 +182,7 @@ func answer_terms_match(answer_text, required_terms_any) {
 
 	normalized_answer := to_lower(answer_text)
 	for term in required_terms_any {
-		if contains(normalized_answer, term) == 1 {
+		if contains(normalized_answer, term) {
 			return true
 		}
 	}
@@ -198,7 +198,7 @@ func citation_path_match(citations, expected_path_contains) {
 	needle := to_lower(expected_path_contains)
 	for citation in citations {
 		path_value := to_lower(str_or(dict_get_or(citation, "path", ""), ""))
-		if contains(path_value, needle) == 1 {
+		if contains(path_value, needle) {
 			return true
 		}
 	}

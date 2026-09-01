@@ -13,6 +13,7 @@ export default_config := func() {
 		"vector_backend_qdrant_sync_enabled": false,
 		"vector_backend_qdrant_timeout_ms": 8000,
 		"vector_backend_qdrant_fail_open": true,
+		"vector_backend_qdrant_allowed_hosts": [],
 		"vector_backend_qdrant_mirror_path": "",
 		"at_rest_encryption_enabled": false,
 		"at_rest_encryption_key": "",
@@ -35,6 +36,7 @@ export default_config := func() {
 		"parser_timeout_ms": 30000,
 		"parser_sandbox_max_bytes": 5000000,
 		"api_host": "127.0.0.1",
+		"api_allow_non_loopback": false,
 		"api_port": 8787,
 		"api_max_body_bytes": 1048576,
 		"api_max_query_chars": 4000,
@@ -52,8 +54,11 @@ export default_config := func() {
 		"api_jwt_issuer": "",
 		"api_jwt_audience": "",
 		"api_jwt_clock_skew_sec": 60,
+		"api_trusted_proxy_secret": "",
+		"api_trusted_proxy_secret_header": "x-kujo-proxy-secret",
+		"api_trusted_proxy_ips": ["127.0.0.1", "::1"],
 		"api_rbac_enabled": false,
-		"api_rbac_default_role": "admin",
+		"api_rbac_default_role": "reader",
 		"api_rbac_role_header": "x-kujo-role",
 		"api_rbac_namespace_header": "x-kujo-namespace",
 		"api_rbac_policy": {
@@ -64,6 +69,8 @@ export default_config := func() {
 		"api_audit_enabled": false,
 		"api_audit_path": "./results/security_audit.log",
 		"api_audit_external_sink_mode": "append_file",
+		"api_audit_fail_closed": false,
+		"api_audit_integrity_key": "",
 		"api_redaction_enabled": true,
 		"api_redaction_mask": "[REDACTED]",
 		"api_redaction_keys": ["authorization", "token", "api_key", "apikey", "secret", "password", "passphrase", "x-api-key", "set-cookie", "cookie", "bearer", "openai_api_key"],
@@ -272,6 +279,53 @@ func parse_csv_string_array(value, default_value) {
 	return parsed
 }
 
+func is_loopback_host(host_value) {
+	host := to_lower(trim(to_string(host_value)))
+	return host == "127.0.0.1" || host == "localhost" || host == "::1" || host == "[::1]"
+}
+
+func array_contains_string(values, expected) {
+	if type(values) != "array" {
+		return false
+	}
+	needle := to_lower(trim(to_string(expected)))
+	for value in values {
+		if to_lower(trim(to_string(value))) == needle {
+			return true
+		}
+	}
+	return false
+}
+
+func url_host(url_value) {
+	url := trim(to_string(url_value))
+	scheme_sep := index_of(url, "://")
+	if scheme_sep < 0 {
+		return ""
+	}
+	authority_and_path := substring(url, scheme_sep + 3, len(url))
+	authority_parts := split(authority_and_path, "/")
+	if len(authority_parts) == 0 {
+		return ""
+	}
+	authority := trim(authority_parts[0])
+	if authority == "" || index_of(authority, "@") >= 0 {
+		return ""
+	}
+	if starts_with(authority, "[") {
+		close_index := index_of(authority, "]")
+		if close_index <= 1 {
+			return ""
+		}
+		return to_lower(substring(authority, 1, close_index))
+	}
+	host_parts := split(authority, ":")
+	if len(host_parts) == 0 {
+		return ""
+	}
+	return to_lower(trim(host_parts[0]))
+}
+
 func parse_json_dict_or(value, default_value) {
 	if type(value) != "string" {
 		return default_value
@@ -310,6 +364,7 @@ export load_config := func(overrides) {
 	cfg["vector_backend_qdrant_sync_enabled"] := parse_bool_or(env_or("KUJO_RAG_VECTOR_BACKEND_QDRANT_SYNC_ENABLED", "false"), cfg["vector_backend_qdrant_sync_enabled"])
 	cfg["vector_backend_qdrant_timeout_ms"] := parse_int_or(env_or("KUJO_RAG_VECTOR_BACKEND_QDRANT_TIMEOUT_MS", to_string(cfg["vector_backend_qdrant_timeout_ms"])), cfg["vector_backend_qdrant_timeout_ms"])
 	cfg["vector_backend_qdrant_fail_open"] := parse_bool_or(env_or("KUJO_RAG_VECTOR_BACKEND_QDRANT_FAIL_OPEN", "true"), cfg["vector_backend_qdrant_fail_open"])
+	cfg["vector_backend_qdrant_allowed_hosts"] := parse_csv_string_array(env_or("KUJO_RAG_VECTOR_BACKEND_QDRANT_ALLOWED_HOSTS", ""), dict_get_or(cfg, "vector_backend_qdrant_allowed_hosts", []))
 	cfg["vector_backend_qdrant_mirror_path"] := trim(env_or("KUJO_RAG_VECTOR_BACKEND_QDRANT_MIRROR_PATH", cfg["vector_backend_qdrant_mirror_path"]))
 	cfg["at_rest_encryption_enabled"] := parse_bool_or(env_or("KUJO_RAG_AT_REST_ENCRYPTION_ENABLED", "false"), cfg["at_rest_encryption_enabled"])
 	cfg["at_rest_encryption_key"] := env_or("KUJO_RAG_AT_REST_ENCRYPTION_KEY", cfg["at_rest_encryption_key"])
@@ -329,6 +384,7 @@ export load_config := func(overrides) {
 	cfg["rerank_mmr_lambda"] := parse_float_or(env_or("KUJO_RAG_RERANK_MMR_LAMBDA", to_string(cfg["rerank_mmr_lambda"])), cfg["rerank_mmr_lambda"])
 	cfg["query_expansion"] := parse_bool_or(env_or("KUJO_RAG_QUERY_EXPANSION", "true"), cfg["query_expansion"])
 	cfg["api_host"] := env_or("KUJO_RAG_API_HOST", cfg["api_host"])
+	cfg["api_allow_non_loopback"] := parse_bool_or(env_or("KUJO_RAG_API_ALLOW_NON_LOOPBACK", "false"), cfg["api_allow_non_loopback"])
 	cfg["api_port"] := parse_int_or(env_or("KUJO_RAG_API_PORT", to_string(cfg["api_port"])), cfg["api_port"])
 	cfg["api_max_body_bytes"] := parse_int_or(env_or("KUJO_RAG_API_MAX_BODY_BYTES", to_string(cfg["api_max_body_bytes"])), cfg["api_max_body_bytes"])
 	cfg["api_max_query_chars"] := parse_int_or(env_or("KUJO_RAG_API_MAX_QUERY_CHARS", to_string(cfg["api_max_query_chars"])), cfg["api_max_query_chars"])
@@ -346,6 +402,9 @@ export load_config := func(overrides) {
 	cfg["api_jwt_issuer"] := trim(env_or("KUJO_RAG_API_JWT_ISSUER", cfg["api_jwt_issuer"]))
 	cfg["api_jwt_audience"] := trim(env_or("KUJO_RAG_API_JWT_AUDIENCE", cfg["api_jwt_audience"]))
 	cfg["api_jwt_clock_skew_sec"] := parse_int_or(env_or("KUJO_RAG_API_JWT_CLOCK_SKEW_SEC", to_string(cfg["api_jwt_clock_skew_sec"])), cfg["api_jwt_clock_skew_sec"])
+	cfg["api_trusted_proxy_secret"] := env_or("KUJO_RAG_API_TRUSTED_PROXY_SECRET", cfg["api_trusted_proxy_secret"])
+	cfg["api_trusted_proxy_secret_header"] := to_lower(trim(env_or("KUJO_RAG_API_TRUSTED_PROXY_SECRET_HEADER", cfg["api_trusted_proxy_secret_header"])))
+	cfg["api_trusted_proxy_ips"] := parse_csv_string_array(env_or("KUJO_RAG_API_TRUSTED_PROXY_IPS", ""), cfg["api_trusted_proxy_ips"])
 	cfg["api_rbac_enabled"] := parse_bool_or(env_or("KUJO_RAG_API_RBAC_ENABLED", "false"), cfg["api_rbac_enabled"])
 	cfg["api_rbac_default_role"] := to_lower(trim(env_or("KUJO_RAG_API_RBAC_DEFAULT_ROLE", cfg["api_rbac_default_role"])))
 	cfg["api_rbac_role_header"] := to_lower(trim(env_or("KUJO_RAG_API_RBAC_ROLE_HEADER", cfg["api_rbac_role_header"])))
@@ -354,6 +413,8 @@ export load_config := func(overrides) {
 	cfg["api_audit_enabled"] := parse_bool_or(env_or("KUJO_RAG_API_AUDIT_ENABLED", "false"), cfg["api_audit_enabled"])
 	cfg["api_audit_path"] := env_or("KUJO_RAG_API_AUDIT_PATH", cfg["api_audit_path"])
 	cfg["api_audit_external_sink_mode"] := to_lower(trim(env_or("KUJO_RAG_API_AUDIT_EXTERNAL_SINK_MODE", cfg["api_audit_external_sink_mode"])))
+	cfg["api_audit_fail_closed"] := parse_bool_or(env_or("KUJO_RAG_API_AUDIT_FAIL_CLOSED", "false"), cfg["api_audit_fail_closed"])
+	cfg["api_audit_integrity_key"] := env_or("KUJO_RAG_API_AUDIT_INTEGRITY_KEY", cfg["api_audit_integrity_key"])
 	cfg["api_redaction_enabled"] := parse_bool_or(env_or("KUJO_RAG_API_REDACTION_ENABLED", "true"), cfg["api_redaction_enabled"])
 	cfg["api_redaction_mask"] := env_or("KUJO_RAG_API_REDACTION_MASK", cfg["api_redaction_mask"])
 	cfg["api_redaction_keys"] := parse_csv_string_array(env_or("KUJO_RAG_API_REDACTION_KEYS", ""), cfg["api_redaction_keys"])
@@ -580,10 +641,48 @@ export validate_config := func(cfg) {
 	qdrant_url := trim(str_or(dict_get_or(cfg, "vector_backend_qdrant_url", ""), ""))
 	qdrant_collection := trim(str_or(dict_get_or(cfg, "vector_backend_qdrant_collection", ""), ""))
 	qdrant_sync_enabled := bool_or(dict_get_or(cfg, "vector_backend_qdrant_sync_enabled", false), false)
+	qdrant_fail_open := bool_or(dict_get_or(cfg, "vector_backend_qdrant_fail_open", true), true)
+	qdrant_allowed_hosts := dict_get_or(cfg, "vector_backend_qdrant_allowed_hosts", [])
+	qdrant_host := url_host(qdrant_url)
 	encryption_enabled := bool_or(dict_get_or(cfg, "at_rest_encryption_enabled", false), false)
 	encryption_key := trim(str_or(dict_get_or(cfg, "at_rest_encryption_key", ""), ""))
 	encryption_key_file := trim(str_or(dict_get_or(cfg, "at_rest_encryption_key_file", ""), ""))
 	encryption_openssl_bin := trim(str_or(dict_get_or(cfg, "at_rest_encryption_openssl_bin", "openssl"), "openssl"))
+
+	if is_loopback_host(api_host) == false && bool_or(dict_get_or(cfg, "api_allow_non_loopback", false), false) == false {
+		errors = push(errors, {
+			"code": "non_loopback_requires_explicit_opt_in",
+			"field": "api_allow_non_loopback",
+			"message": "Non-loopback API binding requires KUJO_RAG_API_ALLOW_NON_LOOPBACK=true"
+		})
+	}
+
+	if auth_provider == "jwt_proxy" {
+		proxy_secret := trim(str_or(dict_get_or(cfg, "api_trusted_proxy_secret", ""), ""))
+		proxy_secret_header := trim(str_or(dict_get_or(cfg, "api_trusted_proxy_secret_header", ""), ""))
+		trusted_proxy_ips := dict_get_or(cfg, "api_trusted_proxy_ips", [])
+		if proxy_secret == "" {
+			errors = push(errors, {
+				"code": "trusted_proxy_secret_required",
+				"field": "api_trusted_proxy_secret",
+				"message": "jwt_proxy mode requires KUJO_RAG_API_TRUSTED_PROXY_SECRET"
+			})
+		}
+		if proxy_secret_header == "" {
+			errors = push(errors, {
+				"code": "trusted_proxy_secret_header_required",
+				"field": "api_trusted_proxy_secret_header",
+				"message": "jwt_proxy mode requires a trusted proxy secret header name"
+			})
+		}
+		if type(trusted_proxy_ips) != "array" || len(trusted_proxy_ips) == 0 {
+			errors = push(errors, {
+				"code": "trusted_proxy_ips_required",
+				"field": "api_trusted_proxy_ips",
+				"message": "jwt_proxy mode requires at least one trusted proxy peer IP"
+			})
+		}
+	}
 
 	if vector_backend == "qdrant_http" {
 		if qdrant_collection == "" {
@@ -616,6 +715,13 @@ export validate_config := func(cfg) {
 					"code": "qdrant_url_unusual",
 					"field": "vector_backend_qdrant_url",
 					"message": "vector_backend_qdrant_url should usually start with http:// or https://"
+				})
+			}
+			if qdrant_host == "" {
+				errors = push(errors, {
+					"code": "invalid_qdrant_url",
+					"field": "vector_backend_qdrant_url",
+					"message": "vector_backend_qdrant_url must contain a valid host and must not include userinfo"
 				})
 			}
 		}
@@ -698,6 +804,67 @@ export validate_config := func(cfg) {
 			}
 		}
 
+		if rbac_enabled == false {
+			errors = push(errors, {
+				"code": "strict_requires_rbac",
+				"field": "api_rbac_enabled",
+				"message": "Strict mode requires RBAC enforcement"
+			})
+		}
+		if audit_enabled == false {
+			errors = push(errors, {
+				"code": "strict_requires_audit",
+				"field": "api_audit_enabled",
+				"message": "Strict mode requires tamper-evident audit logging"
+			})
+		}
+		if bool_or(dict_get_or(cfg, "api_audit_fail_closed", false), false) == false {
+			errors = push(errors, {
+				"code": "strict_requires_audit_fail_closed",
+				"field": "api_audit_fail_closed",
+				"message": "Strict mode requires fail-closed audit writes"
+			})
+		}
+		if trim(str_or(dict_get_or(cfg, "api_audit_integrity_key", ""), "")) == "" {
+			errors = push(errors, {
+				"code": "strict_requires_audit_integrity_key",
+				"field": "api_audit_integrity_key",
+				"message": "Strict mode requires a secret key for keyed audit-chain integrity"
+			})
+		}
+		if bool_or(dict_get_or(cfg, "api_redaction_enabled", false), false) == false {
+			errors = push(errors, {
+				"code": "strict_requires_redaction",
+				"field": "api_redaction_enabled",
+				"message": "Strict mode requires sensitive-data redaction"
+			})
+		}
+
+		if vector_backend == "qdrant_http" && qdrant_sync_enabled {
+			if starts_with(to_lower(qdrant_url), "https://") == false {
+				errors = push(errors, {
+					"code": "strict_requires_qdrant_https",
+					"field": "vector_backend_qdrant_url",
+					"message": "Strict Qdrant synchronization requires an HTTPS endpoint"
+				})
+			}
+			if qdrant_fail_open {
+				errors = push(errors, {
+					"code": "strict_disallows_qdrant_fail_open",
+					"field": "vector_backend_qdrant_fail_open",
+					"message": "Strict Qdrant synchronization must fail closed"
+				})
+			}
+			if type(qdrant_allowed_hosts) != "array" || len(qdrant_allowed_hosts) == 0 || array_contains_string(qdrant_allowed_hosts, qdrant_host) == false {
+				errors = push(errors, {
+					"code": "strict_requires_qdrant_host_allowlist",
+					"field": "vector_backend_qdrant_allowed_hosts",
+					"message": "Strict Qdrant synchronization requires the endpoint host in KUJO_RAG_VECTOR_BACKEND_QDRANT_ALLOWED_HOSTS",
+					"actual": qdrant_host
+				})
+			}
+		}
+
 		namespace := str_or(dict_get_or(cfg, "namespace", "default"), "default")
 		if namespace == "default" {
 			errors = push(errors, {
@@ -726,13 +893,23 @@ export validate_config := func(cfg) {
 			})
 		}
 
-		rbac_default_role := str_or(dict_get_or(cfg, "api_rbac_default_role", "admin"), "admin")
+		rbac_default_role := str_or(dict_get_or(cfg, "api_rbac_default_role", "reader"), "reader")
 		if has_key(rbac_policy, rbac_default_role) == 0 {
 			errors = push(errors, {
 				"code": "invalid_rbac_default_role",
 				"field": "api_rbac_default_role",
 				"message": "api_rbac_default_role must exist in api_rbac_policy"
 			})
+		}
+		if strict_mode {
+			default_actions := dict_get_or(rbac_policy, rbac_default_role, [])
+			if array_contains_string(default_actions, "admin") || array_contains_string(default_actions, "export") || array_contains_string(default_actions, "*") {
+				errors = push(errors, {
+					"code": "strict_disallows_privileged_rbac_default",
+					"field": "api_rbac_default_role",
+					"message": "Strict mode default RBAC role must not grant admin, export, or wildcard actions"
+				})
+			}
 		}
 
 		role_header := str_or(dict_get_or(cfg, "api_rbac_role_header", "x-kujo-role"), "x-kujo-role")

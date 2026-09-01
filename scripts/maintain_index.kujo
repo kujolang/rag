@@ -54,7 +54,7 @@ func parse_allowed_hour_ranges(raw_value) {
 	while i < len(tokens) {
 		token := trim(tokens[i])
 		if token != "" {
-			if contains(token, "-") == 1 {
+			if contains(token, "-") {
 				parts := split(token, "-")
 				if len(parts) == 2 {
 					start_hour := parse_int_or(trim(parts[0]), -1)

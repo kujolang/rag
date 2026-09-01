@@ -1,0 +1,47 @@
+from src.tests_helpers import assert_true
+
+func expect(condition, label) {
+	if to_bool(condition) == false {
+		print("test_qdrant_security failed: " + label)
+		exit(1)
+	}
+}
+
+kujo_bin := env_or("KUJO_BIN", "kujo")
+suffix := to_string(current_timestamp())
+fake_bin_dir := "/tmp/kujo-rag-fake-curl-" + suffix
+fake_curl := fake_bin_dir + "/curl"
+args_log := "/tmp/kujo-rag-fake-curl-args-" + suffix + ".log"
+
+create_dir(fake_bin_dir)
+write_file(fake_curl, "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$FAKE_CURL_LOG\"\nif [ \"$FAKE_CURL_FAIL\" = \"1\" ]; then exit 22; fi\nprintf '200'\nexit 0\n")
+chmod_result := execute_status("chmod 700 " + fake_curl, {"timeout_ms": 5000})
+expect(chmod_result.success == true, "fake curl should be executable")
+
+cmd := "PATH=" + fake_bin_dir + ":$PATH FAKE_CURL_LOG=" + args_log + " KUJO_BIN=" + kujo_bin + " " + kujo_bin + " run tests/fixtures/qdrant_sync_probe.kujo --interpreter"
+result := execute_status(cmd, {"timeout_ms": 120000})
+expect(type(result) == "struct", "probe should return process result")
+if result.success == false {
+	print(to_string(result.stdout))
+	print(to_string(result.stderr))
+}
+expect(result.success == true, "Qdrant sync probe should succeed")
+
+args_text := read_file(args_log)
+expect(to_bool(contains(args_text, "process-list-secret-marker")) == false, "API key must not appear in process arguments")
+expect(to_bool(contains(args_text, "qdrant_headers")) == true, "curl should receive a header-file reference")
+expect(to_bool(contains(args_text, "-X DELETE")) == true, "authoritative sync should reset the remote collection")
+
+failure_cmd := "PATH=" + fake_bin_dir + ":$PATH FAKE_CURL_LOG=" + args_log + " FAKE_CURL_FAIL=1 QDRANT_PROBE_EXPECT_FAILURE=true KUJO_BIN=" + kujo_bin + " " + kujo_bin + " run tests/fixtures/qdrant_sync_probe.kujo --interpreter"
+failure_result := execute_status(failure_cmd, {"timeout_ms": 120000})
+expect(type(failure_result) == "struct", "failure probe should return process result")
+expect(failure_result.success == true, "fail-closed sync should preserve the prior local mirror")
+
+for path in [args_log, "./results/test_qdrant_security_mirror.json"] {
+	if file_exists(path) {
+		delete_file(path)
+	}
+}
+_ = execute_status("rm -f " + fake_curl + " && rmdir " + fake_bin_dir, {"timeout_ms": 5000})
+
+print("test_qdrant_security: ok")

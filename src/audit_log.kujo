@@ -78,11 +78,12 @@ func result_success(res) {
 
 func append_line(path_value, line_value) {
 	ensure_parent_dir(path_value)
-	tmp_path := "./results/.tmp_audit_" + substring(sha256(path_value + ":" + to_string(current_timestamp())), 0, 16) + ".log"
+	tmp_path := "/tmp/kujo_rag_audit_" + substring(sha256(path_value + ":" + to_string(current_timestamp())), 0, 16) + ".log"
 	if file_exists(tmp_path) {
 		delete_file(tmp_path)
 	}
 	write_file(tmp_path, line_value + "\n")
+	_ = execute_status("chmod 600 " + shell_quote(tmp_path), {"timeout_ms": 5000})
 
 	cmd := "cat " + shell_quote(tmp_path) + " >> " + shell_quote(path_value)
 	res := execute_status(cmd, {"timeout_ms": 15000})
@@ -93,11 +94,15 @@ func append_line(path_value, line_value) {
 	return ok
 }
 
-func compute_event_hash(prev_hash, event) {
-	return sha256(prev_hash + "\n" + to_json(event))
+func compute_event_hash(prev_hash, event, cfg) {
+	integrity_key := trim(str_or(dict_get_or(cfg, "api_audit_integrity_key", ""), ""))
+	if integrity_key == "" {
+		return sha256(prev_hash + "\n" + to_json(event))
+	}
+	return hmac_sha256(integrity_key, prev_hash + "\n" + to_json(event))
 }
 
-export append_audit_event := func(cfg, event_type, status, details) {
+func append_audit_event_after_verification(cfg, event_type, status, details) {
 	if audit_enabled(cfg) == false {
 		return {
 			"ok": true,
@@ -133,7 +138,7 @@ export append_audit_event := func(cfg, event_type, status, details) {
 		"details": details,
 		"prev_hash": prev_hash
 	}
-	event_hash := compute_event_hash(prev_hash, event)
+	event_hash := compute_event_hash(prev_hash, event, cfg)
 	event["event_hash"] := event_hash
 
 	if append_line(path_value, to_json(event)) == false {
@@ -149,11 +154,21 @@ export append_audit_event := func(cfg, event_type, status, details) {
 		}
 	}
 
-	write_json_file(state_path, {
+	state_written := write_file_atomic(state_path, to_json({
 		"sequence": sequence,
 		"last_hash": event_hash,
 		"updated_at": current_timestamp()
-	})
+	}), true)
+	if state_written != true {
+		return {
+			"ok": false,
+			"error": {
+				"code": "audit_state_write_failed",
+				"message": "Audit event was appended but its chain checkpoint could not be persisted",
+				"details": {"path": state_path}
+			}
+		}
+	}
 
 	return {
 		"ok": true,
@@ -167,6 +182,19 @@ export verify_audit_chain := func(cfg) {
 	state_path := audit_state_path(path_value)
 
 	if file_exists(path_value) == false {
+		if file_exists(state_path) {
+			orphaned_state := load_chain_state(state_path)
+			if dict_get_or(orphaned_state, "sequence", 0) > 0 || str_or(dict_get_or(orphaned_state, "last_hash", "GENESIS"), "GENESIS") != "GENESIS" {
+				return {
+					"ok": false,
+					"error": {
+						"code": "audit_log_missing",
+						"message": "Audit log is missing while a non-genesis chain checkpoint exists",
+						"details": {"path": path_value, "state_path": state_path}
+					}
+				}
+			}
+		}
 		return {
 			"ok": true,
 			"events": 0,
@@ -224,7 +252,7 @@ export verify_audit_chain := func(cfg) {
 				"details": dict_get_or(event, "details", {}),
 				"prev_hash": dict_get_or(event, "prev_hash", "")
 			}
-			expected_hash := compute_event_hash(prev_hash, event_no_hash)
+			expected_hash := compute_event_hash(prev_hash, event_no_hash, cfg)
 			actual_hash := str_or(dict_get_or(event, "event_hash", ""), "")
 			if actual_hash != expected_hash {
 				return {
@@ -258,6 +286,15 @@ export verify_audit_chain := func(cfg) {
 				}
 			}
 		}
+	} else if events > 0 {
+		return {
+			"ok": false,
+			"error": {
+				"code": "audit_state_missing",
+				"message": "Audit chain checkpoint is missing for a non-empty audit log",
+				"details": {"state_path": state_path}
+			}
+		}
 	}
 
 	return {
@@ -265,4 +302,25 @@ export verify_audit_chain := func(cfg) {
 		"events": events,
 		"last_hash": prev_hash
 	}
+}
+
+export append_audit_event := func(cfg, event_type, status, details) {
+	if audit_enabled(cfg) == false {
+		return {
+			"ok": true,
+			"enabled": false
+		}
+	}
+	verification_result := verify_audit_chain(cfg)
+	if dict_get_or(verification_result, "ok", false) == false {
+		return {
+			"ok": false,
+			"error": {
+				"code": "audit_chain_invalid_before_append",
+				"message": "Audit event was not appended because the existing chain is invalid",
+				"details": {"verification": dict_get_or(verification_result, "error", {})}
+			}
+		}
+	}
+	return append_audit_event_after_verification(cfg, event_type, status, details)
 }

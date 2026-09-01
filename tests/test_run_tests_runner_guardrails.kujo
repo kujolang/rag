@@ -3,6 +3,11 @@ from src.tests_helpers import assert_true
 
 project_kujo_bin := env_or("KUJO_BIN", "/path/to/kujo/target/debug/kujo")
 
+runner_source := read_file("scripts/run_tests.kujo")
+assert_true(to_bool(contains(runner_source, "\"tests/test_index_persistence.kujo\"")))
+assert_true(to_bool(contains(runner_source, "\"tests/test_qdrant_security.kujo\"")))
+assert_true(to_bool(contains(runner_source, "\"tests/test_runtime_http_security.kujo\"")))
+
 # Ensure invalid runtimes fail fast with a clear, actionable error payload.
 invalid_runtime_cmd := "KUJO_BIN=/usr/bin/false " + project_kujo_bin + " run scripts/run_tests.kujo --interpreter"
 invalid_runtime_res := execute_status(invalid_runtime_cmd, {"timeout_ms": 120000})

@@ -413,7 +413,7 @@ func tokens_match_text_value(tokens, value, allow_partial) {
 	while token_idx < len(tokens) {
 		token := tokens[token_idx]
 		if allow_partial {
-			if contains(value, token) == 1 {
+			if contains(value, token) {
 				return true
 			}
 		} else {

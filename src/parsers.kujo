@@ -94,19 +94,19 @@ func detect_byline_author(content) {
 
 func infer_source_system(path, kind) {
 	path_norm := to_lower(to_string(path))
-	if contains(path_norm, "jira") == 1 {
+	if contains(path_norm, "jira") {
 		return "jira"
 	}
-	if contains(path_norm, "github") == 1 {
+	if contains(path_norm, "github") {
 		return "github"
 	}
-	if contains(path_norm, "gitlab") == 1 {
+	if contains(path_norm, "gitlab") {
 		return "gitlab"
 	}
-	if contains(path_norm, "notion") == 1 {
+	if contains(path_norm, "notion") {
 		return "notion"
 	}
-	if contains(path_norm, "slack") == 1 {
+	if contains(path_norm, "slack") {
 		return "slack"
 	}
 
@@ -137,22 +137,22 @@ func extract_sensitivity_tags(content) {
 	}
 
 	lower_content := to_lower(content)
-	if contains(lower_content, "confidential") == 1 {
+	if contains(lower_content, "confidential") {
 		tags = push_unique_lower(tags, "confidential")
 	}
-	if contains(lower_content, "restricted") == 1 {
+	if contains(lower_content, "restricted") {
 		tags = push_unique_lower(tags, "restricted")
 	}
-	if contains(lower_content, "internal") == 1 {
+	if contains(lower_content, "internal") {
 		tags = push_unique_lower(tags, "internal")
 	}
-	if contains(lower_content, "public") == 1 {
+	if contains(lower_content, "public") {
 		tags = push_unique_lower(tags, "public")
 	}
-	if contains(lower_content, "secret") == 1 || contains(lower_content, "password") == 1 || contains(lower_content, "token") == 1 || contains(lower_content, "api_key") == 1 {
+	if contains(lower_content, "secret") || contains(lower_content, "password") || contains(lower_content, "token") || contains(lower_content, "api_key") {
 		tags = push_unique_lower(tags, "sensitive")
 	}
-	if contains(lower_content, "pii") == 1 || contains(lower_content, "personal data") == 1 || contains(lower_content, "ssn") == 1 {
+	if contains(lower_content, "pii") || contains(lower_content, "personal data") || contains(lower_content, "ssn") {
 		tags = push_unique_lower(tags, "pii")
 	}
 

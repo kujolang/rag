@@ -9,7 +9,8 @@ services:
       - ./:/workspace
     environment:
       KUJO_RAG_API_HOST: 0.0.0.0
+      KUJO_RAG_API_ALLOW_NON_LOOPBACK: "true"
       KUJO_RAG_ENV: development
     ports:
-      - "8787:8787"
+      - "127.0.0.1:8787:8787"
     command: ["kujo", "run", "main.kujo", "--interpreter", "serve"]

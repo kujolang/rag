@@ -30,7 +30,7 @@ assert_true(to_bool(len(citations) >= 1))
 
 first := citations[0]
 path := dict_get_or(first, "path", "")
-assert_true(to_bool(contains(path, "examples/kujo_docs") == 1))
+assert_true(to_bool(contains(path, "examples/kujo_docs")))
 assert_true(to_bool(dict_get_or(first, "line_end", 0) >= dict_get_or(first, "line_start", 0)))
 
 answer := dict_get_or(query, "answer", "")
@@ -50,7 +50,7 @@ filtered_count := dict_get_or(filtered_query, "count", 0)
 assert_true(to_bool(filtered_count >= 1))
 filtered_citations := dict_get_or(filtered_query, "citations", [])
 for citation in filtered_citations {
-	assert_true(to_bool(contains(to_lower(dict_get_or(citation, "path", "")), "api.md") == 1))
+	assert_true(to_bool(contains(to_lower(dict_get_or(citation, "path", "")), "api.md")))
 }
 
 session_query := query_rag(index, "What about performance?", cfg, null, [
@@ -159,6 +159,12 @@ if path_exists(ns_beta_dir) == false {
 	create_dir(ns_beta_dir)
 }
 
+if file_exists(ns_alpha_dir + "/alpha.md") {
+	delete_file(ns_alpha_dir + "/alpha.md")
+}
+if file_exists(ns_beta_dir + "/beta.md") {
+	delete_file(ns_beta_dir + "/beta.md")
+}
 write_file(ns_alpha_dir + "/alpha.md", "# Alpha namespace\nalpha-only retrieval marker")
 write_file(ns_beta_dir + "/beta.md", "# Beta namespace\nbeta-only retrieval marker")
 
@@ -179,13 +185,13 @@ ns_beta_citations := dict_get_or(ns_beta_query, "citations", [])
 
 for citation in ns_alpha_citations {
 	path_value := dict_get_or(citation, "path", "")
-	assert_true(to_bool(contains(path_value, "ns_alpha_docs") == 1))
+	assert_true(to_bool(contains(path_value, "ns_alpha_docs")))
 	assert_true(to_bool(contains(path_value, "ns_beta_docs") == 0))
 }
 
 for citation in ns_beta_citations {
 	path_value := dict_get_or(citation, "path", "")
-	assert_true(to_bool(contains(path_value, "ns_beta_docs") == 1))
+	assert_true(to_bool(contains(path_value, "ns_beta_docs")))
 	assert_true(to_bool(contains(path_value, "ns_alpha_docs") == 0))
 }
 

@@ -47,12 +47,17 @@ jwt_cfg := {
 	"api_auth_provider": "jwt_proxy",
 	"api_jwt_issuer": "https://issuer.example",
 	"api_jwt_audience": "kujo-rag",
-	"api_jwt_clock_skew_sec": 30
+	"api_jwt_clock_skew_sec": 30,
+	"api_trusted_proxy_secret": "proxy-attestation-secret",
+	"api_trusted_proxy_secret_header": "x-kujo-proxy-secret",
+	"api_trusted_proxy_ips": ["127.0.0.1"]
 }
 
 jwt_valid := validate_api_auth({
+	"peer_ip": "127.0.0.1",
 	"headers": {
 		"authorization": "Bearer token-1",
+		"x-kujo-proxy-secret": "proxy-attestation-secret",
 		"x-kujo-claim-iss": "https://issuer.example",
 		"x-kujo-claim-aud": "kujo-rag,other",
 		"x-kujo-claim-exp": to_string(now_unix_seconds() + 600),
@@ -63,8 +68,10 @@ assert_true(to_bool(dict_get_or(jwt_valid, "ok", false) == true))
 assert_true(to_bool(dict_get_or(jwt_valid, "provider", "") == "jwt_proxy"))
 
 jwt_expired := validate_api_auth({
+	"peer_ip": "127.0.0.1",
 	"headers": {
 		"authorization": "Bearer token-2",
+		"x-kujo-proxy-secret": "proxy-attestation-secret",
 		"x-kujo-claim-iss": "https://issuer.example",
 		"x-kujo-claim-aud": "kujo-rag",
 		"x-kujo-claim-exp": to_string(now_unix_seconds() - 120)
@@ -74,8 +81,10 @@ assert_true(to_bool(dict_get_or(jwt_expired, "ok", true) == false))
 assert_true(to_bool(dict_get_or(jwt_expired, "error", "") == "expired_token"))
 
 jwt_wrong_issuer := validate_api_auth({
+	"peer_ip": "127.0.0.1",
 	"headers": {
 		"authorization": "Bearer token-3",
+		"x-kujo-proxy-secret": "proxy-attestation-secret",
 		"x-kujo-claim-iss": "https://other-issuer.example",
 		"x-kujo-claim-aud": "kujo-rag",
 		"x-kujo-claim-exp": to_string(now_unix_seconds() + 600)
@@ -85,8 +94,10 @@ assert_true(to_bool(dict_get_or(jwt_wrong_issuer, "ok", true) == false))
 assert_true(to_bool(dict_get_or(jwt_wrong_issuer, "error", "") == "invalid_token_issuer"))
 
 jwt_wrong_audience := validate_api_auth({
+	"peer_ip": "127.0.0.1",
 	"headers": {
 		"authorization": "Bearer token-4",
+		"x-kujo-proxy-secret": "proxy-attestation-secret",
 		"x-kujo-claim-iss": "https://issuer.example",
 		"x-kujo-claim-aud": "different-service",
 		"x-kujo-claim-exp": to_string(now_unix_seconds() + 600)
@@ -96,16 +107,20 @@ assert_true(to_bool(dict_get_or(jwt_wrong_audience, "ok", true) == false))
 assert_true(to_bool(dict_get_or(jwt_wrong_audience, "error", "") == "invalid_token_audience"))
 
 jwt_missing_claims := validate_api_auth({
+	"peer_ip": "127.0.0.1",
 	"headers": {
-		"authorization": "Bearer token-5"
+		"authorization": "Bearer token-5",
+		"x-kujo-proxy-secret": "proxy-attestation-secret"
 	}
 }, jwt_cfg)
 assert_true(to_bool(dict_get_or(jwt_missing_claims, "ok", true) == false))
 assert_true(to_bool(dict_get_or(jwt_missing_claims, "error", "") == "missing_token_claims"))
 
 jwt_missing_config := validate_api_auth({
+	"peer_ip": "127.0.0.1",
 	"headers": {
 		"authorization": "Bearer token-6",
+		"x-kujo-proxy-secret": "proxy-attestation-secret",
 		"x-kujo-claim-iss": "https://issuer.example",
 		"x-kujo-claim-aud": "kujo-rag",
 		"x-kujo-claim-exp": to_string(now_unix_seconds() + 600)
@@ -117,5 +132,33 @@ jwt_missing_config := validate_api_auth({
 })
 assert_true(to_bool(dict_get_or(jwt_missing_config, "ok", true) == false))
 assert_true(to_bool(dict_get_or(jwt_missing_config, "error", "") == "invalid_auth_config"))
+
+forged_direct_claims := validate_api_auth({
+	"peer_ip": "203.0.113.8",
+	"headers": {
+		"authorization": "Bearer attacker-chosen",
+		"x-kujo-proxy-secret": "proxy-attestation-secret",
+		"x-kujo-claim-iss": "https://issuer.example",
+		"x-kujo-claim-aud": "kujo-rag",
+		"x-kujo-claim-exp": to_string(now_unix_seconds() + 600),
+		"x-kujo-claim-role": "admin",
+		"x-kujo-claim-namespace": "*"
+	}
+}, jwt_cfg)
+assert_true(to_bool(dict_get_or(forged_direct_claims, "ok", true) == false))
+assert_true(to_bool(dict_get_or(forged_direct_claims, "error", "") == "untrusted_proxy_peer"))
+
+forged_proxy_secret := validate_api_auth({
+	"peer_ip": "127.0.0.1",
+	"headers": {
+		"authorization": "Bearer attacker-chosen",
+		"x-kujo-proxy-secret": "wrong-secret",
+		"x-kujo-claim-iss": "https://issuer.example",
+		"x-kujo-claim-aud": "kujo-rag",
+		"x-kujo-claim-exp": to_string(now_unix_seconds() + 600)
+	}
+}, jwt_cfg)
+assert_true(to_bool(dict_get_or(forged_proxy_secret, "ok", true) == false))
+assert_true(to_bool(dict_get_or(forged_proxy_secret, "error", "") == "invalid_proxy_attestation"))
 
 print("test_auth_providers: ok")

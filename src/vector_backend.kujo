@@ -1,4 +1,4 @@
-from src.common import dict_get_or, bool_or, num_or
+from src.common import dict_get_or, bool_or, num_or, write_json_file
 from src.vector_store import load_index_with_config, persist_index_with_config, save_index_with_config
 
 func normalize_backend_name(cfg) {
@@ -136,18 +136,21 @@ func qdrant_mirror_path(cfg) {
 	return "./results/vector_backend_qdrant__" + hash + ".json"
 }
 
-func qdrant_headers(cfg) {
-	headers := "-H " + shell_quote("Content-Type: application/json")
+func qdrant_header_file(cfg, collection) {
+	header_file_path := qdrant_tmp_file_path("qdrant_headers", collection, ".txt")
+	lines := ["Content-Type: application/json"]
 	api_key := trim(to_string(dict_get_or(cfg, "vector_backend_qdrant_api_key", "")))
 	if api_key != "" {
-		headers = headers + " -H " + shell_quote("api-key: " + api_key)
+		lines = push(lines, "api-key: " + api_key)
 	}
-	return headers
+	write_file(header_file_path, join(lines, "\n") + "\n")
+	_ = execute_status("chmod 600 " + shell_quote(header_file_path), {"timeout_ms": 5000})
+	return header_file_path
 }
 
 func qdrant_tmp_file_path(prefix, collection, suffix) {
 	id := substring(sha256(prefix + ":" + collection + ":" + to_string(current_timestamp())), 0, 16)
-	return "./results/.tmp_" + prefix + "_" + id + suffix
+	return "/tmp/kujo_rag_" + prefix + "_" + id + suffix
 }
 
 func qdrant_points_payload(index) {
@@ -204,27 +207,59 @@ func qdrant_sync_index(cfg, index) {
 
 	collection := qdrant_collection_name(cfg)
 	points := qdrant_points_payload(index)
+
+	if path_exists("./results") == false {
+		create_dir("./results")
+	}
+
+	header_path := qdrant_header_file(cfg, collection)
+	timeout_ms := qdrant_timeout_ms(cfg)
+	timeout_sec := timeout_ms / 1000
+	if timeout_sec < 1 {
+		timeout_sec = 1
+	}
+	headers := "-H @" + shell_quote(header_path)
+	delete_cmd := "curl --silent --show-error --max-time " + to_string(timeout_sec) + " --output /dev/null --write-out '%{http_code}' -X DELETE " + headers + " " + shell_quote(base_url + "/collections/" + collection)
+	delete_result := execute_status(delete_cmd, {"timeout_ms": timeout_ms + 2000})
+	delete_status := trim(command_stdout(delete_result))
+	delete_ok := command_success(delete_result) && (starts_with(delete_status, "2") || delete_status == "404")
+	if delete_ok == false {
+		remove_file_if_exists(header_path)
+		return {
+			"ok": false,
+			"error": {
+				"code": "qdrant_collection_reset_failed",
+				"message": "Failed to reset Qdrant collection before authoritative synchronization",
+				"details": {
+					"collection": collection,
+					"http_status": delete_status,
+					"stderr": command_stderr(delete_result)
+				}
+			}
+		}
+	}
+
 	if len(points) == 0 {
+		remove_file_if_exists(header_path)
 		return {
 			"ok": true,
-			"synced": false,
-			"reason": "no_vectors",
-			"collection": collection
+			"synced": true,
+			"reason": "collection_cleared",
+			"collection": collection,
+			"points_synced": 0
 		}
 	}
 
 	dims := len(dict_get_or(points[0], "vector", []))
 	if dims <= 0 {
+		remove_file_if_exists(header_path)
 		return {
-			"ok": true,
-			"synced": false,
-			"reason": "empty_dimensions",
-			"collection": collection
+			"ok": false,
+			"error": {
+				"code": "qdrant_vector_dimensions_invalid",
+				"message": "Qdrant synchronization requires non-empty vector dimensions"
+			}
 		}
-	}
-
-	if path_exists("./results") == false {
-		create_dir("./results")
 	}
 
 	meta_payload_path := qdrant_tmp_file_path("qdrant_collection", collection, ".json")
@@ -239,19 +274,14 @@ func qdrant_sync_index(cfg, index) {
 	write_json_file(points_payload_path, {
 		"points": points
 	})
+	_ = execute_status("chmod 600 " + shell_quote(meta_payload_path) + " " + shell_quote(points_payload_path), {"timeout_ms": 5000})
 
-	timeout_ms := qdrant_timeout_ms(cfg)
-	timeout_sec := timeout_ms / 1000
-	if timeout_sec < 1 {
-		timeout_sec = 1
-	}
-	headers := qdrant_headers(cfg)
-
-	create_cmd := "curl --silent --show-error --max-time " + to_string(timeout_sec) + " -X PUT " + headers + " --data-binary @" + shell_quote(meta_payload_path) + " " + shell_quote(base_url + "/collections/" + collection)
+	create_cmd := "curl --silent --show-error --fail-with-body --max-time " + to_string(timeout_sec) + " -X PUT " + headers + " --data-binary @" + shell_quote(meta_payload_path) + " " + shell_quote(base_url + "/collections/" + collection)
 	create_result := execute_status(create_cmd, {"timeout_ms": timeout_ms + 2000})
 	if command_success(create_result) == false {
 		remove_file_if_exists(meta_payload_path)
 		remove_file_if_exists(points_payload_path)
+		remove_file_if_exists(header_path)
 		return {
 			"ok": false,
 			"error": {
@@ -266,11 +296,12 @@ func qdrant_sync_index(cfg, index) {
 		}
 	}
 
-	upsert_cmd := "curl --silent --show-error --max-time " + to_string(timeout_sec) + " -X PUT " + headers + " --data-binary @" + shell_quote(points_payload_path) + " " + shell_quote(base_url + "/collections/" + collection + "/points?wait=true")
+	upsert_cmd := "curl --silent --show-error --fail-with-body --max-time " + to_string(timeout_sec) + " -X PUT " + headers + " --data-binary @" + shell_quote(points_payload_path) + " " + shell_quote(base_url + "/collections/" + collection + "/points?wait=true")
 	upsert_result := execute_status(upsert_cmd, {"timeout_ms": timeout_ms + 2000})
 
 	remove_file_if_exists(meta_payload_path)
 	remove_file_if_exists(points_payload_path)
+	remove_file_if_exists(header_path)
 
 	if command_success(upsert_result) == false {
 		return {
@@ -332,13 +363,12 @@ func qdrant_save(cfg, index) {
 		meta["qdrant_last_sync_reason"] := dict_get_or(error_payload, "code", "qdrant_sync_failed")
 	}
 	index["meta"] := meta
-
-	saved := save_index_with_config(path, index, cfg)
-	if saved == false {
+	if dict_get_or(sync_result, "ok", false) == false && qdrant_fail_open(cfg) == false {
 		return false
 	}
 
-	if dict_get_or(sync_result, "ok", false) == false && qdrant_fail_open(cfg) == false {
+	saved := save_index_with_config(path, index, cfg)
+	if saved == false {
 		return false
 	}
 

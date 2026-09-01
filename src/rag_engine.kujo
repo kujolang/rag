@@ -233,7 +233,7 @@ func contains_any_token(text_value, tokens) {
 	while i < len(tokens) {
 		token := to_lower(trim(to_string(tokens[i])))
 		if token != "" {
-			if contains(lower_text, token) == 1 {
+			if contains(lower_text, token) {
 				return true
 			}
 		}

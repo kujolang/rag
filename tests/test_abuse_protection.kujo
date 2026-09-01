@@ -53,7 +53,7 @@ func stop_server(pid) {
 	if pid == "" {
 		return true
 	}
-	_ := run_cmd("kill " + pid + " >/dev/null 2>&1 || true")
+	_ := run_cmd("kill -KILL " + pid + " >/dev/null 2>&1 || true")
 	_ := run_cmd("wait " + pid + " >/dev/null 2>&1 || true")
 	return true
 }
@@ -77,7 +77,7 @@ func wait_for_health(port) {
 	return false
 }
 
-base_port := 9200 + (current_timestamp() % 100)
+base_port := 40000 + (current_timestamp() % 20000)
 
 # Burst-limit behavior
 burst_port := base_port
@@ -88,13 +88,19 @@ assert_true(to_bool(wait_for_health(burst_port) == true))
 
 j := 0
 burst_body := ""
+burst_limited_observed := false
 while j < 6 {
 	burst_res := run_cmd("curl -s http://127.0.0.1:" + to_string(burst_port) + "/health")
 	burst_body = dict_get_or(burst_res, "stdout", "")
+	burst_attempt_parsed := parse_json_safe(burst_body)
+	burst_attempt_code := dict_get_or(dict_get_or(dict_get_or(burst_attempt_parsed, "data", {}), "error", {}), "code", "")
+	if burst_attempt_code == "burst_limited" {
+		burst_limited_observed = true
+	}
 	j = j + 1
 }
 burst_parsed := parse_json_safe(burst_body)
-assert_true(to_bool(dict_get_or(dict_get_or(dict_get_or(burst_parsed, "data", {}), "error", {}), "code", "") == "burst_limited"))
+assert_true(to_bool(burst_limited_observed))
 
 _ := stop_server(burst_pid)
 

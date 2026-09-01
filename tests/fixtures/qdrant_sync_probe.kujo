@@ -1,0 +1,51 @@
+from src.config import load_config
+from src.common import dict_get_or
+from src.vector_backend import save_index_with_backend
+from src.vector_store import empty_index, load_index_with_config, save_index_with_config
+
+cfg := load_config({
+	"vector_backend": "qdrant_http",
+	"vector_backend_qdrant_url": "https://qdrant.internal:6333",
+	"vector_backend_qdrant_collection": "security_probe",
+	"vector_backend_qdrant_api_key": "process-list-secret-marker",
+	"vector_backend_qdrant_sync_enabled": true,
+	"vector_backend_qdrant_fail_open": false,
+	"vector_backend_qdrant_mirror_path": "./results/test_qdrant_security_mirror.json"
+})
+
+index := empty_index()
+index["chunks"] := [{
+	"chunk_id": "chunk-1",
+	"doc_id": "doc-1",
+	"path": "doc.md",
+	"line_start": 1,
+	"line_end": 1,
+	"text": "security probe"
+}]
+index["vectors"] := [{"chunk_id": "chunk-1", "embedding": [0.1, 0.2]}]
+
+if env_or("QDRANT_PROBE_EXPECT_FAILURE", "false") == "true" {
+	seeded := save_index_with_config("./results/test_qdrant_security_mirror.json", index, cfg)
+	if seeded != true {
+		exit(1)
+	}
+	failed_delete := save_index_with_backend(cfg, empty_index())
+	preserved := load_index_with_config("./results/test_qdrant_security_mirror.json", cfg)
+	if failed_delete != false || len(dict_get_or(preserved, "chunks", [])) != 1 {
+		exit(1)
+	}
+	print(to_json({"ok": true, "failure_preserved_mirror": true}))
+	exit(0)
+}
+
+result := save_index_with_backend(cfg, index)
+if result != true {
+	exit(1)
+}
+
+deleted := empty_index()
+deleted_result := save_index_with_backend(cfg, deleted)
+print(to_json({"ok": result, "deleted_ok": deleted_result}))
+if deleted_result != true {
+	exit(1)
+}

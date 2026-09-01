@@ -1,0 +1,24 @@
+port := to_int(env_or("KUJO_RAG_SLOW_TEST_PORT", "0"))
+if port <= 0 {
+	exit(1)
+}
+
+client := tcp_connect("127.0.0.1", port)
+if type(client) != "tcpstream" {
+	exit(1)
+}
+_ = tcp_set_timeouts(client, 15000, 5000)
+request_prefix := "POST /query HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Type: application/json\r\nContent-Length: 100\r\nConnection: close\r\n\r\n{"
+sent := tcp_send(client, request_prefix)
+if sent <= 0 {
+	tcp_close(client)
+	exit(1)
+}
+sleep(1)
+response := tcp_receive(client, 4096)
+tcp_close(client)
+if contains(response, "408") == 0 || contains(response, "Request Timeout") == 0 {
+	print(response)
+	exit(1)
+}
+print("slow_http_client: ok")

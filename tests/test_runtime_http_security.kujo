@@ -1,0 +1,96 @@
+from src.common import dict_get_or
+
+kujo_bin := env_or("KUJO_BIN", "kujo")
+
+func expect(condition, label) {
+	if to_bool(condition) == false {
+		print("test_runtime_http_security failed: " + label)
+		exit(1)
+	}
+}
+
+func run_cmd(command, timeout_ms) {
+	result := execute_status(command, {"timeout_ms": timeout_ms})
+	if type(result) == "struct" {
+		return {"ok": result.success, "stdout": to_string(result.stdout), "stderr": to_string(result.stderr)}
+	}
+	return {"ok": false, "stdout": "", "stderr": "invalid process result"}
+}
+
+func wait_for_health(port) {
+	attempt := 0
+	while attempt < 500 {
+		response := run_cmd("curl --silent --max-time 2 http://127.0.0.1:" + to_string(port) + "/health", 5000)
+		if contains(dict_get_or(response, "stdout", ""), "\"ok\":true") {
+			return true
+		}
+		attempt = attempt + 1
+	}
+	return false
+}
+
+func stop_server(pid) {
+	if trim(pid) != "" {
+		_ = run_cmd("kill -KILL " + trim(pid) + " >/dev/null 2>&1 || true", 5000)
+	}
+}
+
+func exercise_mode(mode_flag, port, suffix) {
+	log_path := "/tmp/kujo_rag_runtime_http_" + suffix + ".log"
+	state_path := "./results/api_state_" + to_string(port) + ".json"
+	if file_exists(state_path) {
+		delete_file(state_path)
+	}
+	env_prefix := "KUJO_RAG_ENV=development KUJO_RAG_API_AUTH_PROVIDER=jwt_proxy KUJO_RAG_API_JWT_ISSUER=https://issuer.example KUJO_RAG_API_JWT_AUDIENCE=rag-api KUJO_RAG_API_TRUSTED_PROXY_SECRET=test-proxy-secret KUJO_RAG_API_TRUSTED_PROXY_IPS=192.0.2.10 KUJO_RAG_API_RBAC_ENABLED=true KUJO_RAG_API_RBAC_DEFAULT_ROLE=reader"
+	start_cmd := "env " + env_prefix + " " + kujo_bin + " run main.kujo " + mode_flag + " serve --host 127.0.0.1 --port " + to_string(port) + " > " + log_path + " 2>&1 & echo $!"
+	started := run_cmd(start_cmd, 15000)
+	pid := trim(dict_get_or(started, "stdout", ""))
+	health_ok := pid != "" && wait_for_health(port)
+
+	oversized_path := "/tmp/kujo_rag_oversized_body_" + suffix + ".json"
+	oversized_created := run_cmd("dd if=/dev/zero of=" + oversized_path + " bs=1048576 count=9 2>/dev/null", 30000)
+	oversized := run_cmd("curl --silent --max-time 30 --write-out ' HTTP_STATUS:%{http_code}' -X POST http://127.0.0.1:" + to_string(port) + "/query -H 'Content-Type: application/json' -H 'Expect:' --data-binary @" + oversized_path, 45000)
+	oversized_body := to_lower(dict_get_or(oversized, "stdout", ""))
+	oversized_denied := contains(oversized_body, "too large") || contains(oversized_body, "payload") || contains(oversized_body, "http_status:413")
+
+	forged_started_at := current_timestamp()
+	forged := run_cmd("curl --silent --max-time 30 -X POST http://127.0.0.1:" + to_string(port) + "/query -H 'Content-Type: application/json' -H 'Authorization: Bearer forged' -H 'X-Kujo-Proxy-Secret: test-proxy-secret' -H 'X-Kujo-Claim-Iss: https://issuer.example' -H 'X-Kujo-Claim-Aud: rag-api' -H 'X-Kujo-Claim-Exp: 4102444800' -H 'X-Kujo-Claim-Role: admin' -d '{\"query\":\"forged direct request\"}'", 45000)
+	forged_elapsed_ms := current_timestamp() - forged_started_at
+	forged_response := dict_get_or(forged, "stdout", "")
+	forged_denied := contains(forged_response, "untrusted_proxy_peer")
+	slow_client := run_cmd("KUJO_RAG_SLOW_TEST_PORT=" + to_string(port) + " " + kujo_bin + " run tests/fixtures/slow_http_client.kujo --interpreter", 20000)
+
+	stop_server(pid)
+	if file_exists(oversized_path) {
+		delete_file(oversized_path)
+	}
+	log_text := ""
+	if file_exists(log_path) {
+		log_text = read_file(log_path)
+		delete_file(log_path)
+	}
+	forged_denied = forged_denied || contains(log_text, "\"code\":\"untrusted_proxy_peer\"")
+	if file_exists(state_path) {
+		delete_file(state_path)
+	}
+
+	expect(health_ok, suffix + " listener should become healthy")
+	expect(forged_denied, suffix + " direct proxy-claim forgery should fail")
+	expect(contains(forged_response, "Bearer forged") == 0, suffix + " auth failure must not reflect bearer credentials")
+	expect(contains(forged_response, "test-proxy-secret") == 0, suffix + " auth failure must not reflect proxy attestation")
+	expect(forged_elapsed_ms < 8000, suffix + " complete request body should not wait for the read deadline")
+	expect(dict_get_or(slow_client, "ok", false), suffix + " incomplete slow body should receive 408")
+	expect(dict_get_or(oversized_created, "ok", false), suffix + " oversized request fixture should be created")
+	expect(oversized_denied, suffix + " oversized body should fail before application handling")
+	expect(contains(log_text, "\"ip\":\"127.0.0.1\""), suffix + " access log should use socket peer identity")
+}
+
+invalid_bind := run_cmd(kujo_bin + " run main.kujo --interpreter serve --host 0.0.0.0 --port 39991", 15000)
+expect(dict_get_or(invalid_bind, "ok", true) == false, "non-loopback bind should fail without explicit opt-in")
+expect(contains(dict_get_or(invalid_bind, "stdout", ""), "invalid_configuration"), "non-loopback failure should be diagnostic")
+
+base_port := 33000 + (current_timestamp() % 10000)
+exercise_mode("--interpreter", base_port, "interpreter")
+exercise_mode("", base_port + 1, "vm")
+
+print("test_runtime_http_security: ok")
