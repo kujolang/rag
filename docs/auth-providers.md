@@ -36,6 +36,9 @@ Environment variables:
 - `KUJO_RAG_API_JWT_ISSUER=<expected_issuer>`
 - `KUJO_RAG_API_JWT_AUDIENCE=<expected_audience>`
 - `KUJO_RAG_API_JWT_CLOCK_SKEW_SEC=60` (optional)
+- `KUJO_RAG_API_TRUSTED_PROXY_SECRET=<secret>` (required)
+- `KUJO_RAG_API_TRUSTED_PROXY_SECRET_HEADER=x-kujo-proxy-secret`
+- `KUJO_RAG_API_TRUSTED_PROXY_IPS=<csv peer IPs>` (required)
 
 Expected request headers:
 
@@ -46,20 +49,27 @@ Expected request headers:
 - `x-kujo-claim-sub` (optional)
 - `x-kujo-claim-role` (optional RBAC role)
 - `x-kujo-claim-namespace` (optional RBAC namespace scope)
+- `x-kujo-proxy-secret` (or configured equivalent; injected only by the proxy)
 
 Validation:
 
 - issuer equality check
 - audience inclusion check
 - expiry check with configurable clock skew
+- peer socket identity must be in the configured trusted-proxy allowlist
+- proxy attestation is compared by digest before any forwarded claim is trusted
 
 ## Security Notes
 
-- `jwt_proxy` mode assumes token signature verification is performed by an upstream trusted proxy/identity layer.
+- `jwt_proxy` mode requires token signature verification by an upstream trusted proxy/identity layer.
 - The trusted proxy must remove client-supplied claim and RBAC headers before
-  adding verified identity values.
+  adding verified identity values, and must replace any client-supplied proxy
+  attestation header with the configured secret.
+- Direct-backend requests cannot self-assert claims: both trusted peer identity
+  and proxy attestation must validate first.
 - In strict production mode, `api_auth_provider=none` is rejected.
-- In strict production mode, `jwt_proxy` requires issuer and audience configuration.
+- In strict production mode, `jwt_proxy` requires issuer, audience, proxy secret,
+  and explicit proxy-peer configuration.
 
 ## Validation Test
 

@@ -36,3 +36,14 @@ Responses also include the headers:
 - `X-Correlation-ID`
 
 This enables end-to-end traceability between clients and server logs.
+
+`ip` comes from the Kujo runtime's socket-derived `peer_ip`. Older compatible
+runtimes fall back to `remote_addr`; forwarding headers are never used for rate
+limiting or audit identity.
+
+In strict production mode, the security audit uses a secret-keyed hash chain,
+verifies the log and checkpoint before every append and at startup, and stops
+the service on append or checkpoint failure. A missing log or checkpoint is an
+integrity failure when the surviving counterpart proves that prior events
+existed. Deployments still need an independently protected or immutable sink to
+survive an actor that can delete both local files.

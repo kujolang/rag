@@ -19,8 +19,13 @@ docker compose up --build
 This starts the API server with:
 
 - command: `kujo run main.kujo --interpreter serve`
-- host binding: `0.0.0.0:8787`
+- container binding: `0.0.0.0:8787` with explicit non-loopback opt-in
+- host publication: `127.0.0.1:8787` only; the development API is not exposed to the LAN
 - source mounted at `/workspace`
+
+To expose the development container beyond loopback, create a separate reviewed
+Compose override and enable authentication, RBAC, encryption, and audit
+controls. Do not weaken the checked-in loopback publication.
 
 ## VS Code Devcontainer
 

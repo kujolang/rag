@@ -19,6 +19,9 @@ Default policy:
 - `writer`: `ingest`, `query`
 - `reader`: `query`
 
+The default fallback role is `reader`. Strict mode rejects any fallback role
+whose policy grants `admin`, `export`, or wildcard actions.
+
 ## Role and Namespace Resolution
 
 Role is resolved in this order:
@@ -42,8 +45,9 @@ their action permission because they do not select a single namespace.
 Bearer and unauthenticated development modes never trust caller-supplied role
 or namespace headers. A valid static bearer token receives only the configured
 default role and default namespace scope. Use `jwt_proxy` behind a proxy that
-verifies tokens and strips client-supplied identity headers when per-caller
-roles or namespace claims are required.
+verifies tokens, strips client-supplied identity headers, authenticates itself
+with the configured proxy secret, and connects from an allowlisted peer when
+per-caller roles or namespace claims are required.
 
 ## Action Mapping
 

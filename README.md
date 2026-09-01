@@ -157,17 +157,18 @@ Defaults work offline with deterministic hash embeddings.
 Startup configuration integrity validation:
 
 - startup now validates critical config fields before command execution
+- non-loopback listeners require explicit `KUJO_RAG_API_ALLOW_NON_LOOPBACK=true`, including CLI `--host` overrides
 - invalid config exits with structured JSON diagnostics (`error: invalid_configuration`)
 - strict validation mode can be enabled via `KUJO_RAG_STRICT_CONFIG=true`
 - strict mode is automatically active when `KUJO_RAG_ENV=production`
-- strict mode requires non-default namespace, explicit bearer token, non-default index path, and at-rest encryption with key configuration
+- strict mode requires non-default namespace/index paths, authentication, least-privilege RBAC, keyed fail-closed audit logging, redaction, and at-rest encryption
 
 At-rest encryption for persisted indexes:
 
 - enable with `KUJO_RAG_AT_REST_ENCRYPTION_ENABLED=true`
 - provide key material with `KUJO_RAG_AT_REST_ENCRYPTION_KEY` or `KUJO_RAG_AT_REST_ENCRYPTION_KEY_FILE`
 - OpenSSL binary path can be overridden with `KUJO_RAG_AT_REST_ENCRYPTION_OPENSSL_BIN`
-- encrypted index payloads are stored as envelope JSON containing ciphertext; plaintext chunks/vectors are not directly readable at rest
+- encrypted index, privacy-export, deletion-evidence, and API runtime-state payloads are stored as envelope JSON; plaintext content is not written to those artifacts
 
 TLS and reverse-proxy hardening:
 
@@ -180,7 +181,8 @@ Immutable audit logging mode:
 - enable with `KUJO_RAG_API_AUDIT_ENABLED=true`
 - configure append-only sink path with `KUJO_RAG_API_AUDIT_PATH`
 - current external sink mode is `KUJO_RAG_API_AUDIT_EXTERNAL_SINK_MODE=append_file`
-- audit records include hash-chain metadata (`prev_hash`, `event_hash`) for tamper-evident verification
+- strict mode also requires `KUJO_RAG_API_AUDIT_FAIL_CLOSED=true` and a secret `KUJO_RAG_API_AUDIT_INTEGRITY_KEY`
+- audit records use a keyed hash chain, are verified before listening, and stop strict-mode service operation on append failure
 
 Abuse protections and anomaly hooks:
 
@@ -574,6 +576,8 @@ JWT proxy mode configuration:
 - `KUJO_RAG_API_JWT_ISSUER=<issuer>`
 - `KUJO_RAG_API_JWT_AUDIENCE=<audience>`
 - `KUJO_RAG_API_JWT_CLOCK_SKEW_SEC=60` (optional)
+- `KUJO_RAG_API_TRUSTED_PROXY_SECRET=<secret>`
+- `KUJO_RAG_API_TRUSTED_PROXY_IPS=127.0.0.1,::1` (replace with the real proxy peers)
 
 JWT proxy mode expects these headers on authenticated requests:
 
@@ -581,20 +585,23 @@ JWT proxy mode expects these headers on authenticated requests:
 - `x-kujo-claim-iss`
 - `x-kujo-claim-aud`
 - `x-kujo-claim-exp`
+- `x-kujo-proxy-secret` (injected by the trusted proxy; never accepted from clients)
 
 Optional namespace RBAC controls:
 
 - `KUJO_RAG_API_RBAC_ENABLED=true`
-- `KUJO_RAG_API_RBAC_DEFAULT_ROLE=admin`
+- `KUJO_RAG_API_RBAC_DEFAULT_ROLE=reader`
 - `KUJO_RAG_API_RBAC_ROLE_HEADER=x-kujo-role`
 - `KUJO_RAG_API_RBAC_NAMESPACE_HEADER=x-kujo-namespace`
 - `KUJO_RAG_API_RBAC_POLICY_JSON={"admin":["ingest","query","admin"],"writer":["ingest","query"],"reader":["query"]}`
 
 RBAC enforces action permissions (`ingest`, `query`, `admin`) and optional namespace scope restrictions per request.
 Caller-supplied RBAC role and namespace headers are accepted only in
-`jwt_proxy` mode, behind a proxy that verifies tokens and strips untrusted
-identity headers. Bearer mode binds the shared token to the configured default
-role and namespace.
+`jwt_proxy` mode, and only when the request originates from an allowlisted peer
+and carries the configured proxy attestation secret. The proxy must verify the
+token, strip every client-supplied claim/RBAC/attestation header, and inject
+fresh verified values. Bearer mode binds the shared token to the configured
+least-privilege default role and namespace.
 
 Example bearer-mode authenticated query:
 

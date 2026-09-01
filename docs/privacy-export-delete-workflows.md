@@ -80,7 +80,12 @@ Artifacts are written to:
 
 - `./results/privacy/<export_type>__<namespace_slug>__<timestamp>.json`
 
-Artifacts contain:
+When at-rest encryption is enabled, artifacts are atomically persisted as
+`kujo_rag_encrypted_artifact_v1` envelopes. A protection or write failure is an
+operation failure; delete never proceeds if its pre-delete evidence cannot be
+persisted.
+
+The protected payload contains:
 
 - request metadata (`namespace`, `export_type`, `generated_at_ms`)
 - index summary

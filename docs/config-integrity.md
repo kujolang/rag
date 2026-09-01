@@ -37,9 +37,13 @@ Strict mode is active when either condition is true:
 
 Strict mode rejects ambiguous defaults and requires:
 
-- non-empty bearer token (`KUJO_RAG_API_BEARER_TOKEN`)
+- authenticated bearer or trusted-proxy mode
 - non-default namespace
 - non-default index path
+- at-rest encryption for indexes, privacy evidence, and runtime state
+- RBAC with a non-privileged fallback role
+- redaction and keyed, fail-closed audit logging
+- HTTPS, host allowlisting, and fail-closed sync for Qdrant
 
 ## Base Integrity Checks
 
@@ -47,8 +51,10 @@ Always validated:
 
 - `index_path` is non-empty
 - `api_host` is non-empty
+- non-loopback `api_host` values require `api_allow_non_loopback=true`
 - `api_port` is in range `1..65535`
 - `api_ingest_allowed_roots` has at least one entry
+- `jwt_proxy` has a proxy secret and explicit trusted peer IPs
 
 ## Validation Test
 

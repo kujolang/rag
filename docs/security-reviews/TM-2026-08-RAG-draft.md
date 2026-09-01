@@ -10,7 +10,8 @@
 - Prepared: 2026-09-01
 - Repository: `kujolang/rag`
 - Branch: `main`
-- Commit reviewed: `86d8a32a772d445e13e748f2018c147f23ca5072`
+- RAG base commit: `a57031b53ccb541b891c6893ff1008231746581b`
+- Kujo runtime security commit: `385f618aea466726cf2b5430d9cc4d0ed098017a`
 - Required reviewer: Security Team
 - Approval status: awaiting accountable human review
 - Scope: HTTP API exposure, authentication, authorization, remote ingestion,
@@ -51,50 +52,63 @@ logs, and the integrity of persisted indexes.
   `http_listen(host, port)`; loopback is the default. Coverage is in
   `tests/test_api_bind_contract.kujo` and `tests/test_api_contract.kujo`.
 - Production or strict configuration rejects no-auth operation, missing bearer
-  credentials, missing JWT proxy issuer/audience, disabled at-rest encryption,
-  default namespace use, and the default index path (`src/config.kujo`).
+  credentials, missing JWT proxy issuer/audience and proxy attestation,
+  disabled RBAC/audit/redaction/encryption, fail-open audit or Qdrant behavior,
+  privileged fallback roles, default namespace use, and the default index path
+  (`src/config.kujo`).
 - The Kujo runtime enforces a bounded pre-buffer request size, request-body read
   deadline, 408/413 responses, and peer socket identity in interpreter and VM
   paths.
 - API JSON parsing applies the smaller application limit configured by
   `api_max_body_bytes` (`src/query_api.kujo`).
-- Remote ingestion canonicalizes paths, enforces configured roots, and rejects
-  symlink traversal (`validate_api_ingest_path` in `src/query_api.kujo`).
+- Remote ingestion canonicalizes paths, enforces configured roots, rejects
+  symlink descendants during discovery and immediately before parsing, and
+  revalidates queued jobs at execution (`src/query_api.kujo`,
+  `src/ingestion.kujo`).
 - Local index writes are atomic, retain the last readable index on failure, and
   perform read-after-write schema validation (`src/vector_store.kujo`).
 - Rate limiting uses runtime-provided peer socket identity rather than forwarded
   headers (`src/query_api.kujo`).
-- Qdrant synchronization is opt-in and can fail closed; local mirror state
-  records the most recent synchronization result (`src/vector_backend.kujo`).
+- Qdrant synchronization is opt-in, HTTPS/host-allowlisted/fail-closed in
+  strict mode, keeps credentials out of process arguments, and replaces remote
+  collection contents so purge and privacy deletion remove stale vectors
+  (`src/vector_backend.kujo`).
+- Content-bearing indexes, privacy artifacts, and API runtime state use
+  atomic encrypted envelopes with key-bound integrity tags. Strict mode rejects
+  plaintext and unsigned downgrade attempts (`src/vector_store.kujo`).
+- Strict audit mode uses a secret-keyed chain, verifies the log/checkpoint at
+  startup and before append, and exits on append or checkpoint failure.
 
 ## Threat scenarios requiring review
 
 | ID | Scenario and impact | Current control | Decision or evidence required |
 |---|---|---|---|
-| TM-01 | A deployment intended for loopback accidentally listens on every interface, exposing unauthenticated or privileged routes. | Fixed at the reviewed commit: configured `api_host` is passed to `http_listen`; default is `127.0.0.1`. | Verify the deployed listener and firewall rules. Treat explicit `0.0.0.0` as a security-sensitive configuration choice. |
-| TM-02 | A client bypasses the trusted proxy and forges `x-kujo-claim-*` headers. JWT signature verification does not occur inside RAG, so forged issuer, audience, expiry, role, or namespace values could be accepted. | Documentation requires an upstream verifier that strips client-supplied claim headers; strict mode requires issuer and audience. | Prove the backend is unreachable except through the stripping proxy, or require an in-process signed-token verifier before direct exposure. |
-| TM-03 | With RBAC enabled but without role-bearing auth context, a bearer-authenticated client supplies `x-kujo-role: admin` or `x-kujo-namespace: *`. | Fixed at the reviewed commit: bearer and unauthenticated development contexts ignore caller-supplied RBAC headers and use the configured default role and namespace; only `jwt_proxy` contexts may consume proxy-provided identity headers. Composed bearer regressions cover role and namespace escalation, while existing JWT-proxy and global job-control behavior remains covered. | Verify the deployed default bearer role and namespace are least-privilege, and prove the JWT proxy strips untrusted identity headers before adding verified claims. |
-| TM-04 | Development defaults are promoted or exposed without credentials, encryption, or RBAC. Bearer mode with no configured token behaves as authentication disabled. | Loopback default and strict/production validation. | Verify production always sets `runtime_environment=production` or `strict_config=true`; add deployment policy enforcement if configuration can bypass startup validation. |
-| TM-05 | An authorized ingest request reads sensitive local files or traverses a path boundary. | Allowed-root canonicalization, component-wise symlink rejection, file-size and extension limits. | Review the actual service account permissions and allowed roots; ensure writable attacker-controlled parents cannot be swapped after validation. |
-| TM-06 | Privacy export or deletion-receipt artifacts expose full namespace contents after the API request completes. | Admin authorization, namespace scoping, deterministic artifact paths, optional at-rest encryption for indexes. | Define permissions, encryption, retention, backup, and publication rules for `results/privacy`; verify these artifacts are never uploaded as generic CI output. |
-| TM-07 | A malicious or misconfigured Qdrant URL receives full chunks, vectors, and API credentials, or fail-open behavior hides synchronization loss. | Operator-supplied endpoint, optional API key, timeout, explicit sync toggle, selectable fail-open/fail-closed behavior, local mirror metadata. | Require an allowlisted TLS endpoint and fail-closed mode for authoritative production synchronization; verify secrets are redacted from logs and artifacts. |
-| TM-08 | Local indexes, runtime state, backups, or audit data disclose source content at rest. | Strict production mode requires index encryption; audit output is optional and redacted. | Confirm all content-bearing side artifacts and backups receive equivalent protection, not only the primary index. |
-| TM-09 | Oversized or slow HTTP bodies exhaust memory or hold connections indefinitely. | Kujo runtime pre-buffer limit and read deadline, plus the smaller RAG JSON limit. | Verify the released runtime version used by production contains the interpreter/VM hardening and that proxy timeouts are no weaker. |
-| TM-10 | A failed or oversized index write is reported as successful and later reloads as an empty index. | Atomic persistence, read-after-write validation, explicit errors, last-readable-index preservation, bounded size tests. | Confirm hosted release gates execute the large-index regression against the released runtime. |
-| TM-11 | Audit logs are disabled, tampered with, or retained locally after an incident. | Optional hash-chained append-file audit mode and redaction. | Decide when audit is mandatory, who can read/rotate it, and whether production requires an external immutable sink. |
+| TM-01 | A deployment intended for loopback accidentally listens on every interface, exposing unauthenticated or privileged routes. | Source-remediated: loopback is default, non-loopback requires explicit opt-in, CLI overrides are revalidated, direct server startup validates again, and Compose publishes only `127.0.0.1`. | Verify the deployed listener and firewall rules. Treat explicit non-loopback opt-in as security-sensitive. |
+| TM-02 | A client bypasses the trusted proxy and forges `x-kujo-claim-*` headers. | Source-remediated for direct bypass: claims require both a socket-derived allowlisted proxy peer and a secret proxy attestation; deterministic negative tests reject direct and malformed assertions. | Prove the real proxy verifies JWT signatures, strips all client identity/attestation headers, injects the secret, and is the only reachable backend peer. In-process JWT verification remains the stronger future contract. |
+| TM-03 | A bearer client self-asserts admin or wildcard namespace scope. | Source-remediated: bearer/none contexts ignore identity headers, fallback is reader, strict mode requires RBAC and rejects privileged fallback policy, and global job controls retain explicit trusted-admin behavior. | Verify deployed bearer role/namespace and proxy claim mapping are least privilege. |
+| TM-04 | Development defaults are promoted or exposed without credentials, encryption, RBAC, audit, or redaction. | Source-remediated: strict/production startup requires the full security baseline and every listener entry path validates after overrides. | Verify production actually enables strict mode and does not replace the loopback Compose publication. |
+| TM-05 | An authorized ingest reads sensitive local files or crosses a path boundary. | Partially source-remediated: allowed-root checks, descendant symlink rejection, immediate pre-parse checks, and queued-job execution revalidation reduce known paths. | Review service-account permissions and root ownership. Descriptor-relative no-follow opens are still needed to eliminate the final validation/use race on writable trees. |
+| TM-06 | Privacy artifacts expose full namespace contents after the request. | Source-remediated: privacy export, delete preflight, and receipt artifacts use the same atomic encrypted/integrity-tagged contract as indexes; failures are surfaced. | Define permissions, retention, backup, and publication policy for `results/privacy`; ensure CI never uploads it generically. |
+| TM-07 | A malicious/misconfigured Qdrant endpoint receives chunks, vectors, or credentials, or stale remote vectors survive deletion. | Source-remediated: strict HTTPS and exact-host allowlist, fail-closed sync, credential header files outside process args, HTTP-status failures, authoritative collection replacement, empty-index clearing, and destructive-handler failure propagation. | Approve the deployed endpoint/DNS/TLS trust and secret manager. Cross-system local/remote writes are not transactional and require monitoring/retry. |
+| TM-08 | Indexes, runtime state, backups, or side artifacts disclose source content or accept plaintext downgrade. | Source-remediated for repository-managed content: encrypted atomic envelopes cover index/privacy/runtime state, use keyed integrity tags, and reject plaintext/unsigned strict-mode downgrade. | Verify filesystem/backup permissions and migrate legacy unsigned envelopes before strict mode. Shared rate state and redacted audit metadata are non-content-bearing by contract. |
+| TM-09 | Oversized, slow, or complete HTTP bodies exhaust resources or wait for the read deadline. | Source-remediated in Kujo `385f618`: interpreter/VM reject declared overflow before reading, stop at declared lengths, retain bounded unknown-length reads and deadlines, and expose peer identity. RAG has live dual-mode regressions. | Publish and checksum a Kujo patch release containing `385f618`, update the reusable setup action/version pin, and verify proxy timeouts are no weaker. Until then the v1.2.0 artifact is release-blocking. |
+| TM-10 | A failed/oversized write is reported successful and later reloads empty. | Source-remediated: atomic persistence, read-after-write validation, explicit errors, prior-index preservation, size-range tests, and aggregate-runner inclusion. | Confirm hosted gates run the newly published runtime artifact; an unreadable index must remain a startup/ingest failure. |
+| TM-11 | Audit logs are disabled, tampered with, truncated, or silently lose events. | Partially source-remediated: strict mode requires keyed fail-closed audit; startup and pre-append verification detect content, missing-log, missing-checkpoint, and checkpoint-write failures; trace appends use the checked path. | Assign ownership/rotation and deploy an independently protected immutable sink. An actor able to delete both local files remains outside the local-chain guarantee. |
 
 ## Proposed reviewer disposition
 
 The preparer proposes the following for Security Team consideration; none is an
 approved disposition yet:
 
-- Treat TM-02 as release-blocking for any deployment reachable by untrusted
-  clients until the trusted-header boundary is proven or in-process signed-token
-  verification is added.
+- Treat TM-02 as deployment-blocking until the real proxy boundary is proven.
 - Treat TM-03 as remediated in source, pending deployment verification of the
   configured bearer defaults and trusted JWT-proxy header stripping.
-- Treat TM-01 as remediated in source, pending hosted CI and deployment listener
-  verification.
+- Treat TM-01, TM-03, TM-04, TM-06, TM-07, TM-08, and TM-10 as remediated in
+  source, pending hosted and deployment verification.
+- Treat the missing patch release for TM-09 as release-blocking. Do not claim
+  v1.2.0 contains the complete-body length fix.
+- Keep TM-05 and TM-11 partially open for descriptor-level filesystem defense
+  and an external immutable audit sink respectively.
 - Require production strict mode, loopback/private binding, TLS termination,
   authenticated access, encrypted persistence, and scoped ingest roots as a
   single deployment baseline.
@@ -122,9 +136,10 @@ Local evidence at preparation time:
 - `kujo check main.kujo`: passed.
 - Bind contract: passed in interpreter and VM modes.
 - API integration contract: passed.
-- Bearer RBAC escalation regression: passed in interpreter and VM modes with
-  the published Kujo v1.2.0 runtime.
-- Full repository runner: 65/65 suites passed with zero undefined-function
+- Bearer RBAC escalation and trusted-proxy forgery regressions: passed in
+  interpreter and VM modes with the release-candidate runtime built from Kujo
+  commit `385f618`.
+- Full repository runner: 68/68 suites passed with zero undefined-function
   warnings and within the existing warning budget.
 - Cadence validation: all gates pass except `review_not_overdue`; this is the
   expected failure until the accountable review occurs.

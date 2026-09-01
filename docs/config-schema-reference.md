@@ -10,12 +10,15 @@ Generated and validated by `scripts/run_config_schema_review.kujo`.
 |---|---|---|---|
 | api_abuse_blocklist_ips | array | [] | Use explicit allowlists tailored to tenant and environment boundaries. |
 | api_access_log | bool | true | Use default unless workload or compliance requirements justify override. |
+| api_allow_non_loopback | bool | false | Use default unless workload or compliance requirements justify override. |
 | api_anomaly_auto_block_enabled | bool | false | Keep disabled until explicitly required, then enable with controls documented. |
 | api_anomaly_block_ttl_sec | int | 900 | Start with default and tune from observed latency/error-budget telemetry. |
 | api_anomaly_hook_enabled | bool | false | Keep disabled until explicitly required, then enable with controls documented. |
 | api_anomaly_violation_threshold | int | 3 | Use default unless workload or compliance requirements justify override. |
 | api_audit_enabled | bool | false | Keep disabled until explicitly required, then enable with controls documented. |
 | api_audit_external_sink_mode | string | append_file | Use default unless workload or compliance requirements justify override. |
+| api_audit_fail_closed | bool | false | Use default unless workload or compliance requirements justify override. |
+| api_audit_integrity_key | string |  | Use default unless workload or compliance requirements justify override. |
 | api_audit_path | string | ./results/security_audit.log | Use deployment-stable paths with least-privilege file permissions. |
 | api_auth_provider | string | bearer | Use default unless workload or compliance requirements justify override. |
 | api_bearer_revoked_tokens | array | [] | Inject via secret management; do not commit plaintext values. |
@@ -55,11 +58,11 @@ Generated and validated by `scripts/run_config_schema_review.kujo`.
 | api_rate_limit_max_keys | int | 5000 | Start with default and tune from observed latency/error-budget telemetry. |
 | api_rate_limit_max_requests | int | 120 | Start with default and tune from observed latency/error-budget telemetry. |
 | api_rate_limit_window_sec | int | 60 | Start with default and tune from observed latency/error-budget telemetry. |
-| api_rbac_default_role | string | admin | Role bound to bearer/unauthenticated development callers and fallback role for trusted JWT proxy requests; choose least privilege for the deployment. |
+| api_rbac_default_role | string | reader | Use default unless workload or compliance requirements justify override. |
 | api_rbac_enabled | bool | false | Keep disabled until explicitly required, then enable with controls documented. |
-| api_rbac_namespace_header | string | x-kujo-namespace | Trusted JWT proxy fallback header only; never accepted as caller identity in bearer or unauthenticated modes. |
+| api_rbac_namespace_header | string | x-kujo-namespace | Use default unless workload or compliance requirements justify override. |
 | api_rbac_policy | dict | {"admin":["ingest","query","admin","export"],"reader":["query"],"writer":["ingest","query"]} | Keep schema-compatible structure; modify only through reviewed change control. |
-| api_rbac_role_header | string | x-kujo-role | Trusted JWT proxy fallback header only; never accepted as caller identity in bearer or unauthenticated modes. |
+| api_rbac_role_header | string | x-kujo-role | Use default unless workload or compliance requirements justify override. |
 | api_readiness_force_unready | bool | false | Use default unless workload or compliance requirements justify override. |
 | api_redaction_enabled | bool | true | Keep enabled only with monitoring and rollback readiness in place. |
 | api_redaction_keys | array | ["authorization","token","api_key","apikey","secret","password","passphrase","x-api-key","set-cookie","cookie","bearer","openai_api_key"] | Use explicit allowlists tailored to tenant and environment boundaries. |
@@ -71,6 +74,9 @@ Generated and validated by `scripts/run_config_schema_review.kujo`.
 | api_tenant_query_rate_window_sec | int | 60 | Start with default and tune from observed latency/error-budget telemetry. |
 | api_tenant_quota_enabled | bool | false | Keep disabled until explicitly required, then enable with controls documented. |
 | api_tenant_storage_max_chunks | int | 200000 | Start with default and tune from observed latency/error-budget telemetry. |
+| api_trusted_proxy_ips | array | ["127.0.0.1","::1"] | Use explicit allowlists tailored to tenant and environment boundaries. |
+| api_trusted_proxy_secret | string |  | Inject via secret management; do not commit plaintext values. |
+| api_trusted_proxy_secret_header | string | x-kujo-proxy-secret | Inject via secret management; do not commit plaintext values. |
 | at_rest_encryption_enabled | bool | false | Keep disabled until explicitly required, then enable with controls documented. |
 | at_rest_encryption_key | string |  | Use default unless workload or compliance requirements justify override. |
 | at_rest_encryption_key_file | string |  | Inject via secret management; do not commit plaintext values. |
@@ -116,6 +122,7 @@ Generated and validated by `scripts/run_config_schema_review.kujo`.
 | top_k | int | 6 | Use default unless workload or compliance requirements justify override. |
 | vector_backend | string | local_json | Use default unless workload or compliance requirements justify override. |
 | vector_backend_memory_key | string |  | Use default unless workload or compliance requirements justify override. |
+| vector_backend_qdrant_allowed_hosts | array | [] | Use explicit allowlists tailored to tenant and environment boundaries. |
 | vector_backend_qdrant_api_key | string |  | Inject via secret management; do not commit plaintext values. |
 | vector_backend_qdrant_collection | string | kujo_rag | Use default unless workload or compliance requirements justify override. |
 | vector_backend_qdrant_fail_open | bool | true | Use default unless workload or compliance requirements justify override. |

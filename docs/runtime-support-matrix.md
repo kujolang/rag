@@ -13,9 +13,9 @@ This matrix applies to:
 
 | Runtime source | Execution mode | Support level | CI validation | Notes |
 |---|---|---|---|---|
-| Pinned Kujo runtime commit (3a625ea22b10909df0d9758804a267cb920fd971) | Interpreter (`kujo run ... --interpreter`) | supported | required | Primary reliability mode for multi-module flows. |
-| Pinned Kujo runtime commit (3a625ea22b10909df0d9758804a267cb920fd971) | Bridge (`scripts/run_main_auto.kujo`) | supported | required | Native-first bridge with automatic interpreter fallback. |
-| Pinned Kujo runtime commit (3a625ea22b10909df0d9758804a267cb920fd971) | Direct native core parity (`kujo run main.kujo ingest/query ...`) | supported-for-core-flows | required | Core ingest/query parity is validated through `tests/test_native_mode_parity.kujo`. |
+| Kujo security-candidate commit (`385f618aea466726cf2b5430d9cc4d0ed098017a`) | Interpreter (`kujo run ... --interpreter`) | supported | required | Docker source pin and security baseline; bounds request bodies, honors declared lengths without deadline stalls, enforces read deadlines, and exposes trustworthy peer identity. |
+| Kujo security-candidate commit (`385f618aea466726cf2b5430d9cc4d0ed098017a`) | VM (`kujo run ...`) | supported | required | The same live listener, peer, direct-proxy-bypass, and oversized-body checks run in VM mode. |
+| Kujo v1.2.0 signed release commit (`ed51720892d8e475980909dffe54c8fba8731e11`) | Interpreter and VM | compatibility-only | blocked for production | Contains the initial body bound/deadline work but can wait for the read deadline after a complete declared body. Publish and checksum a patch release containing `385f618` before restoring release-artifact CI installation. |
 
 ## Non-Goals / Unsupported Combinations
 
