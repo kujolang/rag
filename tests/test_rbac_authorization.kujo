@@ -1,6 +1,6 @@
 from src.tests_helpers import assert_true
 from src.common import dict_get_or
-from src.query_api import validate_api_rbac
+from src.query_api import validate_api_auth, validate_api_rbac
 
 rbac_disabled := validate_api_rbac({"headers": {}}, {
 	"api_rbac_enabled": false
@@ -10,6 +10,7 @@ assert_true(to_bool(dict_get_or(rbac_disabled, "ok", false) == true))
 rbac_cfg := {
 	"api_rbac_enabled": true,
 	"api_rbac_default_role": "reader",
+	"namespace": "team_a",
 	"api_rbac_role_header": "x-kujo-role",
 	"api_rbac_namespace_header": "x-kujo-namespace",
 	"api_rbac_policy": {
@@ -24,7 +25,7 @@ reader_query := validate_api_rbac({
 		"x-kujo-role": "reader",
 		"x-kujo-namespace": "team_a"
 	}
-}, rbac_cfg, {}, "query", "team_a")
+}, rbac_cfg, {"provider": "jwt_proxy"}, "query", "team_a")
 assert_true(to_bool(dict_get_or(reader_query, "ok", false) == true))
 
 reader_ingest := validate_api_rbac({
@@ -32,7 +33,7 @@ reader_ingest := validate_api_rbac({
 		"x-kujo-role": "reader",
 		"x-kujo-namespace": "team_a"
 	}
-}, rbac_cfg, {}, "ingest", "team_a")
+}, rbac_cfg, {"provider": "jwt_proxy"}, "ingest", "team_a")
 assert_true(to_bool(dict_get_or(reader_ingest, "ok", true) == false))
 assert_true(to_bool(dict_get_or(reader_ingest, "error", "") == "rbac_forbidden"))
 
@@ -41,17 +42,19 @@ writer_wrong_namespace := validate_api_rbac({
 		"x-kujo-role": "writer",
 		"x-kujo-namespace": "team_b"
 	}
-}, rbac_cfg, {}, "ingest", "team_a")
+}, rbac_cfg, {"provider": "jwt_proxy"}, "ingest", "team_a")
 assert_true(to_bool(dict_get_or(writer_wrong_namespace, "ok", true) == false))
 assert_true(to_bool(dict_get_or(writer_wrong_namespace, "error", "") == "rbac_namespace_forbidden"))
 
 jwt_context_allowed := validate_api_rbac({"headers": {}}, rbac_cfg, {
+	"provider": "jwt_proxy",
 	"role": "writer",
 	"namespace_scope": "team_a"
 }, "ingest", "team_a")
 assert_true(to_bool(dict_get_or(jwt_context_allowed, "ok", false) == true))
 
 jwt_context_denied := validate_api_rbac({"headers": {}}, rbac_cfg, {
+	"provider": "jwt_proxy",
 	"role": "writer",
 	"namespace_scope": "team_a"
 }, "ingest", "team_b")
@@ -63,7 +66,66 @@ admin_global := validate_api_rbac({
 		"x-kujo-role": "admin",
 		"x-kujo-namespace": "*"
 	}
-}, rbac_cfg, {}, "admin", "team_x")
+}, rbac_cfg, {"provider": "jwt_proxy"}, "admin", "team_x")
 assert_true(to_bool(dict_get_or(admin_global, "ok", false) == true))
+
+bearer_cfg := {
+	"api_auth_provider": "bearer",
+	"api_bearer_token": "valid-reader-token",
+	"api_rbac_enabled": true,
+	"api_rbac_default_role": "reader",
+	"namespace": "team_a",
+	"api_rbac_role_header": "x-kujo-role",
+	"api_rbac_namespace_header": "x-kujo-namespace",
+	"api_rbac_policy": {
+		"admin": ["ingest", "query", "admin"],
+		"writer": ["ingest", "query"],
+		"reader": ["query"]
+	}
+}
+forged_bearer_req := {
+	"headers": {
+		"authorization": "Bearer valid-reader-token",
+		"x-kujo-role": "admin",
+		"x-kujo-namespace": "*"
+	}
+}
+bearer_auth := validate_api_auth(forged_bearer_req, bearer_cfg)
+assert_true(to_bool(dict_get_or(bearer_auth, "ok", false) == true))
+
+bearer_admin_escalation := validate_api_rbac(forged_bearer_req, bearer_cfg, bearer_auth, "admin", "team_a")
+assert_true(to_bool(dict_get_or(bearer_admin_escalation, "ok", true) == false))
+assert_true(to_bool(dict_get_or(bearer_admin_escalation, "error", "") == "rbac_forbidden"))
+
+bearer_namespace_escalation := validate_api_rbac(forged_bearer_req, bearer_cfg, bearer_auth, "query", "team_b")
+assert_true(to_bool(dict_get_or(bearer_namespace_escalation, "ok", true) == false))
+assert_true(to_bool(dict_get_or(bearer_namespace_escalation, "error", "") == "rbac_namespace_forbidden"))
+
+bearer_default_scope := validate_api_rbac(forged_bearer_req, bearer_cfg, bearer_auth, "query", "team_a")
+assert_true(to_bool(dict_get_or(bearer_default_scope, "ok", false) == true))
+assert_true(to_bool(dict_get_or(bearer_default_scope, "role", "") == "reader"))
+assert_true(to_bool(dict_get_or(bearer_default_scope, "namespace_scope", "") == "team_a"))
+
+bearer_admin_cfg := {
+	"api_auth_provider": "bearer",
+	"api_bearer_token": "valid-admin-token",
+	"api_rbac_enabled": true,
+	"api_rbac_default_role": "admin",
+	"namespace": "team_a",
+	"api_rbac_policy": {
+		"admin": ["ingest", "query", "admin"],
+		"writer": ["ingest", "query"],
+		"reader": ["query"]
+	}
+}
+bearer_admin_req := {"headers": {"authorization": "Bearer valid-admin-token"}}
+bearer_admin_auth := validate_api_auth(bearer_admin_req, bearer_admin_cfg)
+assert_true(to_bool(dict_get_or(bearer_admin_auth, "ok", false) == true))
+
+bearer_global_job_status := validate_api_rbac(bearer_admin_req, bearer_admin_cfg, bearer_admin_auth, "ingest", "*")
+assert_true(to_bool(dict_get_or(bearer_global_job_status, "ok", false) == true))
+
+bearer_global_worker := validate_api_rbac(bearer_admin_req, bearer_admin_cfg, bearer_admin_auth, "admin", "*")
+assert_true(to_bool(dict_get_or(bearer_global_worker, "ok", false) == true))
 
 print("test_rbac_authorization: ok")

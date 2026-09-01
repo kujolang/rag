@@ -55,11 +55,11 @@ Generated and validated by `scripts/run_config_schema_review.kujo`.
 | api_rate_limit_max_keys | int | 5000 | Start with default and tune from observed latency/error-budget telemetry. |
 | api_rate_limit_max_requests | int | 120 | Start with default and tune from observed latency/error-budget telemetry. |
 | api_rate_limit_window_sec | int | 60 | Start with default and tune from observed latency/error-budget telemetry. |
-| api_rbac_default_role | string | admin | Use default unless workload or compliance requirements justify override. |
+| api_rbac_default_role | string | admin | Role bound to bearer/unauthenticated development callers and fallback role for trusted JWT proxy requests; choose least privilege for the deployment. |
 | api_rbac_enabled | bool | false | Keep disabled until explicitly required, then enable with controls documented. |
-| api_rbac_namespace_header | string | x-kujo-namespace | Use default unless workload or compliance requirements justify override. |
+| api_rbac_namespace_header | string | x-kujo-namespace | Trusted JWT proxy fallback header only; never accepted as caller identity in bearer or unauthenticated modes. |
 | api_rbac_policy | dict | {"admin":["ingest","query","admin","export"],"reader":["query"],"writer":["ingest","query"]} | Keep schema-compatible structure; modify only through reviewed change control. |
-| api_rbac_role_header | string | x-kujo-role | Use default unless workload or compliance requirements justify override. |
+| api_rbac_role_header | string | x-kujo-role | Trusted JWT proxy fallback header only; never accepted as caller identity in bearer or unauthenticated modes. |
 | api_readiness_force_unready | bool | false | Use default unless workload or compliance requirements justify override. |
 | api_redaction_enabled | bool | true | Keep enabled only with monitoring and rollback readiness in place. |
 | api_redaction_keys | array | ["authorization","token","api_key","apikey","secret","password","passphrase","x-api-key","set-cookie","cookie","bearer","openai_api_key"] | Use explicit allowlists tailored to tenant and environment boundaries. |

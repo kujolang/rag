@@ -2784,36 +2784,52 @@ export validate_api_auth := func(req, cfg) {
 
 func rbac_role_from_context(req, cfg, auth_ctx) {
 	role := ""
+	provider := ""
 	if type(auth_ctx) == "dict" {
 		role = to_lower(trim(to_string(dict_get_or(auth_ctx, "role", ""))))
+		provider = to_lower(trim(to_string(dict_get_or(auth_ctx, "provider", ""))))
 	}
 	if role != "" {
 		return role
 	}
-	role_header := to_lower(trim(to_string(dict_get_or(cfg, "api_rbac_role_header", "x-kujo-role"))))
-	if role_header == "" {
-		role_header = "x-kujo-role"
-	}
-	role = to_lower(trim(req_header(req, role_header)))
-	if role != "" {
-		return role
+	if provider == "jwt_proxy" {
+		role_header := to_lower(trim(to_string(dict_get_or(cfg, "api_rbac_role_header", "x-kujo-role"))))
+		if role_header == "" {
+			role_header = "x-kujo-role"
+		}
+		role = to_lower(trim(req_header(req, role_header)))
+		if role != "" {
+			return role
+		}
 	}
 	return to_lower(trim(to_string(dict_get_or(cfg, "api_rbac_default_role", "admin"))))
 }
 
 func rbac_namespace_scope_from_context(req, cfg, auth_ctx) {
 	scope := ""
+	provider := ""
 	if type(auth_ctx) == "dict" {
 		scope = to_lower(trim(to_string(dict_get_or(auth_ctx, "namespace_scope", ""))))
+		provider = to_lower(trim(to_string(dict_get_or(auth_ctx, "provider", ""))))
 	}
 	if scope != "" {
 		return scope
 	}
-	namespace_header := to_lower(trim(to_string(dict_get_or(cfg, "api_rbac_namespace_header", "x-kujo-namespace"))))
-	if namespace_header == "" {
-		namespace_header = "x-kujo-namespace"
+	if provider == "jwt_proxy" {
+		namespace_header := to_lower(trim(to_string(dict_get_or(cfg, "api_rbac_namespace_header", "x-kujo-namespace"))))
+		if namespace_header == "" {
+			namespace_header = "x-kujo-namespace"
+		}
+		scope = to_lower(trim(req_header(req, namespace_header)))
+		if scope != "" {
+			return scope
+		}
 	}
-	return to_lower(trim(req_header(req, namespace_header)))
+	scope = to_lower(trim(to_string(dict_get_or(cfg, "namespace", "default"))))
+	if scope == "" {
+		return "default"
+	}
+	return scope
 }
 
 func rbac_action_allowed(cfg, role, action) {

@@ -591,6 +591,10 @@ Optional namespace RBAC controls:
 - `KUJO_RAG_API_RBAC_POLICY_JSON={"admin":["ingest","query","admin"],"writer":["ingest","query"],"reader":["query"]}`
 
 RBAC enforces action permissions (`ingest`, `query`, `admin`) and optional namespace scope restrictions per request.
+Caller-supplied RBAC role and namespace headers are accepted only in
+`jwt_proxy` mode, behind a proxy that verifies tokens and strips untrusted
+identity headers. Bearer mode binds the shared token to the configured default
+role and namespace.
 
 Example bearer-mode authenticated query:
 
