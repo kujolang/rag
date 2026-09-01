@@ -77,6 +77,19 @@ func wait_for_health(port) {
 	return false
 }
 
+func wait_for_log_markers(log_file, first_marker, second_marker) {
+	attempt := 0
+	while attempt < 1200 {
+		log_content := run_cmd("cat " + log_file + " | cat")
+		log_text := dict_get_or(log_content, "stdout", "")
+		if contains(log_text, first_marker) && contains(log_text, second_marker) {
+			return true
+		}
+		attempt = attempt + 1
+	}
+	return false
+}
+
 port := 36000 + (current_timestamp() % 10000)
 log_file := "/tmp/kujo_rag_structured_logs_test.log"
 request_id := "req-structured-123"
@@ -95,10 +108,7 @@ assert_true(to_bool(dict_get_or(body, "ok", false) == true))
 assert_true(to_bool(dict_get_or(body, "request_id", "") == request_id))
 assert_true(to_bool(dict_get_or(body, "correlation_id", "") == correlation_id))
 
-log_content := run_cmd("cat " + log_file + " | cat")
-log_text := dict_get_or(log_content, "stdout", "")
-assert_true(to_bool(contains(log_text, request_id) == 1))
-assert_true(to_bool(contains(log_text, correlation_id) == 1))
+assert_true(to_bool(wait_for_log_markers(log_file, request_id, correlation_id) == true))
 
 _ := stop_server(pid)
 
