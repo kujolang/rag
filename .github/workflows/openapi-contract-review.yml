@@ -9,28 +9,12 @@ jobs:
   openapi-contract-review:
     runs-on: ubuntu-latest
     timeout-minutes: 25
-    env:
-      KUJO_RUNTIME_REF: "f0b7c6af753ed350e0957c4a873613fb7d88937d"
-
     steps:
       - name: Checkout repository
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
 
-      - name: Setup Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Build Kujo runtime
-        shell: bash
-        run: |
-          set -euo pipefail
-          git init /tmp/kujo-runtime
-          git -C /tmp/kujo-runtime remote add origin https://github.com/kujolang/kujo.git
-          git -C /tmp/kujo-runtime fetch --depth 1 origin "$KUJO_RUNTIME_REF"
-          git -C /tmp/kujo-runtime checkout --detach "$KUJO_RUNTIME_REF"
-          cargo build --release --locked --manifest-path /tmp/kujo-runtime/Cargo.toml
-          echo "/tmp/kujo-runtime/target/release" >> "$GITHUB_PATH"
-          echo "KUJO_MODULE_PATH=/tmp/kujo-runtime/modules" >> "$GITHUB_ENV"
-          echo "KUJO_BIN=/tmp/kujo-runtime/target/release/kujo" >> "$GITHUB_ENV"
+      - name: Install pinned Kujo runtime
+        uses: ./.github/actions/setup-kujo
 
       - name: Verify Kujo runtime
         run: kujo --version

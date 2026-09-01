@@ -1,0 +1,17 @@
+name: Setup pinned Kujo
+description: Install and expose the checksum-verified Kujo runtime used by RAG CI.
+
+runs:
+  using: composite
+  steps:
+    - name: Install Kujo v1.2.0
+      id: kujo
+      uses: kujolang/kujo/.github/actions/setup-kujo@ed51720892d8e475980909dffe54c8fba8731e11
+      with:
+        version: v1.2.0
+
+    - name: Export Kujo runtime path
+      shell: bash
+      env:
+        KUJO_SETUP_PATH: ${{ steps.kujo.outputs.kujo-path }}
+      run: echo "KUJO_BIN=${KUJO_SETUP_PATH}" >> "$GITHUB_ENV"
