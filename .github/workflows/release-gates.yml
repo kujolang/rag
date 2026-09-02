@@ -5,6 +5,28 @@ on:
   pull_request:
 
 jobs:
+  descriptor-relative-ingest:
+    name: descriptor-relative-ingest-${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest
+          - macos-latest
+          - windows-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+
+      - name: Install pinned Kujo runtime
+        uses: ./.github/actions/setup-kujo
+
+      - name: Verify descriptor-relative ingest
+        shell: bash
+        run: kujo run tests/test_descriptor_relative_ingest.kujo --interpreter
+
   runtime-support-matrix:
     runs-on: ubuntu-latest
     timeout-minutes: 25
