@@ -10,8 +10,8 @@
 - Prepared: 2026-09-01
 - Repository: `kujolang/rag`
 - Branch: `main`
-- RAG base commit: `a57031b53ccb541b891c6893ff1008231746581b`
-- Kujo runtime security commit: `385f618aea466726cf2b5430d9cc4d0ed098017a`
+- RAG base commit: `b850db11f353a9ffbaea627d1991e62d7c281fb0`
+- Kujo runtime release: `v1.2.2` / `22582e7f0111a1005002579b44f5d03cd2ed1c9c`
 - Required reviewer: Security Team
 - Approval status: awaiting accountable human review
 - Scope: HTTP API exposure, authentication, authorization, remote ingestion,
@@ -91,7 +91,7 @@ logs, and the integrity of persisted indexes.
 | TM-06 | Privacy artifacts expose full namespace contents after the request. | Source-remediated: privacy export, delete preflight, and receipt artifacts use the same atomic encrypted/integrity-tagged contract as indexes; failures are surfaced. | Define permissions, retention, backup, and publication policy for `results/privacy`; ensure CI never uploads it generically. |
 | TM-07 | A malicious/misconfigured Qdrant endpoint receives chunks, vectors, or credentials, or stale remote vectors survive deletion. | Source-remediated: strict HTTPS and exact-host allowlist, fail-closed sync, credential header files outside process args, HTTP-status failures, authoritative collection replacement, empty-index clearing, and destructive-handler failure propagation. | Approve the deployed endpoint/DNS/TLS trust and secret manager. Cross-system local/remote writes are not transactional and require monitoring/retry. |
 | TM-08 | Indexes, runtime state, backups, or side artifacts disclose source content or accept plaintext downgrade. | Source-remediated for repository-managed content: encrypted atomic envelopes cover index/privacy/runtime state, use keyed integrity tags, and reject plaintext/unsigned strict-mode downgrade. | Verify filesystem/backup permissions and migrate legacy unsigned envelopes before strict mode. Shared rate state and redacted audit metadata are non-content-bearing by contract. |
-| TM-09 | Oversized, slow, or complete HTTP bodies exhaust resources or wait for the read deadline. | Source-remediated in Kujo `385f618`: interpreter/VM reject declared overflow before reading, stop at declared lengths, retain bounded unknown-length reads and deadlines, and expose peer identity. RAG has live dual-mode regressions. | Publish and checksum a Kujo patch release containing `385f618`, update the reusable setup action/version pin, and verify proxy timeouts are no weaker. Until then the v1.2.0 artifact is release-blocking. |
+| TM-09 | Oversized, slow, or complete HTTP bodies exhaust resources or wait for the read deadline. | Source-remediated in signed Kujo v1.2.2: interpreter/VM reject declared overflow before reading, stop at declared lengths, retain bounded unknown-length reads and deadlines, and expose peer identity. RAG pins the checksum-verified release and has live dual-mode regressions. | Verify deployed proxy timeouts are no weaker and prohibit pre-v1.2.2 artifacts in production. |
 | TM-10 | A failed/oversized write is reported successful and later reloads empty. | Source-remediated: atomic persistence, read-after-write validation, explicit errors, prior-index preservation, size-range tests, and aggregate-runner inclusion. | Confirm hosted gates run the newly published runtime artifact; an unreadable index must remain a startup/ingest failure. |
 | TM-11 | Audit logs are disabled, tampered with, truncated, or silently lose events. | Partially source-remediated: strict mode requires keyed fail-closed audit; startup and pre-append verification detect content, missing-log, missing-checkpoint, and checkpoint-write failures; trace appends use the checked path. | Assign ownership/rotation and deploy an independently protected immutable sink. An actor able to delete both local files remains outside the local-chain guarantee. |
 
@@ -105,8 +105,8 @@ approved disposition yet:
   configured bearer defaults and trusted JWT-proxy header stripping.
 - Treat TM-01, TM-03, TM-04, TM-06, TM-07, TM-08, and TM-10 as remediated in
   source, pending hosted and deployment verification.
-- Treat the missing patch release for TM-09 as release-blocking. Do not claim
-  v1.2.0 contains the complete-body length fix.
+- Treat TM-09 as runtime-remediated by signed Kujo v1.2.2, pending deployed
+  proxy-timeout verification. Do not use v1.2.0 for production.
 - Keep TM-05 and TM-11 partially open for descriptor-level filesystem defense
   and an external immutable audit sink respectively.
 - Require production strict mode, loopback/private binding, TLS termination,
@@ -137,8 +137,7 @@ Local evidence at preparation time:
 - Bind contract: passed in interpreter and VM modes.
 - API integration contract: passed.
 - Bearer RBAC escalation and trusted-proxy forgery regressions: passed in
-  interpreter and VM modes with the release-candidate runtime built from Kujo
-  commit `385f618`.
+  interpreter and VM modes with signed Kujo v1.2.2 commit `22582e7f0111a1005002579b44f5d03cd2ed1c9c`.
 - Full repository runner: 68/68 suites passed with zero undefined-function
   warnings and within the existing warning budget.
 - Cadence validation: all gates pass except `review_not_overdue`; this is the

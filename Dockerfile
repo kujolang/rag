@@ -1,6 +1,6 @@
 FROM rust:1.81-bookworm
 
-ARG KUJO_RUNTIME_REF=385f618aea466726cf2b5430d9cc4d0ed098017a
+ARG KUJO_RUNTIME_REF=22582e7f0111a1005002579b44f5d03cd2ed1c9c
 
 RUN apt-get update \
 	&& apt-get install -y --no-install-recommends git ca-certificates \
