@@ -185,6 +185,19 @@ func qdrant_points_payload(index) {
 	return points
 }
 
+func qdrant_tagged_points(index) {
+	points := qdrant_points_payload(index)
+	generation_digest := sha256(to_json(points))
+	tagged := []
+	for point in points {
+		payload := dict_get_or(point, "payload", {})
+		payload["_kujo_generation_digest"] := generation_digest
+		point["payload"] := payload
+		tagged = push(tagged, point)
+	}
+	return {"points": tagged, "generation_digest": generation_digest}
+}
+
 func qdrant_sync_index_legacy(cfg, index) {
 	if qdrant_sync_enabled(cfg) == false {
 		return {
@@ -476,7 +489,9 @@ func qdrant_sync_index_staged(cfg, index) {
 
 	collection := qdrant_collection_name(cfg)
 	alias_name := qdrant_alias_name(cfg)
-	points := qdrant_points_payload(index)
+	tagged_points := qdrant_tagged_points(index)
+	points := dict_get_or(tagged_points, "points", [])
+	generation_digest := dict_get_or(tagged_points, "generation_digest", "")
 	dims := num_or(dict_get_or(cfg, "embedding_dims", 0), 0)
 	if len(points) > 0 {
 		dims = len(dict_get_or(points[0], "vector", []))
@@ -500,6 +515,7 @@ func qdrant_sync_index_staged(cfg, index) {
 		"candidate_collection": generation,
 		"expected_points": len(points),
 		"vector_dimensions": dims,
+		"generation_digest": generation_digest,
 		"created_at_unix_ms": current_timestamp(),
 		"updated_at_unix_ms": current_timestamp()
 	}
@@ -512,17 +528,20 @@ func qdrant_sync_index_staged(cfg, index) {
 	meta_payload_path := qdrant_tmp_file_path("qdrant_collection", generation, ".json")
 	points_payload_path := qdrant_tmp_file_path("qdrant_points", generation, ".json")
 	count_payload_path := qdrant_tmp_file_path("qdrant_count", generation, ".json")
+	digest_count_payload_path := qdrant_tmp_file_path("qdrant_digest_count", generation, ".json")
 	alias_payload_path := qdrant_tmp_file_path("qdrant_alias", generation, ".json")
 	write_json_file(meta_payload_path, {"vectors": {"size": dims, "distance": "Cosine"}})
 	write_json_file(points_payload_path, {"points": points})
 	write_json_file(count_payload_path, {"exact": true})
-	_ = execute_status("chmod 600 " + shell_quote(meta_payload_path) + " " + shell_quote(points_payload_path) + " " + shell_quote(count_payload_path), {"timeout_ms": 5000})
+	write_json_file(digest_count_payload_path, {"exact": true, "filter": {"must": [{"key": "_kujo_generation_digest", "match": {"value": generation_digest}}]}})
+	_ = execute_status("chmod 600 " + shell_quote(meta_payload_path) + " " + shell_quote(points_payload_path) + " " + shell_quote(count_payload_path) + " " + shell_quote(digest_count_payload_path), {"timeout_ms": 5000})
 
 	create_response := qdrant_request(cfg, header_path, "PUT", base_url + "/collections/" + generation, meta_payload_path)
 	if dict_get_or(create_response, "ok", false) == false {
 		remove_file_if_exists(meta_payload_path)
 		remove_file_if_exists(points_payload_path)
 		remove_file_if_exists(count_payload_path)
+		remove_file_if_exists(digest_count_payload_path)
 		remove_file_if_exists(header_path)
 		return qdrant_fail_staged(cfg, journal, "qdrant_candidate_create_failed", "Failed to create the staged Qdrant collection", create_response)
 	}
@@ -533,6 +552,7 @@ func qdrant_sync_index_staged(cfg, index) {
 		remove_file_if_exists(meta_payload_path)
 		remove_file_if_exists(points_payload_path)
 		remove_file_if_exists(count_payload_path)
+		remove_file_if_exists(digest_count_payload_path)
 		remove_file_if_exists(header_path)
 		return journal_write
 	}
@@ -543,6 +563,7 @@ func qdrant_sync_index_staged(cfg, index) {
 			remove_file_if_exists(meta_payload_path)
 			remove_file_if_exists(points_payload_path)
 			remove_file_if_exists(count_payload_path)
+			remove_file_if_exists(digest_count_payload_path)
 			remove_file_if_exists(header_path)
 			return qdrant_fail_staged(cfg, journal, "qdrant_candidate_upsert_failed", "Failed to populate the staged Qdrant collection", upsert_response)
 		}
@@ -554,6 +575,7 @@ func qdrant_sync_index_staged(cfg, index) {
 		remove_file_if_exists(meta_payload_path)
 		remove_file_if_exists(points_payload_path)
 		remove_file_if_exists(count_payload_path)
+		remove_file_if_exists(digest_count_payload_path)
 		remove_file_if_exists(header_path)
 		return journal_write
 	}
@@ -561,12 +583,16 @@ func qdrant_sync_index_staged(cfg, index) {
 	count_response := qdrant_request(cfg, header_path, "POST", base_url + "/collections/" + generation + "/points/count", count_payload_path)
 	count_parsed := qdrant_parse_response(count_response)
 	actual_points := num_or(dict_get_or(dict_get_or(count_parsed, "result", {}), "count", -1), -1)
-	if dict_get_or(count_response, "ok", false) == false || actual_points != len(points) {
+	digest_count_response := qdrant_request(cfg, header_path, "POST", base_url + "/collections/" + generation + "/points/count", digest_count_payload_path)
+	digest_count_parsed := qdrant_parse_response(digest_count_response)
+	digest_points := num_or(dict_get_or(dict_get_or(digest_count_parsed, "result", {}), "count", -1), -1)
+	if dict_get_or(count_response, "ok", false) == false || actual_points != len(points) || dict_get_or(digest_count_response, "ok", false) == false || digest_points != len(points) {
 		remove_file_if_exists(meta_payload_path)
 		remove_file_if_exists(points_payload_path)
 		remove_file_if_exists(count_payload_path)
+		remove_file_if_exists(digest_count_payload_path)
 		remove_file_if_exists(header_path)
-		return qdrant_fail_staged(cfg, journal, "qdrant_candidate_verification_failed", "Staged Qdrant collection did not match the expected point count", {"expected": len(points), "actual": actual_points, "response": count_response})
+		return qdrant_fail_staged(cfg, journal, "qdrant_candidate_verification_failed", "Staged Qdrant collection did not match the expected point count and generation digest", {"expected": len(points), "actual": actual_points, "digest_actual": digest_points, "count_response": count_response, "digest_response": digest_count_response})
 	}
 	journal["phase"] := "candidate_verified"
 	journal["updated_at_unix_ms"] := current_timestamp()
@@ -575,6 +601,7 @@ func qdrant_sync_index_staged(cfg, index) {
 		remove_file_if_exists(meta_payload_path)
 		remove_file_if_exists(points_payload_path)
 		remove_file_if_exists(count_payload_path)
+		remove_file_if_exists(digest_count_payload_path)
 		remove_file_if_exists(header_path)
 		return journal_write
 	}
@@ -584,6 +611,7 @@ func qdrant_sync_index_staged(cfg, index) {
 		remove_file_if_exists(meta_payload_path)
 		remove_file_if_exists(points_payload_path)
 		remove_file_if_exists(count_payload_path)
+		remove_file_if_exists(digest_count_payload_path)
 		remove_file_if_exists(header_path)
 		return qdrant_fail_staged(cfg, journal, "qdrant_alias_lookup_failed", "Failed to resolve the active Qdrant alias before commit", previous_result)
 	}
@@ -604,6 +632,7 @@ func qdrant_sync_index_staged(cfg, index) {
 		remove_file_if_exists(meta_payload_path)
 		remove_file_if_exists(points_payload_path)
 		remove_file_if_exists(count_payload_path)
+		remove_file_if_exists(digest_count_payload_path)
 		remove_file_if_exists(alias_payload_path)
 		remove_file_if_exists(header_path)
 		return journal_write
@@ -613,6 +642,7 @@ func qdrant_sync_index_staged(cfg, index) {
 	remove_file_if_exists(meta_payload_path)
 	remove_file_if_exists(points_payload_path)
 	remove_file_if_exists(count_payload_path)
+	remove_file_if_exists(digest_count_payload_path)
 	remove_file_if_exists(alias_payload_path)
 	remove_file_if_exists(header_path)
 	if dict_get_or(alias_response, "ok", false) == false {

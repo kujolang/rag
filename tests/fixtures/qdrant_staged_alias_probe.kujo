@@ -34,7 +34,7 @@ func fixture_index(label) {
 	return index
 }
 
-if case_name == "failure" {
+if case_name == "failure" || case_name == "digest_failure" {
 	seeded := save_index_with_config(mirror_path, fixture_index("prior"), cfg)
 	if seeded != true {
 		exit(1)

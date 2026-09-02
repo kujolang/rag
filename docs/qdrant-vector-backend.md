@@ -88,9 +88,10 @@ one non-strict compatibility window and is rejected by strict configuration.
 This first staged tranche deliberately retains prior generations. Automated
 rollback, restart completion, and delayed bounded generation garbage collection
 remain required before operators should enable unattended cleanup. Candidate
-verification currently proves exact cardinality, not a full vector-and-payload
-digest; deployments requiring content attestation must keep staged mode behind
-an operator gate until read-back digest verification is implemented.
+verification proves exact cardinality and requires every payload to carry the
+expected generation digest. It does not yet read every stored vector back and
+rehash it; deployments requiring full storage-level content attestation must
+keep staged mode behind an operator gate until vector read-back is implemented.
 
 ## Validation
 
