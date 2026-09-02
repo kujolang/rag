@@ -4,11 +4,11 @@ description: Install and expose the checksum-verified Kujo runtime used by RAG C
 runs:
   using: composite
   steps:
-    - name: Install Kujo v1.2.2
+    - name: Install Kujo v1.2.3
       id: kujo
-      uses: kujolang/kujo/.github/actions/setup-kujo@22582e7f0111a1005002579b44f5d03cd2ed1c9c
+      uses: kujolang/kujo/.github/actions/setup-kujo@b1cec6b6c0f22e9015f5a8d3d1afc7e30b6964f7
       with:
-        version: v1.2.2
+        version: v1.2.3
 
     - name: Export Kujo runtime path
       shell: bash

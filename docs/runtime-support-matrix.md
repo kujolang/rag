@@ -13,8 +13,9 @@ This matrix applies to:
 
 | Runtime source | Execution mode | Support level | CI validation | Notes |
 |---|---|---|---|---|
-| Kujo v1.2.2 signed release commit (`22582e7f0111a1005002579b44f5d03cd2ed1c9c`) | Interpreter (`kujo run ... --interpreter`) | supported | required | Release-artifact CI and Docker source pin; bounds request bodies, honors declared lengths without deadline stalls, enforces read deadlines, and exposes trustworthy peer identity. |
-| Kujo v1.2.2 signed release commit (`22582e7f0111a1005002579b44f5d03cd2ed1c9c`) | VM (`kujo run ...`) | supported | required | The same live listener, peer, direct-proxy-bypass, and oversized-body checks run in VM mode. |
+| Kujo v1.2.3 signed release commit (`b1cec6b6c0f22e9015f5a8d3d1afc7e30b6964f7`) | Interpreter (`kujo run ... --interpreter`) | supported | required | Release-artifact CI and Docker source pin; adds descriptor-relative no-follow reads and bounded structured-process stdin while retaining request-body bounds, deadlines, and trustworthy peer identity. |
+| Kujo v1.2.3 signed release commit (`b1cec6b6c0f22e9015f5a8d3d1afc7e30b6964f7`) | VM (`kujo run ...`) | supported | required | The same filesystem capabilities, process-input contract, live listener, peer, direct-proxy-bypass, and oversized-body checks run in VM mode. |
+| Kujo v1.2.2 signed release commit (`22582e7f0111a1005002579b44f5d03cd2ed1c9c`) | Interpreter and VM | compatibility-only | prohibited for production ingestion | Retains the hardened HTTP boundary but lacks descriptor-relative no-follow reads and bounded structured-process stdin required by the current parser boundary. |
 | Kujo v1.2.0 signed release commit (`ed51720892d8e475980909dffe54c8fba8731e11`) | Interpreter and VM | compatibility-only | prohibited for production | Contains the initial body bound/deadline work but can wait for the read deadline after a complete declared body. |
 
 ## Non-Goals / Unsupported Combinations
