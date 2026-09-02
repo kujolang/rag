@@ -8,7 +8,7 @@ mirror_path := "./results/test_qdrant_staged_alias_" + case_name + ".json"
 journal_path := mirror_path + ".journal.json"
 cfg := load_config({
 	"vector_backend": "qdrant_http",
-	"vector_backend_qdrant_url": "https://qdrant.internal:6333",
+	"vector_backend_qdrant_url": env_or("QDRANT_STAGED_URL", "https://qdrant.internal:6333"),
 	"vector_backend_qdrant_collection": "staged_security_probe",
 	"vector_backend_qdrant_alias": "staged_security_probe_active",
 	"vector_backend_qdrant_api_key": "staged-process-secret-marker",
