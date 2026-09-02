@@ -427,10 +427,7 @@ func qdrant_parse_response(response) {
 }
 
 func qdrant_existing_alias_target(cfg, header_path, alias_name) {
-	response := qdrant_request(cfg, header_path, "GET", qdrant_base_url(cfg) + "/aliases/" + alias_name, "")
-	if dict_get_or(response, "status", "") == "404" {
-		return {"ok": true, "target": ""}
-	}
+	response := qdrant_request(cfg, header_path, "GET", qdrant_base_url(cfg) + "/aliases", "")
 	if dict_get_or(response, "ok", false) == false {
 		return {"ok": false, "response": response}
 	}
@@ -459,6 +456,22 @@ func qdrant_sync_index_staged(cfg, index) {
 	base_url := qdrant_base_url(cfg)
 	if base_url == "" {
 		return {"ok": false, "error": {"code": "qdrant_url_missing", "message": "Qdrant sync requires non-empty vector_backend_qdrant_url"}}
+	}
+	existing_journal := read_json_file_or(qdrant_journal_path(cfg), {})
+	existing_phase := to_string(dict_get_or(existing_journal, "phase", ""))
+	if existing_phase != "" && existing_phase != "mirror_committed" && existing_phase != "aborted_cleaned" {
+		return {
+			"ok": false,
+			"error": {
+				"code": "qdrant_recovery_required",
+				"message": "An unresolved staged Qdrant transaction must be reconciled before another save",
+				"details": {
+					"journal_path": qdrant_journal_path(cfg),
+					"phase": existing_phase,
+					"candidate_collection": dict_get_or(existing_journal, "candidate_collection", "")
+				}
+			}
+		}
 	}
 
 	collection := qdrant_collection_name(cfg)
@@ -582,6 +595,19 @@ func qdrant_sync_index_staged(cfg, index) {
 	actions = push(actions, {"create_alias": {"collection_name": generation, "alias_name": alias_name}})
 	write_json_file(alias_payload_path, {"actions": actions})
 	_ = execute_status("chmod 600 " + shell_quote(alias_payload_path), {"timeout_ms": 5000})
+	journal["phase"] := "alias_commit_started"
+	journal["previous_collection"] := previous_target
+	journal["alias_commit_started_at_unix_ms"] := current_timestamp()
+	journal["updated_at_unix_ms"] := current_timestamp()
+	journal_write = qdrant_write_journal(cfg, journal)
+	if dict_get_or(journal_write, "ok", false) == false {
+		remove_file_if_exists(meta_payload_path)
+		remove_file_if_exists(points_payload_path)
+		remove_file_if_exists(count_payload_path)
+		remove_file_if_exists(alias_payload_path)
+		remove_file_if_exists(header_path)
+		return journal_write
+	}
 	alias_response := qdrant_request(cfg, header_path, "POST", base_url + "/collections/aliases", alias_payload_path)
 
 	remove_file_if_exists(meta_payload_path)
@@ -590,7 +616,11 @@ func qdrant_sync_index_staged(cfg, index) {
 	remove_file_if_exists(alias_payload_path)
 	remove_file_if_exists(header_path)
 	if dict_get_or(alias_response, "ok", false) == false {
-		return qdrant_fail_staged(cfg, journal, "qdrant_alias_commit_failed", "Failed to atomically switch the active Qdrant alias", alias_response)
+		journal["phase"] := "alias_commit_ambiguous"
+		journal["error"] := {"code": "qdrant_alias_commit_ambiguous", "message": "The alias request did not return success; remote commit state must be reconciled", "details": alias_response}
+		journal["updated_at_unix_ms"] := current_timestamp()
+		_ = qdrant_write_journal(cfg, journal)
+		return {"ok": false, "error": journal["error"]}
 	}
 
 	journal["phase"] := "alias_committed"
@@ -636,10 +666,13 @@ func qdrant_load(cfg) {
 			meta["qdrant_journal_phase"] := phase
 			meta["qdrant_generation"] := dict_get_or(journal, "candidate_collection", "")
 		}
-		if phase == "alias_committed" {
+		if phase != "" && phase != "mirror_committed" && phase != "aborted_cleaned" {
+			meta["qdrant_recovery_required"] := true
+		}
+		if phase == "alias_commit_started" || phase == "alias_commit_ambiguous" || phase == "alias_committed" {
 			meta["load_error"] := {
 				"code": "qdrant_recovery_required",
-				"message": "The remote alias committed but the local mirror did not; retry the interrupted save or perform operator recovery",
+				"message": "The remote alias may have committed while the local mirror did not; perform operator recovery before another save",
 				"details": {"journal_path": qdrant_journal_path(cfg), "candidate_collection": dict_get_or(journal, "candidate_collection", "")}
 			}
 		}

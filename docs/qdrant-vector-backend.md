@@ -75,6 +75,10 @@ verification. An atomic local journal records every phase; a journal left at
 `alias_committed` is surfaced as `qdrant_recovery_required` on load instead of
 silently treating the prior mirror as current. Empty authoritative indexes use
 the configured embedding dimension and follow the same verified alias commit.
+The runtime writes `alias_commit_started` before the visibility request; a
+timeout or transport failure becomes `alias_commit_ambiguous`. Any unresolved
+journal phase blocks subsequent staged saves so a retry cannot overwrite the
+only recovery evidence or create an unbounded series of orphan generations.
 
 The default alias is `<collection>__active` so it cannot collide with an existing
 legacy collection of the configured name. Query clients must use this alias after
@@ -83,7 +87,10 @@ one non-strict compatibility window and is rejected by strict configuration.
 
 This first staged tranche deliberately retains prior generations. Automated
 rollback, restart completion, and delayed bounded generation garbage collection
-remain required before operators should enable unattended cleanup.
+remain required before operators should enable unattended cleanup. Candidate
+verification currently proves exact cardinality, not a full vector-and-payload
+digest; deployments requiring content attestation must keep staged mode behind
+an operator gate until read-back digest verification is implemented.
 
 ## Validation
 
