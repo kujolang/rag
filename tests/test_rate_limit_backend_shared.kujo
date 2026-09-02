@@ -84,7 +84,7 @@ if file_exists(state_file) {
 
 port_a := 43000 + (current_timestamp() % 10000)
 port_b := port_a + 1
-env_common := "KUJO_RAG_ENV=development KUJO_RAG_API_AUTH_PROVIDER=none KUJO_RAG_API_RATE_LIMIT_WINDOW_SEC=60 KUJO_RAG_API_RATE_LIMIT_MAX_REQUESTS=200 KUJO_RAG_API_RATE_LIMIT_BURST_WINDOW_SEC=60 KUJO_RAG_API_RATE_LIMIT_BURST_MAX_REQUESTS=200 KUJO_RAG_API_RATE_LIMIT_BACKEND=shared_file KUJO_RAG_API_RATE_LIMIT_BACKEND_FILE=" + state_file
+env_common := "KUJO_RAG_ENV=development KUJO_RAG_API_AUTH_PROVIDER=none KUJO_RAG_API_RATE_LIMIT_WINDOW_SEC=300 KUJO_RAG_API_RATE_LIMIT_MAX_REQUESTS=40 KUJO_RAG_API_RATE_LIMIT_BURST_WINDOW_SEC=300 KUJO_RAG_API_RATE_LIMIT_BURST_MAX_REQUESTS=40 KUJO_RAG_API_RATE_LIMIT_BACKEND=shared_file KUJO_RAG_API_RATE_LIMIT_BACKEND_FILE=" + state_file
 
 pid_a := start_server(port_a, env_common, "/tmp/kujo_rag_rate_backend_a.log")
 pid_b := start_server(port_b, env_common, "/tmp/kujo_rag_rate_backend_b.log")
@@ -94,14 +94,14 @@ assert_true(to_bool(wait_for_health(port_a) == true))
 assert_true(to_bool(wait_for_health(port_b) == true))
 
 i := 0
-while i < 120 {
+while i < 30 {
 	_ = run_cmd("curl -s http://127.0.0.1:" + to_string(port_a) + "/health")
 	i = i + 1
 }
 
 limited := false
 j := 0
-while j < 120 {
+while j < 30 {
 	res := run_cmd("curl -s http://127.0.0.1:" + to_string(port_b) + "/health")
 	parsed := parse_json_safe(dict_get_or(res, "stdout", ""))
 	if dict_get_or(parsed, "ok", false) == true {
