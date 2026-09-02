@@ -1,6 +1,6 @@
 from src.config import load_config
 from src.common import dict_get_or, read_json_file_or
-from src.vector_backend import load_index_with_backend, save_index_with_backend
+from src.vector_backend import load_index_with_backend, rollback_qdrant_generation, save_index_with_backend
 from src.vector_store import empty_index, load_index_with_config, save_index_with_config
 
 case_name := env_or("QDRANT_STAGED_CASE", "success")
@@ -38,12 +38,59 @@ func fixture_index(label) {
 	return index
 }
 
+func prior_fixture_index() {
+	index := fixture_index("prior")
+	meta := dict_get_or(index, "meta", {})
+	meta["qdrant_generation"] := "prior_generation"
+	index["meta"] := meta
+	return index
+}
+
+if case_name == "lock_busy" {
+	lock_path := journal_path + ".mutation-lock"
+	create_dir(lock_path)
+	result := save_index_with_backend(cfg, fixture_index("blocked"))
+	journal := read_json_file_or(journal_path, {})
+	lock_released := execute_status("rmdir '" + lock_path + "'", {"timeout_ms": 5000})
+	if result != false || len(keys(journal)) != 0 || file_exists(journal_path + ".candidate.json") || lock_released.success != true {
+		exit(1)
+	}
+	print(to_json({"ok": true, "case": case_name, "lock_enforced": true}))
+	exit(0)
+}
+
+if case_name == "candidate_persist_failure" {
+	candidate_path := journal_path + ".candidate.json"
+	create_dir(candidate_path)
+	result := save_index_with_backend(cfg, fixture_index("candidate-persist-failure"))
+	_ = execute_status("rmdir '" + candidate_path + "'", {"timeout_ms": 5000})
+	leak_check := execute_status("find ./results -maxdepth 1 -name 'test_qdrant_staged_alias_candidate_persist_failure.json.journal.json.previous.*.json' | wc -l", {"timeout_ms": 5000})
+	if result != false || trim(to_string(leak_check.stdout)) != "0" {
+		exit(1)
+	}
+	print(to_json({"ok": true, "case": case_name, "pre_journal_snapshot_cleaned": true}))
+	exit(0)
+}
+
+if case_name == "journal_persist_failure" {
+	create_dir(journal_path)
+	result := save_index_with_backend(cfg, fixture_index("journal-persist-failure"))
+	_ = execute_status("rmdir '" + journal_path + "'", {"timeout_ms": 5000})
+	leak_check := execute_status("find ./results -maxdepth 1 \\( -name 'test_qdrant_staged_alias_journal_persist_failure.json.journal.json.previous.*.json' -o -name 'test_qdrant_staged_alias_journal_persist_failure.json.journal.json.candidate.json' \\) | wc -l", {"timeout_ms": 5000})
+	if result != false || trim(to_string(leak_check.stdout)) != "0" {
+		exit(1)
+	}
+	print(to_json({"ok": true, "case": case_name, "prepared_failure_artifacts_cleaned": true}))
+	exit(0)
+}
+
 if case_name == "restart_recovery" {
 	first_saved := save_index_with_backend(cfg, fixture_index("prior"))
 	second_saved := save_index_with_backend(cfg, fixture_index("candidate"))
 	committed_journal := read_json_file_or(journal_path, {})
 	candidate_path := to_string(dict_get_or(committed_journal, "candidate_mirror_path", journal_path + ".candidate.json"))
 	candidate_copy := write_file_atomic(candidate_path, read_file(mirror_path), true)
+	committed_journal["candidate_mirror_sha256"] := to_string(sha256_file(candidate_path))
 	prior_restored := save_index_with_config(mirror_path, fixture_index("prior"), cfg)
 	committed_journal["phase"] := "alias_committed"
 	journal_seeded := write_file_atomic(journal_path, to_json(committed_journal), true)
@@ -72,8 +119,84 @@ if case_name == "gc" {
 	exit(0)
 }
 
-if case_name == "failure" || case_name == "digest_failure" {
-	seeded := save_index_with_config(mirror_path, fixture_index("prior"), cfg)
+if case_name == "rollback" {
+	first_saved := save_index_with_backend(cfg, fixture_index("prior"))
+	second_saved := save_index_with_backend(cfg, fixture_index("candidate"))
+	rolled_back := rollback_qdrant_generation(cfg)
+	restored := load_index_with_backend(cfg)
+	rollback_journal := read_json_file_or(journal_path, {})
+	restored_chunks := dict_get_or(restored, "chunks", [])
+	if first_saved != true || second_saved != true || dict_get_or(rolled_back, "ok", false) != true || len(restored_chunks) != 1 || dict_get_or(restored_chunks[0], "chunk_id", "") != "chunk-prior" || dict_get_or(dict_get_or(restored, "meta", {}), "qdrant_generation", "") != dict_get_or(rollback_journal, "previous_collection", "") || dict_get_or(dict_get_or(restored, "meta", {}), "qdrant_recovery_required", false) == true || dict_get_or(rollback_journal, "phase", "") != "rolled_back" || dict_get_or(rollback_journal, "rollback_action", "") != "restored_previous_generation" {
+		exit(1)
+	}
+	print(to_json({"ok": true, "case": case_name, "rolled_back": true}))
+	exit(0)
+}
+
+if case_name == "rollback_tamper" {
+	first_saved := save_index_with_backend(cfg, fixture_index("prior"))
+	second_saved := save_index_with_backend(cfg, fixture_index("candidate"))
+	tamper_journal := read_json_file_or(journal_path, {})
+	rollback_path := to_string(dict_get_or(tamper_journal, "rollback_mirror_path", ""))
+	tampered := read_json_file_or(rollback_path, {})
+	tampered_chunks := dict_get_or(tampered, "chunks", [])
+	if len(tampered_chunks) > 0 {
+		tampered_chunk := tampered_chunks[0]
+		tampered_chunk["text"] := "tampered local-only rollback content"
+		tampered_chunks[0] = tampered_chunk
+	}
+	tampered["chunks"] := tampered_chunks
+	tamper_written := write_file_atomic(rollback_path, to_json(tampered), true)
+	rolled_back := rollback_qdrant_generation(cfg)
+	final_journal := read_json_file_or(journal_path, {})
+	if first_saved != true || second_saved != true || tamper_written != true || dict_get_or(rolled_back, "ok", true) != false || dict_get_or(dict_get_or(rolled_back, "error", {}), "code", "") != "qdrant_rollback_mirror_digest_mismatch" || dict_get_or(final_journal, "phase", "") != "mirror_committed" {
+		exit(1)
+	}
+	print(to_json({"ok": true, "case": case_name, "tamper_rejected": true}))
+	exit(0)
+}
+
+if case_name == "rollback_readback_failure" {
+	first_saved := save_index_with_backend(cfg, fixture_index("prior"))
+	second_saved := save_index_with_backend(cfg, fixture_index("candidate"))
+	marker_path := env_or("FAKE_QDRANT_BAD_READBACK_MARKER", "")
+	marker_written := marker_path != "" && write_file_atomic(marker_path, "1", true)
+	rolled_back := rollback_qdrant_generation(cfg)
+	if marker_path != "" && file_exists(marker_path) {
+		delete_file(marker_path)
+	}
+	active := load_index_with_backend(cfg)
+	active_chunks := dict_get_or(active, "chunks", [])
+	final_journal := read_json_file_or(journal_path, {})
+	if first_saved != true || second_saved != true || marker_written != true || dict_get_or(rolled_back, "ok", true) != false || dict_get_or(dict_get_or(rolled_back, "error", {}), "code", "") != "qdrant_rollback_readback_verification_failed" || len(active_chunks) != 1 || dict_get_or(active_chunks[0], "chunk_id", "") != "chunk-candidate" || dict_get_or(final_journal, "phase", "") != "mirror_committed" {
+		exit(1)
+	}
+	print(to_json({"ok": true, "case": case_name, "rollback_readback_rejected": true}))
+	exit(0)
+}
+
+if case_name == "failed_next_then_rollback" {
+	first_saved := save_index_with_backend(cfg, fixture_index("prior"))
+	second_saved := save_index_with_backend(cfg, fixture_index("candidate"))
+	third_saved := save_index_with_backend(cfg, fixture_index("failed-next"))
+	failed_journal := read_json_file_or(journal_path, {})
+	failed_snapshot_path := to_string(dict_get_or(failed_journal, "rollback_mirror_path", ""))
+	fake_count_path := env_or("FAKE_QDRANT_STATE_FILE", "")
+	if fake_count_path != "" {
+		write_file_atomic(fake_count_path, "1", true)
+	}
+	rolled_back := rollback_qdrant_generation(cfg)
+	restored := load_index_with_backend(cfg)
+	restored_chunks := dict_get_or(restored, "chunks", [])
+	if first_saved != true || second_saved != true || third_saved != false || failed_snapshot_path == "" || file_exists(failed_snapshot_path) || dict_get_or(rolled_back, "ok", false) != true || len(restored_chunks) != 1 || dict_get_or(restored_chunks[0], "chunk_id", "") != "chunk-prior" {
+		exit(1)
+	}
+	print(to_json({"ok": true, "case": case_name, "rollback_history_preserved": true}))
+	exit(0)
+}
+
+if case_name == "failure" || case_name == "digest_failure" || case_name == "readback_failure" {
+	seeded := save_index_with_config(mirror_path, prior_fixture_index(), cfg)
 	if seeded != true {
 		exit(1)
 	}
@@ -88,7 +211,7 @@ if case_name == "failure" || case_name == "digest_failure" {
 }
 
 if case_name == "alias_failure" {
-	seeded := save_index_with_config(mirror_path, fixture_index("prior"), cfg)
+	seeded := save_index_with_config(mirror_path, prior_fixture_index(), cfg)
 	if seeded != true {
 		exit(1)
 	}

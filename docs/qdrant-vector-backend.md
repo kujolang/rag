@@ -83,7 +83,9 @@ timeout or transport failure becomes `alias_commit_ambiguous`. Any unresolved
 journal phase blocks subsequent staged saves so a retry cannot overwrite the
 only recovery evidence or create an unbounded series of orphan generations.
 Before remote mutation, the candidate mirror is persisted atomically beside the
-journal. Startup/load recovery resolves the live alias: when it points to the
+journal. When a prior managed generation is active, its validated local mirror
+is also retained beside the journal as rollback evidence; the commit fails closed
+if that mirror does not attest the live alias target. Startup/load recovery resolves the live alias: when it points to the
 candidate, the durable candidate mirror is committed forward locally; when it
 still points to the recorded prior generation, the candidate is marked abandoned
 and queued for later garbage collection. An unrelated alias target fails with
@@ -98,12 +100,32 @@ Prior and abandoned managed generations are recorded durably in `gc_pending`.
 Optional GC re-resolves the live alias before every bounded deletion, rejects
 collection names outside the managed `<collection>__gen_` prefix, honors the
 configured grace window, and deletes at most the configured per-save limit.
-It is disabled by default. Automated operator-requested rollback remains required
-before operators should enable unattended recovery actions. Candidate
-verification proves exact cardinality and requires every payload to carry the
-expected generation digest. It does not yet read every stored vector back and
-rehash it; deployments requiring full storage-level content attestation must
-keep staged mode behind an operator gate until vector read-back is implemented.
+It is disabled by default. Operators can restore the immediately previous
+attested generation with an explicit confirmation:
+
+```bash
+kujo run main.kujo --interpreter qdrant-rollback --confirm true
+```
+
+Rollback re-verifies the previous generation's exact count and generation digest,
+records intent durably before changing the alias, restores the matching local
+mirror, and queues the replaced generation for delayed GC. It refuses missing,
+unmanaged, stale, tampered, or concurrently changed targets. `--namespace` is
+rejected because rollback acts on the explicitly configured collection, alias,
+mirror, and journal as one unit. The last committed rollback descriptor and its
+content-addressed local snapshot survive a later failed staging attempt.
+
+Alias commit, rollback, and GC share an atomic directory lock beside the journal,
+so processes using that journal cannot race an alias switch against deletion or
+local mirror commit. A crashed process can leave this lock in place deliberately;
+operators must reconcile the journal and live alias before removing a stale lock.
+Every writer for one alias must use the same journal path on shared storage. Qdrant
+does not provide conditional alias compare-and-swap, so deployments that cannot
+share that lock must enforce a single writer externally. Candidate verification
+proves exact cardinality, requires every payload to carry the expected generation
+digest, and scrolls every stored point back before promotion. Read-back verifies
+IDs, every payload field, and cosine-normalized vector components within a narrow
+floating-point tolerance; unknown, duplicate, missing, or altered points fail closed.
 
 ## Validation
 

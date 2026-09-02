@@ -5,6 +5,7 @@ from src.cli_args import parse_cli, bool_from_flag, parse_int_flag
 from src.rag_engine import build_rag_index, load_or_initialize_index, query_rag
 from src.query_api import start_api_server
 from src.bootstrap import bootstrap_repository
+from src.vector_backend import rollback_qdrant_generation
 
 func print_lines(lines) {
 	for line in lines {
@@ -38,13 +39,15 @@ func print_help() {
 		"  kujo run main.kujo --interpreter serve --port 8787",
 		"  kujo run main.kujo --interpreter demo",
 		"  kujo run main.kujo --interpreter bootstrap --target ./results/bootstrap_repo",
+		"  kujo run main.kujo --interpreter qdrant-rollback --confirm true",
 		"",
 		"Commands:",
 		"  ingest   Build the index from local files",
 		"  query    Run hybrid retrieval and return citations",
 		"  serve    Start HTTP API",
 		"  demo     Run Kujo docs assistant demo",
-		"  bootstrap Generate an adoption-ready starter template"
+		"  bootstrap Generate an adoption-ready starter template",
+		"  qdrant-rollback Restore the immediately previous staged Qdrant generation"
 	])
 }
 
@@ -174,6 +177,22 @@ func command_bootstrap(parsed) {
 	print(to_json(result))
 }
 
+func command_qdrant_rollback(parsed, cfg) {
+	flags := parsed["flags"]
+	if bool_from_flag(flags, "confirm", false) == false {
+		exit_with_json({"ok": false, "error": "rollback_confirmation_required", "message": "Pass --confirm true to change the active Qdrant generation"}, 1)
+	}
+	if has_key(flags, "namespace") == 1 {
+		exit_with_json({"ok": false, "error": "qdrant_rollback_namespace_unsupported", "message": "Rollback targets the explicitly configured Qdrant collection and does not accept --namespace"}, 1)
+	}
+	result := rollback_qdrant_generation(cfg)
+	if dict_get_or(result, "ok", false) == false {
+		exit_with_json(result, 1)
+	}
+	result["command"] := "qdrant-rollback"
+	print(to_json(result))
+}
+
 # Entry point
 _ := load_dot_env(".env")
 cfg := load_config({})
@@ -201,6 +220,8 @@ if command == "ingest" {
 	command_demo(cfg)
 } else if command == "bootstrap" {
 	command_bootstrap(parsed)
+} else if command == "qdrant-rollback" {
+	command_qdrant_rollback(parsed, cfg)
 } else {
 	print_help()
 }

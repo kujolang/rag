@@ -1,4 +1,5 @@
 from src.tests_helpers import assert_true
+from src.common import dict_get_or, read_json_file_or
 
 func expect(condition, label) {
 	if to_bool(condition) == false {
@@ -14,8 +15,12 @@ fake_curl := fake_bin_dir + "/curl"
 args_log := "/tmp/kujo-rag-staged-curl-args-" + suffix + ".log"
 state_file := "/tmp/kujo-rag-staged-count-" + suffix
 alias_state_file := "/tmp/kujo-rag-staged-alias-" + suffix
+upsert_count_file := "/tmp/kujo-rag-staged-upserts-" + suffix
+points_state_dir := "/tmp/kujo-rag-staged-points-" + suffix
+bad_readback_marker := "/tmp/kujo-rag-staged-bad-readback-" + suffix
 
 create_dir(fake_bin_dir)
+create_dir(points_state_dir)
 script_lines := [
 	"#!/bin/sh",
 	"out=''",
@@ -35,6 +40,7 @@ script_lines := [
 	"case \"$payload\" in",
 	"  @*) payload_path=$(printf '%s' \"$payload\" | cut -c2-); if [ -f \"$payload_path\" ]; then printf 'PAYLOAD %s\\n' \"$(cat \"$payload_path\")\" >> \"$FAKE_CURL_LOG\"; fi ;;",
 	"esac",
+	"if printf '%s' \"$url\" | grep -q '/points?wait=true' && [ -n \"$FAKE_QDRANT_FAIL_UPSERT_NUMBER\" ]; then n=0; [ -f \"$FAKE_QDRANT_UPSERT_COUNT_FILE\" ] && n=$(cat \"$FAKE_QDRANT_UPSERT_COUNT_FILE\"); n=$((n + 1)); printf '%s' \"$n\" > \"$FAKE_QDRANT_UPSERT_COUNT_FILE\"; if [ \"$n\" = \"$FAKE_QDRANT_FAIL_UPSERT_NUMBER\" ]; then printf '{\"status\":\"error\"}' > \"$out\"; printf '500'; exit 22; fi; fi",
 	"if [ -n \"$FAKE_QDRANT_FAIL_MATCH\" ] && printf '%s %s' \"$method\" \"$url\" | grep -q \"$FAKE_QDRANT_FAIL_MATCH\"; then",
 	"  if [ \"$FAKE_QDRANT_COMMIT_ON_ALIAS_ERROR\" = \"1\" ] && printf '%s' \"$url\" | grep -q '/collections/aliases' && [ -n \"$payload_path\" ]; then target=$(sed -n 's/.*\"collection_name\":\"\\([^\"]*\\)\".*/\\1/p' \"$payload_path\"); printf '%s' \"$target\" > \"$FAKE_QDRANT_ALIAS_STATE_FILE\"; fi",
 	"  printf '{\"status\":\"error\"}' > \"$out\"",
@@ -43,9 +49,10 @@ script_lines := [
 	"fi",
 	"case \"$url\" in",
 	"  */collections/aliases) target=$(sed -n 's/.*\"collection_name\":\"\\([^\"]*\\)\".*/\\1/p' \"$payload_path\"); printf '%s' \"$target\" > \"$FAKE_QDRANT_ALIAS_STATE_FILE\"; printf '{\"status\":\"ok\"}' > \"$out\" ;;",
-	"  */aliases) target='prior_generation'; [ -f \"$FAKE_QDRANT_ALIAS_STATE_FILE\" ] && target=$(cat \"$FAKE_QDRANT_ALIAS_STATE_FILE\"); printf '{\"result\":{\"aliases\":[{\"alias_name\":\"staged_security_probe_active\",\"collection_name\":\"%s\"}]}}' \"$target\" > \"$out\" ;;",
+	"  */aliases) if [ -f \"$FAKE_QDRANT_ALIAS_STATE_FILE\" ]; then target=$(cat \"$FAKE_QDRANT_ALIAS_STATE_FILE\"); printf '{\"result\":{\"aliases\":[{\"alias_name\":\"staged_security_probe_active\",\"collection_name\":\"%s\"}]}}' \"$target\" > \"$out\"; else printf '{\"result\":{\"aliases\":[]}}' > \"$out\"; fi ;;",
+	"  */points/scroll) collection=$(printf '%s' \"$url\" | awk -F/ '{print $(NF-2)}'); points_file=\"$FAKE_QDRANT_POINTS_STATE_DIR/$collection.json\"; points='[]'; if [ -f \"$points_file\" ]; then points=$(jq -c '.points |= map(.vector as $v | ($v | map(. * .) | add | sqrt) as $n | if $n > 0 then .vector |= map(. / $n) else . end) | .points' \"$points_file\"); if [ \"$FAKE_QDRANT_BAD_READBACK\" = \"1\" ] || [ -f \"$FAKE_QDRANT_BAD_READBACK_MARKER\" ]; then points=$(printf '%s' \"$points\" | jq -c '.[0].vector[0] = 9.9'); fi; fi; printf '{\"result\":{\"points\":%s,\"next_page_offset\":null}}' \"$points\" > \"$out\" ;;",
 	"  */points/count) count=0; [ -f \"$FAKE_QDRANT_STATE_FILE\" ] && count=$(cat \"$FAKE_QDRANT_STATE_FILE\"); if [ \"$FAKE_QDRANT_BAD_DIGEST\" = \"1\" ] && [ -n \"$payload_path\" ] && grep -q '_kujo_generation_digest' \"$payload_path\"; then count=0; fi; printf '{\"result\":{\"count\":%s}}' \"$count\" > \"$out\" ;;",
-	"  */points?wait=true) printf '1' > \"$FAKE_QDRANT_STATE_FILE\"; printf '{\"status\":\"ok\"}' > \"$out\" ;;",
+	"  */points?wait=true) collection=$(printf '%s' \"$url\" | awk -F/ '{print $(NF-1)}'); printf '1' > \"$FAKE_QDRANT_STATE_FILE\"; cp \"$payload_path\" \"$FAKE_QDRANT_POINTS_STATE_DIR/$collection.json\"; printf '{\"status\":\"ok\"}' > \"$out\" ;;",
 	"  */collections/*) printf '0' > \"$FAKE_QDRANT_STATE_FILE\"; printf '{\"status\":\"ok\"}' > \"$out\" ;;",
 	"  *) printf '{\"status\":\"ok\"}' > \"$out\" ;;",
 	"esac",
@@ -57,11 +64,30 @@ chmod_result := execute_status("chmod 700 " + fake_curl, {"timeout_ms": 5000})
 expect(chmod_result.success == true, "fake curl should be executable")
 
 func run_case(case_name, fail_match) {
-	cmd := "PATH=" + fake_bin_dir + ":$PATH FAKE_CURL_LOG=" + args_log + " FAKE_QDRANT_STATE_FILE=" + state_file + " FAKE_QDRANT_ALIAS_STATE_FILE=" + alias_state_file
+	if file_exists(state_file) {
+		delete_file(state_file)
+	}
+	if file_exists(alias_state_file) {
+		delete_file(alias_state_file)
+	}
+	if file_exists(upsert_count_file) {
+		delete_file(upsert_count_file)
+	}
+	if file_exists(bad_readback_marker) {
+		delete_file(bad_readback_marker)
+	}
+	if case_name == "failure" || case_name == "digest_failure" || case_name == "readback_failure" || case_name == "alias_failure" {
+		write_file(alias_state_file, "prior_generation")
+	}
+	cmd := "PATH=" + fake_bin_dir + ":$PATH FAKE_CURL_LOG=" + args_log + " FAKE_QDRANT_STATE_FILE=" + state_file + " FAKE_QDRANT_ALIAS_STATE_FILE=" + alias_state_file + " FAKE_QDRANT_UPSERT_COUNT_FILE=" + upsert_count_file + " FAKE_QDRANT_POINTS_STATE_DIR=" + points_state_dir + " FAKE_QDRANT_BAD_READBACK_MARKER=" + bad_readback_marker
 	if fail_match == "bad_digest" {
 		cmd = cmd + " FAKE_QDRANT_BAD_DIGEST=1"
+	} else if fail_match == "bad_readback" {
+		cmd = cmd + " FAKE_QDRANT_BAD_READBACK=1"
 	} else if fail_match == "alias_commit_ambiguous" {
 		cmd = cmd + " FAKE_QDRANT_FAIL_MATCH=collections/aliases FAKE_QDRANT_COMMIT_ON_ALIAS_ERROR=1"
+	} else if fail_match == "third_upsert" {
+		cmd = cmd + " FAKE_QDRANT_FAIL_UPSERT_NUMBER=3"
 	} else if fail_match != "" {
 		cmd = cmd + " FAKE_QDRANT_FAIL_MATCH=" + fail_match
 	}
@@ -75,11 +101,19 @@ func run_case(case_name, fail_match) {
 }
 
 run_case("success", "")
+run_case("lock_busy", "")
+run_case("candidate_persist_failure", "")
+run_case("journal_persist_failure", "")
 run_case("empty", "")
 run_case("restart_recovery", "")
 run_case("gc", "")
+run_case("rollback", "")
+run_case("rollback_tamper", "")
+run_case("rollback_readback_failure", "")
+run_case("failed_next_then_rollback", "third_upsert")
 run_case("failure", "points?wait=true")
 run_case("digest_failure", "bad_digest")
+run_case("readback_failure", "bad_readback")
 run_case("alias_failure", "alias_commit_ambiguous")
 run_case("recovery_guard", "")
 
@@ -94,18 +128,26 @@ expect(to_bool(contains(args_text, "/aliases/staged_security_probe_active")) == 
 expect(to_bool(contains(args_text, "delete_alias")) == true, "existing alias replacement must be part of the atomic action payload")
 expect(to_bool(contains(args_text, "create_alias")) == true, "candidate alias creation must be part of the atomic action payload")
 
-for case_name in ["success", "empty", "restart_recovery", "gc", "failure", "digest_failure", "alias_failure", "recovery_guard"] {
-	for path in ["./results/test_qdrant_staged_alias_" + case_name + ".json", "./results/test_qdrant_staged_alias_" + case_name + ".json.journal.json", "./results/test_qdrant_staged_alias_" + case_name + ".json.journal.json.candidate.json"] {
+for case_name in ["success", "lock_busy", "candidate_persist_failure", "journal_persist_failure", "empty", "restart_recovery", "gc", "rollback", "rollback_tamper", "rollback_readback_failure", "failed_next_then_rollback", "failure", "digest_failure", "readback_failure", "alias_failure", "recovery_guard"] {
+	journal_path := "./results/test_qdrant_staged_alias_" + case_name + ".json.journal.json"
+	cleanup_journal := read_json_file_or(journal_path, {})
+	for recorded_path in [dict_get_or(cleanup_journal, "candidate_mirror_path", ""), dict_get_or(cleanup_journal, "rollback_mirror_path", ""), dict_get_or(dict_get_or(cleanup_journal, "last_committed_rollback", {}), "rollback_mirror_path", "")] {
+		if recorded_path != "" && file_exists(recorded_path) {
+			delete_file(recorded_path)
+		}
+	}
+	for path in ["./results/test_qdrant_staged_alias_" + case_name + ".json", "./results/test_qdrant_staged_alias_" + case_name + ".json.journal.json", "./results/test_qdrant_staged_alias_" + case_name + ".json.journal.json.candidate.json", "./results/test_qdrant_staged_alias_" + case_name + ".json.journal.json.previous.json"] {
 		if file_exists(path) {
 			delete_file(path)
 		}
 	}
 }
-for path in [args_log, state_file, alias_state_file] {
+for path in [args_log, state_file, alias_state_file, upsert_count_file, bad_readback_marker] {
 	if file_exists(path) {
 		delete_file(path)
 	}
 }
 _ = execute_status("rm -f " + fake_curl + " && rmdir " + fake_bin_dir, {"timeout_ms": 5000})
+_ = execute_status("find " + points_state_dir + " -type f -delete && rmdir " + points_state_dir, {"timeout_ms": 5000})
 
 print("test_qdrant_staged_alias: ok")

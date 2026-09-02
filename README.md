@@ -297,7 +297,7 @@ Vector backend adapter modes:
 
 - `local_json` (default): persisted JSON index at `KUJO_RAG_INDEX_PATH`
 - `memory` (reference scaffold): key-scoped adapter state selected by `KUJO_RAG_VECTOR_BACKEND_MEMORY_KEY`
-- `qdrant_http`: qdrant-compatible ANN adapter with local mirror persistence and optional remote sync (`KUJO_RAG_VECTOR_BACKEND_QDRANT_*`)
+- `qdrant_http`: qdrant-compatible ANN adapter with local mirror persistence, staged alias commits, restart recovery, and confirmed one-generation rollback (`qdrant-rollback --confirm true`; `KUJO_RAG_VECTOR_BACKEND_QDRANT_*`)
 
 For third-party adoption patterns (minimum setup, docs/code/mixed recipes, deployment options, and troubleshooting), see:
 
