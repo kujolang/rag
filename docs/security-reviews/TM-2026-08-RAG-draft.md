@@ -141,8 +141,9 @@ Local evidence at preparation time:
 - Bearer RBAC escalation, trusted-proxy forgery, descriptor-relative ingest,
   and parser replacement-race regressions: passed in focused interpreter and
   VM runs with signed Kujo v1.2.3 commit `b1cec6b6c0f22e9015f5a8d3d1afc7e30b6964f7`.
-- Full repository runner: 70 suites are configured; final hosted aggregate
-  evidence is required before accountable review sign-off.
+- Hosted full repository runner: 70/70 suites passed on Kujo v1.2.3 with zero
+  undefined-function warnings and 16 total warnings, within the configured
+  warning budget (release-gates run `33643187939`).
 - Cadence validation: all gates pass except `review_not_overdue`; this is the
   expected failure until the accountable review occurs.
 
