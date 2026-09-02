@@ -36,6 +36,9 @@ Supported behavior:
 - `KUJO_RAG_VECTOR_BACKEND_QDRANT_SYNC_MODE`: `legacy_replace|staged_alias` (default `legacy_replace`; strict mode requires `staged_alias`)
 - `KUJO_RAG_VECTOR_BACKEND_QDRANT_ALIAS`: stable query alias (default `<collection>__active`)
 - `KUJO_RAG_VECTOR_BACKEND_QDRANT_JOURNAL_PATH`: optional recovery-journal path (default `<mirror>.qdrant-journal.json`)
+- `KUJO_RAG_VECTOR_BACKEND_QDRANT_GC_ENABLED`: enables delayed generation cleanup (default `false`)
+- `KUJO_RAG_VECTOR_BACKEND_QDRANT_GC_GRACE_SEC`: minimum generation age before deletion (default `86400`, bounded to `60..2592000`)
+- `KUJO_RAG_VECTOR_BACKEND_QDRANT_GC_MAX_PER_SAVE`: maximum deletions attempted per save (default `1`, bounded to `1..10`)
 
 ## Sync behavior
 
@@ -79,15 +82,24 @@ The runtime writes `alias_commit_started` before the visibility request; a
 timeout or transport failure becomes `alias_commit_ambiguous`. Any unresolved
 journal phase blocks subsequent staged saves so a retry cannot overwrite the
 only recovery evidence or create an unbounded series of orphan generations.
+Before remote mutation, the candidate mirror is persisted atomically beside the
+journal. Startup/load recovery resolves the live alias: when it points to the
+candidate, the durable candidate mirror is committed forward locally; when it
+still points to the recorded prior generation, the candidate is marked abandoned
+and queued for later garbage collection. An unrelated alias target fails with
+`qdrant_concurrent_writer_detected` instead of guessing through a multi-writer race.
 
 The default alias is `<collection>__active` so it cannot collide with an existing
 legacy collection of the configured name. Query clients must use this alias after
 migration. `legacy_replace` retains the previous delete-and-recreate behavior for
 one non-strict compatibility window and is rejected by strict configuration.
 
-This first staged tranche deliberately retains prior generations. Automated
-rollback, restart completion, and delayed bounded generation garbage collection
-remain required before operators should enable unattended cleanup. Candidate
+Prior and abandoned managed generations are recorded durably in `gc_pending`.
+Optional GC re-resolves the live alias before every bounded deletion, rejects
+collection names outside the managed `<collection>__gen_` prefix, honors the
+configured grace window, and deletes at most the configured per-save limit.
+It is disabled by default. Automated operator-requested rollback remains required
+before operators should enable unattended recovery actions. Candidate
 verification proves exact cardinality and requires every payload to carry the
 expected generation digest. It does not yet read every stored vector back and
 rehash it; deployments requiring full storage-level content attestation must

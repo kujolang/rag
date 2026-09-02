@@ -18,6 +18,9 @@ export default_config := func() {
 		"vector_backend_qdrant_sync_mode": "legacy_replace",
 		"vector_backend_qdrant_alias": "",
 		"vector_backend_qdrant_journal_path": "",
+		"vector_backend_qdrant_gc_enabled": false,
+		"vector_backend_qdrant_gc_grace_sec": 86400,
+		"vector_backend_qdrant_gc_max_per_save": 1,
 		"at_rest_encryption_enabled": false,
 		"at_rest_encryption_key": "",
 		"at_rest_encryption_key_file": "",
@@ -372,6 +375,9 @@ export load_config := func(overrides) {
 	cfg["vector_backend_qdrant_sync_mode"] := to_lower(trim(env_or("KUJO_RAG_VECTOR_BACKEND_QDRANT_SYNC_MODE", cfg["vector_backend_qdrant_sync_mode"])))
 	cfg["vector_backend_qdrant_alias"] := to_lower(trim(env_or("KUJO_RAG_VECTOR_BACKEND_QDRANT_ALIAS", cfg["vector_backend_qdrant_alias"])))
 	cfg["vector_backend_qdrant_journal_path"] := trim(env_or("KUJO_RAG_VECTOR_BACKEND_QDRANT_JOURNAL_PATH", cfg["vector_backend_qdrant_journal_path"]))
+	cfg["vector_backend_qdrant_gc_enabled"] := parse_bool_or(env_or("KUJO_RAG_VECTOR_BACKEND_QDRANT_GC_ENABLED", "false"), cfg["vector_backend_qdrant_gc_enabled"])
+	cfg["vector_backend_qdrant_gc_grace_sec"] := parse_int_or(env_or("KUJO_RAG_VECTOR_BACKEND_QDRANT_GC_GRACE_SEC", to_string(cfg["vector_backend_qdrant_gc_grace_sec"])), cfg["vector_backend_qdrant_gc_grace_sec"])
+	cfg["vector_backend_qdrant_gc_max_per_save"] := parse_int_or(env_or("KUJO_RAG_VECTOR_BACKEND_QDRANT_GC_MAX_PER_SAVE", to_string(cfg["vector_backend_qdrant_gc_max_per_save"])), cfg["vector_backend_qdrant_gc_max_per_save"])
 	cfg["at_rest_encryption_enabled"] := parse_bool_or(env_or("KUJO_RAG_AT_REST_ENCRYPTION_ENABLED", "false"), cfg["at_rest_encryption_enabled"])
 	cfg["at_rest_encryption_key"] := env_or("KUJO_RAG_AT_REST_ENCRYPTION_KEY", cfg["at_rest_encryption_key"])
 	cfg["at_rest_encryption_key_file"] := env_or("KUJO_RAG_AT_REST_ENCRYPTION_KEY_FILE", cfg["at_rest_encryption_key_file"])
@@ -536,6 +542,8 @@ export load_config := func(overrides) {
 	cfg["api_jwt_clock_skew_sec"] := clamp(cfg["api_jwt_clock_skew_sec"], 0, 600)
 	cfg["session_history_max_turns"] := clamp(cfg["session_history_max_turns"], 1, 20)
 	cfg["vector_backend_qdrant_timeout_ms"] := clamp(cfg["vector_backend_qdrant_timeout_ms"], 1000, 120000)
+	cfg["vector_backend_qdrant_gc_grace_sec"] := clamp(cfg["vector_backend_qdrant_gc_grace_sec"], 60, 2592000)
+	cfg["vector_backend_qdrant_gc_max_per_save"] := clamp(cfg["vector_backend_qdrant_gc_max_per_save"], 1, 10)
 	if cfg["otel_export_mode"] != "audit" && cfg["otel_export_mode"] != "none" {
 		cfg["otel_export_mode"] = "audit"
 	}

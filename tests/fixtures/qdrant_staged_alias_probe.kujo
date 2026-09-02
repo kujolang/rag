@@ -6,6 +6,7 @@ from src.vector_store import empty_index, load_index_with_config, save_index_wit
 case_name := env_or("QDRANT_STAGED_CASE", "success")
 mirror_path := "./results/test_qdrant_staged_alias_" + case_name + ".json"
 journal_path := mirror_path + ".journal.json"
+gc_enabled := case_name == "gc"
 cfg := load_config({
 	"vector_backend": "qdrant_http",
 	"vector_backend_qdrant_url": env_or("QDRANT_STAGED_URL", "https://qdrant.internal:6333"),
@@ -17,6 +18,9 @@ cfg := load_config({
 	"vector_backend_qdrant_fail_open": false,
 	"vector_backend_qdrant_mirror_path": mirror_path,
 	"vector_backend_qdrant_journal_path": journal_path,
+	"vector_backend_qdrant_gc_enabled": gc_enabled,
+	"vector_backend_qdrant_gc_grace_sec": 60,
+	"vector_backend_qdrant_gc_max_per_save": 1,
 	"embedding_dims": 2
 })
 
@@ -32,6 +36,40 @@ func fixture_index(label) {
 	}]
 	index["vectors"] := [{"chunk_id": "chunk-" + label, "embedding": [0.1, 0.2]}]
 	return index
+}
+
+if case_name == "restart_recovery" {
+	first_saved := save_index_with_backend(cfg, fixture_index("prior"))
+	second_saved := save_index_with_backend(cfg, fixture_index("candidate"))
+	committed_journal := read_json_file_or(journal_path, {})
+	candidate_path := to_string(dict_get_or(committed_journal, "candidate_mirror_path", journal_path + ".candidate.json"))
+	candidate_copy := write_file_atomic(candidate_path, read_file(mirror_path), true)
+	prior_restored := save_index_with_config(mirror_path, fixture_index("prior"), cfg)
+	committed_journal["phase"] := "alias_committed"
+	journal_seeded := write_file_atomic(journal_path, to_json(committed_journal), true)
+	recovered := load_index_with_backend(cfg)
+	recovered_chunks := dict_get_or(recovered, "chunks", [])
+	recovered_journal := read_json_file_or(journal_path, {})
+	if first_saved != true || second_saved != true || candidate_copy != true || prior_restored != true || journal_seeded != true || len(recovered_chunks) != 1 || dict_get_or(recovered_chunks[0], "chunk_id", "") != "chunk-candidate" || dict_get_or(recovered_journal, "phase", "") != "mirror_committed" || dict_get_or(recovered_journal, "recovery_action", "") != "completed_forward" || file_exists(candidate_path) {
+		exit(1)
+	}
+	print(to_json({"ok": true, "case": case_name, "restart_recovered": true}))
+	exit(0)
+}
+
+if case_name == "gc" {
+	first_saved := save_index_with_backend(cfg, fixture_index("prior"))
+	gc_journal := read_json_file_or(journal_path, {})
+	gc_journal["gc_pending"] := [{"collection": "staged_security_probe__gen_stale", "reason": "test_stale", "recorded_at_unix_ms": 0, "eligible_after_unix_ms": 0}]
+	journal_seeded := write_file_atomic(journal_path, to_json(gc_journal), true)
+	second_saved := save_index_with_backend(cfg, fixture_index("candidate"))
+	final_journal := read_json_file_or(journal_path, {})
+	deleted := dict_get_or(final_journal, "gc_last_deleted", [])
+	if first_saved != true || journal_seeded != true || second_saved != true || len(deleted) != 1 || deleted[0] != "staged_security_probe__gen_stale" || len(dict_get_or(final_journal, "gc_pending", [])) < 1 {
+		exit(1)
+	}
+	print(to_json({"ok": true, "case": case_name, "bounded_gc": true}))
+	exit(0)
 }
 
 if case_name == "failure" || case_name == "digest_failure" {
@@ -56,13 +94,13 @@ if case_name == "alias_failure" {
 	}
 	result := save_index_with_backend(cfg, fixture_index("candidate"))
 	preserved := load_index_with_config(mirror_path, cfg)
-	journal := read_json_file_or(journal_path, {})
 	recovery_view := load_index_with_backend(cfg)
-	load_error := dict_get_or(dict_get_or(recovery_view, "meta", {}), "load_error", {})
-	if result != false || len(dict_get_or(preserved, "chunks", [])) != 1 || dict_get_or(journal, "phase", "") != "alias_commit_ambiguous" || dict_get_or(load_error, "code", "") != "qdrant_recovery_required" {
+	journal := read_json_file_or(journal_path, {})
+	recovered_chunks := dict_get_or(recovery_view, "chunks", [])
+	if result != false || len(dict_get_or(preserved, "chunks", [])) != 1 || len(recovered_chunks) != 1 || dict_get_or(recovered_chunks[0], "chunk_id", "") != "chunk-candidate" || dict_get_or(journal, "phase", "") != "mirror_committed" || dict_get_or(journal, "recovery_action", "") != "completed_forward" {
 		exit(1)
 	}
-	print(to_json({"ok": true, "case": case_name, "ambiguous_commit_detected": true}))
+	print(to_json({"ok": true, "case": case_name, "ambiguous_commit_recovered": true}))
 	exit(0)
 }
 

@@ -367,6 +367,53 @@ func qdrant_journal_path(cfg) {
 	return qdrant_mirror_path(cfg) + ".qdrant-journal.json"
 }
 
+func qdrant_candidate_mirror_path(cfg) {
+	return qdrant_journal_path(cfg) + ".candidate.json"
+}
+
+func qdrant_phase_is_terminal(phase) {
+	return phase == "" || phase == "mirror_committed" || phase == "aborted_cleaned" || phase == "candidate_abandoned" || phase == "rolled_back"
+}
+
+func qdrant_gc_enabled(cfg) {
+	return bool_or(dict_get_or(cfg, "vector_backend_qdrant_gc_enabled", false), false)
+}
+
+func qdrant_gc_grace_ms(cfg) {
+	seconds := num_or(dict_get_or(cfg, "vector_backend_qdrant_gc_grace_sec", 86400), 86400)
+	if seconds < 60 {
+		seconds = 60
+	}
+	if seconds > 2592000 {
+		seconds = 2592000
+	}
+	return seconds * 1000
+}
+
+func qdrant_gc_max_per_save(cfg) {
+	limit := num_or(dict_get_or(cfg, "vector_backend_qdrant_gc_max_per_save", 1), 1)
+	if limit < 1 {
+		limit = 1
+	}
+	if limit > 10 {
+		limit = 10
+	}
+	return limit
+}
+
+func qdrant_pending_add(cfg, pending, collection, reason) {
+	if collection == "" {
+		return pending
+	}
+	for entry in pending {
+		if to_string(dict_get_or(entry, "collection", "")) == collection {
+			return pending
+		}
+	}
+	now_ms := current_timestamp()
+	return push(pending, {"collection": collection, "reason": reason, "recorded_at_unix_ms": now_ms, "eligible_after_unix_ms": now_ms + qdrant_gc_grace_ms(cfg)})
+}
+
 func qdrant_write_journal(cfg, journal) {
 	journal_file_path := qdrant_journal_path(cfg)
 	dir := dirname(journal_file_path)
@@ -462,6 +509,120 @@ func qdrant_fail_staged(cfg, journal, code, message, details) {
 	return {"ok": false, "error": journal["error"]}
 }
 
+func qdrant_recover_staged_transaction(cfg) {
+	recovery_journal := read_json_file_or(qdrant_journal_path(cfg), {})
+	recovery_phase := to_string(dict_get_or(recovery_journal, "phase", ""))
+	if qdrant_phase_is_terminal(recovery_phase) {
+		return {"ok": true, "recovered": false, "phase": recovery_phase}
+	}
+	if qdrant_sync_enabled(cfg) == false || qdrant_base_url(cfg) == "" {
+		return {"ok": false, "error": {"code": "qdrant_recovery_connection_required", "message": "An unresolved staged transaction requires an enabled Qdrant connection", "details": {"phase": recovery_phase, "journal_path": qdrant_journal_path(cfg)}}}
+	}
+
+	recovery_alias := to_string(dict_get_or(recovery_journal, "alias", qdrant_alias_name(cfg)))
+	recovery_candidate := to_string(dict_get_or(recovery_journal, "candidate_collection", ""))
+	recovery_previous := to_string(dict_get_or(recovery_journal, "previous_collection", ""))
+	recovery_header_path := qdrant_header_file(cfg, qdrant_collection_name(cfg))
+	recovery_alias_result := qdrant_existing_alias_target(cfg, recovery_header_path, recovery_alias)
+	remove_file_if_exists(recovery_header_path)
+	if dict_get_or(recovery_alias_result, "ok", false) == false {
+		return {"ok": false, "error": {"code": "qdrant_recovery_alias_lookup_failed", "message": "Could not resolve the active alias while recovering a staged transaction", "details": recovery_alias_result}}
+	}
+	recovery_active := to_string(dict_get_or(recovery_alias_result, "target", ""))
+
+	if recovery_candidate != "" && recovery_active == recovery_candidate {
+		recovery_candidate_path := to_string(dict_get_or(recovery_journal, "candidate_mirror_path", qdrant_candidate_mirror_path(cfg)))
+		if file_exists(recovery_candidate_path) == false {
+			return {"ok": false, "error": {"code": "qdrant_recovery_candidate_missing", "message": "The alias points to the candidate but its durable local mirror is missing", "details": {"candidate_collection": recovery_candidate, "candidate_mirror_path": recovery_candidate_path}}}
+		}
+		recovery_index := load_index_with_config(recovery_candidate_path, cfg)
+		recovery_load_error := dict_get_or(dict_get_or(recovery_index, "meta", {}), "load_error", null)
+		if type(recovery_load_error) == "dict" {
+			return {"ok": false, "error": {"code": "qdrant_recovery_candidate_invalid", "message": "The durable candidate mirror failed validation", "details": recovery_load_error}}
+		}
+		recovery_saved := save_index_with_config(qdrant_mirror_path(cfg), recovery_index, cfg)
+		if recovery_saved == false {
+			return {"ok": false, "error": {"code": "qdrant_recovery_mirror_commit_failed", "message": "The alias points to the candidate but its local mirror could not be committed"}}
+		}
+		recovery_journal["phase"] := "mirror_committed"
+		recovery_journal["recovery_action"] := "completed_forward"
+		recovery_journal["mirror_path"] := qdrant_mirror_path(cfg)
+		recovery_journal["mirror_committed_at_unix_ms"] := current_timestamp()
+		recovery_journal["updated_at_unix_ms"] := current_timestamp()
+		recovery_write := qdrant_write_journal(cfg, recovery_journal)
+		if dict_get_or(recovery_write, "ok", false) == false {
+			return recovery_write
+		}
+		remove_file_if_exists(recovery_candidate_path)
+		return {"ok": true, "recovered": true, "phase": "mirror_committed", "action": "completed_forward"}
+	}
+
+	may_have_committed := recovery_phase == "alias_commit_started" || recovery_phase == "alias_commit_ambiguous" || recovery_phase == "alias_committed"
+	if may_have_committed && recovery_active != recovery_previous {
+		return {"ok": false, "error": {"code": "qdrant_concurrent_writer_detected", "message": "The active alias matches neither the candidate nor the recorded previous generation", "details": {"active_collection": recovery_active, "candidate_collection": recovery_candidate, "previous_collection": recovery_previous}}}
+	}
+
+	gc_pending := dict_get_or(recovery_journal, "gc_pending", [])
+	gc_pending = qdrant_pending_add(cfg, gc_pending, recovery_candidate, "aborted_candidate")
+	recovery_journal["gc_pending"] := gc_pending
+	recovery_journal["phase"] := "candidate_abandoned"
+	recovery_journal["recovery_action"] := "preserved_active_alias"
+	recovery_journal["updated_at_unix_ms"] := current_timestamp()
+	recovery_write := qdrant_write_journal(cfg, recovery_journal)
+	if dict_get_or(recovery_write, "ok", false) == false {
+		return recovery_write
+	}
+	remove_file_if_exists(to_string(dict_get_or(recovery_journal, "candidate_mirror_path", qdrant_candidate_mirror_path(cfg))))
+	return {"ok": true, "recovered": true, "phase": "candidate_abandoned", "action": "preserved_active_alias"}
+}
+
+func qdrant_gc_staged_generations(cfg, gc_journal) {
+	if qdrant_gc_enabled(cfg) == false {
+		return {"ok": true, "enabled": false, "deleted": []}
+	}
+	pending := dict_get_or(gc_journal, "gc_pending", [])
+	if type(pending) != "array" || len(pending) == 0 {
+		return {"ok": true, "enabled": true, "deleted": []}
+	}
+	gc_header_path := qdrant_header_file(cfg, qdrant_collection_name(cfg))
+	gc_alias_result := qdrant_existing_alias_target(cfg, gc_header_path, qdrant_alias_name(cfg))
+	if dict_get_or(gc_alias_result, "ok", false) == false {
+		remove_file_if_exists(gc_header_path)
+		return {"ok": false, "error": {"code": "qdrant_gc_alias_lookup_failed", "message": "Generation GC could not verify the active alias", "details": gc_alias_result}}
+	}
+	active_collection := to_string(dict_get_or(gc_alias_result, "target", ""))
+	managed_prefix := qdrant_collection_name(cfg) + "__gen_"
+	remaining := []
+	deleted := []
+	delete_limit := qdrant_gc_max_per_save(cfg)
+	now_ms := current_timestamp()
+	for entry in pending {
+		candidate_collection := to_string(dict_get_or(entry, "collection", ""))
+		eligible_after := num_or(dict_get_or(entry, "eligible_after_unix_ms", now_ms + qdrant_gc_grace_ms(cfg)), now_ms + qdrant_gc_grace_ms(cfg))
+		eligible := starts_with(candidate_collection, managed_prefix) && candidate_collection != active_collection && eligible_after <= now_ms && len(deleted) < delete_limit
+		if eligible {
+			delete_response := qdrant_request(cfg, gc_header_path, "DELETE", qdrant_base_url(cfg) + "/collections/" + candidate_collection, "")
+			delete_status := to_string(dict_get_or(delete_response, "status", ""))
+			if dict_get_or(delete_response, "ok", false) || delete_status == "404" {
+				deleted = push(deleted, candidate_collection)
+			} else {
+				remaining = push(remaining, entry)
+			}
+		} else {
+			remaining = push(remaining, entry)
+		}
+	}
+	remove_file_if_exists(gc_header_path)
+	gc_journal["gc_pending"] := remaining
+	gc_journal["gc_last_run_at_unix_ms"] := current_timestamp()
+	gc_journal["gc_last_deleted"] := deleted
+	gc_write := qdrant_write_journal(cfg, gc_journal)
+	if dict_get_or(gc_write, "ok", false) == false {
+		return gc_write
+	}
+	return {"ok": true, "enabled": true, "deleted": deleted, "remaining": len(remaining)}
+}
+
 func qdrant_sync_index_staged(cfg, index) {
 	if qdrant_sync_enabled(cfg) == false {
 		return {"ok": true, "synced": false, "reason": "sync_disabled"}
@@ -472,20 +633,15 @@ func qdrant_sync_index_staged(cfg, index) {
 	}
 	existing_journal := read_json_file_or(qdrant_journal_path(cfg), {})
 	existing_phase := to_string(dict_get_or(existing_journal, "phase", ""))
-	if existing_phase != "" && existing_phase != "mirror_committed" && existing_phase != "aborted_cleaned" {
-		return {
-			"ok": false,
-			"error": {
-				"code": "qdrant_recovery_required",
-				"message": "An unresolved staged Qdrant transaction must be reconciled before another save",
-				"details": {
-					"journal_path": qdrant_journal_path(cfg),
-					"phase": existing_phase,
-					"candidate_collection": dict_get_or(existing_journal, "candidate_collection", "")
-				}
-			}
+	if qdrant_phase_is_terminal(existing_phase) == false {
+		recovery_result := qdrant_recover_staged_transaction(cfg)
+		if dict_get_or(recovery_result, "ok", false) == false {
+			return recovery_result
 		}
+		existing_journal = read_json_file_or(qdrant_journal_path(cfg), {})
 	}
+	_ = qdrant_gc_staged_generations(cfg, existing_journal)
+	existing_journal = read_json_file_or(qdrant_journal_path(cfg), existing_journal)
 
 	collection := qdrant_collection_name(cfg)
 	alias_name := qdrant_alias_name(cfg)
@@ -506,6 +662,17 @@ func qdrant_sync_index_staged(cfg, index) {
 		base_prefix = substring(base_prefix, 0, 48)
 	}
 	generation := base_prefix + "__gen_" + generation_id
+	candidate_mirror_path := qdrant_candidate_mirror_path(cfg)
+	candidate_meta := dict_get_or(index, "meta", {})
+	candidate_meta["backend"] := "qdrant_http"
+	candidate_meta["qdrant_alias"] := alias_name
+	candidate_meta["qdrant_generation"] := generation
+	candidate_meta["qdrant_generation_digest"] := generation_digest
+	index["meta"] := candidate_meta
+	candidate_persist := persist_index_with_config(candidate_mirror_path, index, cfg)
+	if dict_get_or(candidate_persist, "ok", false) == false {
+		return {"ok": false, "error": {"code": "qdrant_candidate_mirror_persistence_failed", "message": "The staged local mirror could not be persisted before remote mutation", "details": candidate_persist}}
+	}
 	journal := {
 		"schema_version": 1,
 		"mode": "staged_alias",
@@ -516,6 +683,11 @@ func qdrant_sync_index_staged(cfg, index) {
 		"expected_points": len(points),
 		"vector_dimensions": dims,
 		"generation_digest": generation_digest,
+		"candidate_mirror_path": candidate_mirror_path,
+		"candidate_mirror_sha256": dict_get_or(candidate_persist, "sha256", ""),
+		"gc_pending": dict_get_or(existing_journal, "gc_pending", []),
+		"gc_last_run_at_unix_ms": dict_get_or(existing_journal, "gc_last_run_at_unix_ms", 0),
+		"gc_last_deleted": dict_get_or(existing_journal, "gc_last_deleted", []),
 		"created_at_unix_ms": current_timestamp(),
 		"updated_at_unix_ms": current_timestamp()
 	}
@@ -655,6 +827,11 @@ func qdrant_sync_index_staged(cfg, index) {
 
 	journal["phase"] := "alias_committed"
 	journal["previous_collection"] := previous_target
+	if previous_target != "" {
+		pending_generations := dict_get_or(journal, "gc_pending", [])
+		pending_generations = qdrant_pending_add(cfg, pending_generations, previous_target, "superseded_generation")
+		journal["gc_pending"] := pending_generations
+	}
 	journal["committed_at_unix_ms"] := current_timestamp()
 	journal["updated_at_unix_ms"] := current_timestamp()
 	journal_write = qdrant_write_journal(cfg, journal)
@@ -686,6 +863,10 @@ func qdrant_sync_index(cfg, index) {
 func qdrant_load(cfg) {
 	collection := qdrant_collection_name(cfg)
 	path := qdrant_mirror_path(cfg)
+	recovery_result := {"ok": true, "recovered": false}
+	if qdrant_sync_mode(cfg) == "staged_alias" {
+		recovery_result = qdrant_recover_staged_transaction(cfg)
+	}
 	loaded := load_index_with_config(path, cfg)
 	meta := dict_get_or(loaded, "meta", {})
 	meta["backend"] := "qdrant_http"
@@ -708,6 +889,9 @@ func qdrant_load(cfg) {
 				"message": "The remote alias may have committed while the local mirror did not; perform operator recovery before another save",
 				"details": {"journal_path": qdrant_journal_path(cfg), "candidate_collection": dict_get_or(journal, "candidate_collection", "")}
 			}
+		}
+		if dict_get_or(recovery_result, "ok", true) == false {
+			meta["load_error"] := dict_get_or(recovery_result, "error", {"code": "qdrant_recovery_failed", "message": "Staged Qdrant recovery failed"})
 		}
 	}
 	loaded["meta"] := meta
@@ -763,6 +947,7 @@ func qdrant_save(cfg, index) {
 			if dict_get_or(journal_write, "ok", false) == false {
 				return false
 			}
+			remove_file_if_exists(to_string(dict_get_or(journal, "candidate_mirror_path", qdrant_candidate_mirror_path(cfg))))
 		}
 	}
 
