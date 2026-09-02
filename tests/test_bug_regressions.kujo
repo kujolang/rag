@@ -1,8 +1,8 @@
-from src.common import dict_get_or
+from src.common import dict_get_or, filesystem_capability_scope
 from src.config import cfg_with_namespace
 from src.embeddings import clear_embedding_cache, embed_texts, embedding_cache_metrics
-from src.ingestion import discover_files
-from src.parsers import parse_file
+from src.ingestion import discover_files, ingest_documents
+from src.parsers import parse_file, parse_file_beneath
 from src.query_api import validate_api_ingest_path, validate_api_query_text, validate_api_recursive
 from src.tests_helpers import assert_true
 
@@ -43,6 +43,33 @@ assert_true(to_bool(contains(html_content, "visible")))
 assert_true(to_bool(contains(html_content, "secretCode")) == false)
 assert_true(to_bool(contains(html_content, ".secret")) == false)
 
+# A caller-provided parser budget above Kujo's 8 MiB read ceiling is bounded
+# defensively and must not make an otherwise valid small read fail.
+html_scope := filesystem_capability_scope(html_path)
+html_doc_large_budget := parse_file_beneath(html_path, {
+	"parser_sandbox_max_bytes": 10000000
+}, dict_get_or(html_scope, "root", ""), dict_get_or(html_scope, "relative", ""))
+assert_true(to_bool(contains(dict_get_or(html_doc_large_budget, "content", ""), "visible")))
+
+# Capability roots are stable filesystem roots rather than the requested
+# ingest directory. This preserves native Windows verbatim roots and ensures
+# every requested directory component is traversed with no-follow semantics.
+scope_root := dict_get_or(html_scope, "root", "")
+scope_relative := dict_get_or(html_scope, "relative", "")
+assert_true(to_bool(scope_root != ""))
+assert_true(to_bool(scope_relative != ""))
+assert_true(to_bool(path_exists(scope_root)))
+
+portable_ingest_root := "results/capability_ingest_" + suffix
+create_dir(portable_ingest_root)
+write_file(portable_ingest_root + "/sample.txt", "descriptor relative portable ingest")
+portable_ingest := ingest_documents(portable_ingest_root, {
+	"ingest_extensions": ["txt"],
+	"max_file_bytes": 5000000,
+	"parser_sandbox_max_bytes": 10000000
+}, true)
+assert_true(to_bool(dict_get_or(dict_get_or(portable_ingest, "stats", {}), "docs_loaded", 0) == 1))
+
 base_cfg := {
 	"index_path": "./data/rag_index.json",
 	"namespace": "team_a",
@@ -74,6 +101,15 @@ assert_true(to_bool(link_result.success == true))
 symlink_escape := validate_api_ingest_path(link_path + "/secret.txt", scope_cfg)
 assert_true(to_bool(dict_get_or(symlink_escape, "ok", true) == false))
 assert_true(to_bool(dict_get_or(symlink_escape, "error", "") == "ingest_path_symlink_forbidden"))
+escape_scope := filesystem_capability_scope(link_path + "/secret.txt")
+assert_true(to_bool(contains(dict_get_or(escape_scope, "relative", ""), "/escape/secret.txt")))
+escape_read_error := null
+try {
+	_ = parse_file_beneath(link_path + "/secret.txt", parser_cfg, dict_get_or(escape_scope, "root", ""), dict_get_or(escape_scope, "relative", ""))
+} except e {
+	escape_read_error = e
+}
+assert_true(to_bool(type(escape_read_error) != "null"))
 discovered_with_symlink := discover_files(allowed_root, {
 	"ingest_extensions": ["txt"]
 }, true)
@@ -106,6 +142,10 @@ for path in [csv_path, csv_collision_path, json_collision_path, html_path] {
 		delete_file(path)
 	}
 }
+if file_exists(portable_ingest_root + "/sample.txt") {
+	delete_file(portable_ingest_root + "/sample.txt")
+}
+_ = execute_status("rmdir " + portable_ingest_root, {"timeout_ms": 5000})
 _ = execute_status("rm -f " + link_path, {"timeout_ms": 5000})
 if file_exists(outside_root + "/secret.txt") {
 	delete_file(outside_root + "/secret.txt")

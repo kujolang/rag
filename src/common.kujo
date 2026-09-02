@@ -24,6 +24,93 @@ export num_or := func(value, default_value) {
 	return default_value
 }
 
+# Resolve the caller's lexical path beneath a stable filesystem root. File
+# paths must not be canonicalized here: canonicalizing after authorization
+# would let a concurrently swapped symlink choose a different trusted path.
+# Keep the raw native root for the runtime call while slash-normalizing only
+# the descriptor-relative component. This preserves Windows verbatim roots.
+export filesystem_capability_scope := func(path_value) {
+	raw_input := to_string(path_value)
+	raw_base := path_absolute(".")
+	normalized_base := regex_replace(raw_base, "\\\\", "/")
+	is_windows := starts_with(normalized_base, "//?/")
+	if len(normalized_base) >= 3 && substring(normalized_base, 1, 3) == ":/" {
+		is_windows = true
+	}
+
+	normalized_input := raw_input
+	if is_windows {
+		normalized_input = regex_replace(raw_input, "\\\\", "/")
+	}
+	is_absolute := starts_with(normalized_input, "/")
+	if len(normalized_input) >= 3 && substring(normalized_input, 1, 3) == ":/" {
+		is_absolute = true
+	}
+
+	raw_root_source := raw_input
+	if is_absolute == false {
+		normalized_input = normalized_base + "/" + normalized_input
+		raw_root_source = raw_base
+	}
+
+	root := ""
+	body := normalized_input
+	if is_windows && starts_with(normalized_input, "//?/UNC/") {
+		unc_parts := split(substring(normalized_input, 8, len(normalized_input)), "/")
+		if len(unc_parts) >= 2 && unc_parts[0] != "" && unc_parts[1] != "" {
+			root_length := 8 + len(unc_parts[0]) + 1 + len(unc_parts[1]) + 1
+			root = substring(raw_root_source, 0, root_length)
+			body = substring(normalized_input, root_length, len(normalized_input))
+		}
+	} else if is_windows && starts_with(normalized_input, "//?/") && len(normalized_input) >= 7 && substring(normalized_input, 5, 7) == ":/" {
+		root = substring(raw_root_source, 0, 7)
+		body = substring(normalized_input, 7, len(normalized_input))
+	} else if is_windows && starts_with(normalized_input, "//") {
+		unc_parts := split(substring(normalized_input, 2, len(normalized_input)), "/")
+		if len(unc_parts) >= 2 && unc_parts[0] != "" && unc_parts[1] != "" {
+			root_length := 2 + len(unc_parts[0]) + 1 + len(unc_parts[1]) + 1
+			root = substring(raw_root_source, 0, root_length)
+			body = substring(normalized_input, root_length, len(normalized_input))
+		}
+	} else if is_windows && len(normalized_input) >= 3 && substring(normalized_input, 1, 3) == ":/" {
+		root = path_absolute(substring(raw_input, 0, 3))
+		body = substring(normalized_input, 3, len(normalized_input))
+	}
+
+	parts := split(body, "/")
+	clean_parts := []
+	for part in parts {
+		if part == "" || part == "." {
+			continue
+		}
+		if part == ".." {
+			if len(clean_parts) > 0 {
+				clean_parts = slice(clean_parts, 0, len(clean_parts) - 1)
+			}
+		} else {
+			clean_parts = push(clean_parts, part)
+		}
+	}
+
+	if is_windows == false {
+		if len(clean_parts) >= 2 {
+			# macOS and some Unix deployments expose stable top-level symlinks
+			# such as /tmp. Canonicalize that trusted system component once, then
+			# traverse every caller-controlled component descriptor-relatively.
+			root = path_absolute("/" + clean_parts[0])
+			clean_parts = slice(clean_parts, 1, len(clean_parts))
+		} else {
+			root = "/"
+		}
+	}
+	relative := join(clean_parts, "/")
+
+	return {
+		"root": root,
+		"relative": relative
+	}
+}
+
 export bool_or := func(value, default_value) {
 	if type(value) == "bool" {
 		return value

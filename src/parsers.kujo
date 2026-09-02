@@ -1,4 +1,4 @@
-from src.common import dict_get_or, stable_chunk_id
+from src.common import dict_get_or, filesystem_capability_scope, stable_chunk_id
 
 func build_document(path, kind, content, meta) {
 	enriched_meta := enrich_document_meta(path, kind, content, meta)
@@ -698,14 +698,6 @@ func is_safe_pdf_extractor(extractor) {
 	return invalid == ""
 }
 
-func shell_quote(value) {
-	if type(value) != "string" {
-		return "''"
-	}
-	escaped := regex_replace(value, "'", "'\"'\"'")
-	return "'" + escaped + "'"
-}
-
 func build_pdf_fallback(path, extractor, error_code) {
 	fallback := "[PDF extraction unavailable] " + path
 	meta := {
@@ -719,7 +711,7 @@ func build_pdf_fallback(path, extractor, error_code) {
 	return build_document(path, "pdf", fallback, meta)
 }
 
-func parse_pdf(path, cfg) {
+func parse_pdf_bytes(path, cfg, pdf_bytes) {
 	extractor := dict_get_or(cfg, "pdf_extractor_command", "pdftotext")
 	timeout_ms := dict_get_or(cfg, "parser_timeout_ms", 30000)
 	if timeout_ms < 1000 {
@@ -732,8 +724,19 @@ func parse_pdf(path, cfg) {
 		return build_pdf_fallback(path, extractor, "invalid_pdf_extractor")
 	}
 
-	cmd := trim(extractor) + " " + shell_quote(path) + " -"
-	result := execute_status(cmd, {"timeout_ms": timeout_ms})
+	result := null
+	spawn_error := null
+	try {
+		result = spawn_process([trim(extractor), "-", "-"], {
+			"timeout_ms": timeout_ms,
+			"stdin": pdf_bytes
+		})
+	} except e {
+		spawn_error = e
+	}
+	if type(spawn_error) != "null" {
+		return build_pdf_fallback(path, extractor, "pdf_extract_failed")
+	}
 	if type(result) == "struct" {
 		if result.success == true {
 			stdout := result.stdout
@@ -759,11 +762,17 @@ func parse_pdf(path, cfg) {
 	return build_pdf_fallback(path, extractor, "pdf_extract_failed")
 }
 
-export parse_file := func(path, cfg) {
+func parse_file_beneath_impl(path, cfg, trusted_root, relative_path) {
 	parser_key := resolve_parser_key(path)
 	sandbox_max_bytes := dict_get_or(cfg, "parser_sandbox_max_bytes", 5000000)
 	if sandbox_max_bytes < 1024 {
 		sandbox_max_bytes = 1024
+	}
+	# Kujo descriptor-relative reads intentionally cap one read at 8 MiB.
+	# Keep the parser budget inside that public runtime contract even when a
+	# caller bypasses normalized configuration.
+	if sandbox_max_bytes > 8388608 {
+		sandbox_max_bytes = 8388608
 	}
 
 	file_bytes := 0
@@ -780,10 +789,24 @@ export parse_file := func(path, cfg) {
 	}
 
 	if parser_key == "pdf" {
-		return parse_pdf(path, cfg)
+		extractor := dict_get_or(cfg, "pdf_extractor_command", "pdftotext")
+		if is_safe_pdf_extractor(extractor) == false {
+			return build_pdf_fallback(path, extractor, "invalid_pdf_extractor")
+		}
+		pdf_bytes := null
+		pdf_read_error := null
+		try {
+			pdf_bytes = read_binary_file_beneath(trusted_root, relative_path, sandbox_max_bytes)
+		} except e {
+			pdf_read_error = e
+		}
+		if type(pdf_read_error) != "null" {
+			return build_pdf_fallback(path, extractor, "pdf_extract_failed")
+		}
+		return parse_pdf_bytes(path, cfg, pdf_bytes)
 	}
 
-	raw := read_file(path)
+	raw := read_file_beneath(trusted_root, relative_path, sandbox_max_bytes)
 	if parser_key == "log_text" {
 		return parse_log_text(path, raw)
 	}
@@ -807,4 +830,13 @@ export parse_file := func(path, cfg) {
 	}
 
 	return parse_text(path, raw)
+}
+
+export parse_file_beneath := func(path, cfg, trusted_root, relative_path) {
+	return parse_file_beneath_impl(path, cfg, trusted_root, relative_path)
+}
+
+export parse_file := func(path, cfg) {
+	scope := filesystem_capability_scope(path)
+	return parse_file_beneath_impl(path, cfg, dict_get_or(scope, "root", ""), dict_get_or(scope, "relative", ""))
 }

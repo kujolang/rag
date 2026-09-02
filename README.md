@@ -142,9 +142,10 @@ PDF extractor safety constraints:
 
 - `KUJO_RAG_PDF_EXTRACTOR` must be a single binary/path token containing only: letters, digits, `_`, `.`, `/`, `-`
 - values with shell metacharacters or command chaining (for example `;`, `&&`, `$()`) are rejected and fall back safely
-- PDF file paths are shell-quoted before execution to prevent command-injection via crafted filenames
+- the extractor is launched directly without a shell and must implement the `pdftotext`-compatible stdin contract: `EXTRACTOR - -` reads PDF bytes from standard input and writes text to standard output
+- source paths are never passed to extractors; descriptor-relative authorization is preserved through parsing and path-swap races fail closed
 - parser timeout budget is configurable via `KUJO_RAG_PARSER_TIMEOUT_MS` (clamped to safe bounds)
-- parser sandbox byte budget is configurable via `KUJO_RAG_PARSER_SANDBOX_MAX_BYTES` and triggers deterministic fallback metadata when exceeded
+- parser sandbox byte budget is configurable via `KUJO_RAG_PARSER_SANDBOX_MAX_BYTES`, capped at Kujo's 8 MiB descriptor-relative read limit, and triggers deterministic fallback metadata when exceeded
 
 ## Environment Setup
 

@@ -856,16 +856,19 @@ if file_exists("results/test.pdf") {
 }
 write_file("results/test.pdf", "fake")
 
+is_unix_runtime := starts_with(path_absolute("."), "/")
 pdf_cfg_ok := {
-	"pdf_extractor_command": "echo"
+	"pdf_extractor_command": "/bin/cat"
 }
-pdf_doc_ok := parse_file("results/test.pdf", pdf_cfg_ok)
-assert_true(to_bool(dict_get_or(dict_get_or(pdf_doc_ok, "meta", {}), "parser", "") == "pdf_shell"))
+if is_unix_runtime {
+	pdf_doc_ok := parse_file("results/test.pdf", pdf_cfg_ok)
+	assert_true(to_bool(dict_get_or(dict_get_or(pdf_doc_ok, "meta", {}), "parser", "") == "pdf_shell"))
+}
 
 pdf_cfg_fail := {
 	"pdf_extractor_command": "definitely_missing_pdf_binary"
 }
-pdf_doc_fail := parse_file("results/missing.pdf", pdf_cfg_fail)
+pdf_doc_fail := parse_file("results/test.pdf", pdf_cfg_fail)
 assert_true(to_bool(dict_get_or(dict_get_or(pdf_doc_fail, "meta", {}), "parser", "") == "pdf_fallback"))
 assert_true(to_bool(dict_get_or(dict_get_or(pdf_doc_fail, "meta", {}), "error_code", "") == "pdf_extract_failed"))
 
@@ -888,7 +891,9 @@ if file_exists(path_payload_file) {
 path_injection_pdf := "results/test\";touch sec001_path_payload.txt;\".pdf"
 write_file(path_injection_pdf, "fake")
 pdf_doc_path_payload := parse_file(path_injection_pdf, pdf_cfg_ok)
-assert_true(to_bool(dict_get_or(dict_get_or(pdf_doc_path_payload, "meta", {}), "parser", "") == "pdf_shell"))
+if is_unix_runtime {
+	assert_true(to_bool(dict_get_or(dict_get_or(pdf_doc_path_payload, "meta", {}), "parser", "") == "pdf_shell"))
+}
 assert_true(to_bool(file_exists(path_payload_file) == false))
 
 if file_exists(path_injection_pdf) {

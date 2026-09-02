@@ -179,4 +179,9 @@ bounded_qdrant_gc_cfg := load_config({
 assert_true(to_bool(dict_get_or(bounded_qdrant_gc_cfg, "vector_backend_qdrant_gc_grace_sec", 0) == 60))
 assert_true(to_bool(dict_get_or(bounded_qdrant_gc_cfg, "vector_backend_qdrant_gc_max_per_save", 0) == 10))
 
+bounded_parser_cfg := load_config({
+	"parser_sandbox_max_bytes": 10000000
+})
+assert_true(to_bool(dict_get_or(bounded_parser_cfg, "parser_sandbox_max_bytes", 0) == 8388608))
+
 print("test_config_integrity: ok")

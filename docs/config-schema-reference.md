@@ -122,12 +122,18 @@ Generated and validated by `scripts/run_config_schema_review.kujo`.
 | top_k | int | 6 | Use default unless workload or compliance requirements justify override. |
 | vector_backend | string | local_json | Use default unless workload or compliance requirements justify override. |
 | vector_backend_memory_key | string |  | Use default unless workload or compliance requirements justify override. |
+| vector_backend_qdrant_alias | string |  | Use default unless workload or compliance requirements justify override. |
 | vector_backend_qdrant_allowed_hosts | array | [] | Use explicit allowlists tailored to tenant and environment boundaries. |
 | vector_backend_qdrant_api_key | string |  | Inject via secret management; do not commit plaintext values. |
 | vector_backend_qdrant_collection | string | kujo_rag | Use default unless workload or compliance requirements justify override. |
 | vector_backend_qdrant_fail_open | bool | true | Use default unless workload or compliance requirements justify override. |
+| vector_backend_qdrant_gc_enabled | bool | false | Keep disabled until explicitly required, then enable with controls documented. |
+| vector_backend_qdrant_gc_grace_sec | int | 86400 | Use default unless workload or compliance requirements justify override. |
+| vector_backend_qdrant_gc_max_per_save | int | 1 | Start with default and tune from observed latency/error-budget telemetry. |
+| vector_backend_qdrant_journal_path | string |  | Use deployment-stable paths with least-privilege file permissions. |
 | vector_backend_qdrant_mirror_path | string |  | Use deployment-stable paths with least-privilege file permissions. |
 | vector_backend_qdrant_sync_enabled | bool | false | Keep disabled until explicitly required, then enable with controls documented. |
+| vector_backend_qdrant_sync_mode | string | legacy_replace | Use default unless workload or compliance requirements justify override. |
 | vector_backend_qdrant_timeout_ms | int | 8000 | Start with default and tune from observed latency/error-budget telemetry. |
 | vector_backend_qdrant_url | string |  | Use default unless workload or compliance requirements justify override. |
 

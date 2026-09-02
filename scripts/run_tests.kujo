@@ -142,6 +142,7 @@ default_tests := [
 	"tests/test_connector_framework.kujo",
 	"tests/test_connector_plugin_stub.kujo",
 	"tests/test_containerized_dev_environment_review.kujo",
+	"tests/test_descriptor_relative_ingest.kujo",
 	"tests/test_disaster_recovery_drills.kujo",
 	"tests/test_federated_query_planner.kujo",
 	"tests/test_graceful_shutdown_safeguards.kujo",

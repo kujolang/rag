@@ -18,12 +18,13 @@ Malformed structured files fail safely with deterministic metadata:
 
 Parser sandbox guardrail:
 
-- `KUJO_RAG_PARSER_SANDBOX_MAX_BYTES` caps parser input size.
+- `KUJO_RAG_PARSER_SANDBOX_MAX_BYTES` caps parser input size at Kujo's 8 MiB descriptor-relative read limit.
 - oversized files return deterministic fallback docs with `meta.parser=sandbox_fallback` and `meta.error_code=parser_input_too_large`.
 
 Parser timeout guardrail:
 
-- `KUJO_RAG_PARSER_TIMEOUT_MS` controls parser timeout budget (notably PDF shell extraction).
+- `KUJO_RAG_PARSER_TIMEOUT_MS` controls parser timeout budget (notably PDF process extraction).
+- PDF extractors use the versioned stdin protocol `EXTRACTOR - -`: PDF bytes arrive on standard input and extracted text must be written to standard output. Extractors are never given the source pathname.
 
 ## Validation Corpus
 
