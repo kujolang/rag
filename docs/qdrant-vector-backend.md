@@ -33,6 +33,9 @@ Supported behavior:
 - `KUJO_RAG_VECTOR_BACKEND_QDRANT_FAIL_OPEN`: `true|false` (default `true`)
 - `KUJO_RAG_VECTOR_BACKEND_QDRANT_ALLOWED_HOSTS`: comma-separated endpoint hosts
 - `KUJO_RAG_VECTOR_BACKEND_QDRANT_MIRROR_PATH`: optional explicit local mirror file path
+- `KUJO_RAG_VECTOR_BACKEND_QDRANT_SYNC_MODE`: `legacy_replace|staged_alias` (default `legacy_replace`; strict mode requires `staged_alias`)
+- `KUJO_RAG_VECTOR_BACKEND_QDRANT_ALIAS`: stable query alias (default `<collection>__active`)
+- `KUJO_RAG_VECTOR_BACKEND_QDRANT_JOURNAL_PATH`: optional recovery-journal path (default `<mirror>.qdrant-journal.json`)
 
 ## Sync behavior
 
@@ -62,6 +65,25 @@ header and content payload files are created with owner-only permissions in the
 OS temporary directory and deleted after both success and failure. HTTP 4xx/5xx
 responses fail synchronization rather than being mistaken for successful curl
 process execution.
+
+### Staged alias mode
+
+`staged_alias` creates a new generation collection, uploads all candidate points,
+performs an exact point-count verification, and then changes visibility with one
+Qdrant alias action. It never deletes or mutates the active collection before
+verification. An atomic local journal records every phase; a journal left at
+`alias_committed` is surfaced as `qdrant_recovery_required` on load instead of
+silently treating the prior mirror as current. Empty authoritative indexes use
+the configured embedding dimension and follow the same verified alias commit.
+
+The default alias is `<collection>__active` so it cannot collide with an existing
+legacy collection of the configured name. Query clients must use this alias after
+migration. `legacy_replace` retains the previous delete-and-recreate behavior for
+one non-strict compatibility window and is rejected by strict configuration.
+
+This first staged tranche deliberately retains prior generations. Automated
+rollback, restart completion, and delayed bounded generation garbage collection
+remain required before operators should enable unattended cleanup.
 
 ## Validation
 

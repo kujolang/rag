@@ -15,6 +15,9 @@ export default_config := func() {
 		"vector_backend_qdrant_fail_open": true,
 		"vector_backend_qdrant_allowed_hosts": [],
 		"vector_backend_qdrant_mirror_path": "",
+		"vector_backend_qdrant_sync_mode": "legacy_replace",
+		"vector_backend_qdrant_alias": "",
+		"vector_backend_qdrant_journal_path": "",
 		"at_rest_encryption_enabled": false,
 		"at_rest_encryption_key": "",
 		"at_rest_encryption_key_file": "",
@@ -366,6 +369,9 @@ export load_config := func(overrides) {
 	cfg["vector_backend_qdrant_fail_open"] := parse_bool_or(env_or("KUJO_RAG_VECTOR_BACKEND_QDRANT_FAIL_OPEN", "true"), cfg["vector_backend_qdrant_fail_open"])
 	cfg["vector_backend_qdrant_allowed_hosts"] := parse_csv_string_array(env_or("KUJO_RAG_VECTOR_BACKEND_QDRANT_ALLOWED_HOSTS", ""), dict_get_or(cfg, "vector_backend_qdrant_allowed_hosts", []))
 	cfg["vector_backend_qdrant_mirror_path"] := trim(env_or("KUJO_RAG_VECTOR_BACKEND_QDRANT_MIRROR_PATH", cfg["vector_backend_qdrant_mirror_path"]))
+	cfg["vector_backend_qdrant_sync_mode"] := to_lower(trim(env_or("KUJO_RAG_VECTOR_BACKEND_QDRANT_SYNC_MODE", cfg["vector_backend_qdrant_sync_mode"])))
+	cfg["vector_backend_qdrant_alias"] := to_lower(trim(env_or("KUJO_RAG_VECTOR_BACKEND_QDRANT_ALIAS", cfg["vector_backend_qdrant_alias"])))
+	cfg["vector_backend_qdrant_journal_path"] := trim(env_or("KUJO_RAG_VECTOR_BACKEND_QDRANT_JOURNAL_PATH", cfg["vector_backend_qdrant_journal_path"]))
 	cfg["at_rest_encryption_enabled"] := parse_bool_or(env_or("KUJO_RAG_AT_REST_ENCRYPTION_ENABLED", "false"), cfg["at_rest_encryption_enabled"])
 	cfg["at_rest_encryption_key"] := env_or("KUJO_RAG_AT_REST_ENCRYPTION_KEY", cfg["at_rest_encryption_key"])
 	cfg["at_rest_encryption_key_file"] := env_or("KUJO_RAG_AT_REST_ENCRYPTION_KEY_FILE", cfg["at_rest_encryption_key_file"])
@@ -541,6 +547,9 @@ export load_config := func(overrides) {
 	if cfg["vector_backend"] != "local_json" && cfg["vector_backend"] != "memory" && cfg["vector_backend"] != "qdrant_http" {
 		cfg["vector_backend"] = "local_json"
 	}
+	if cfg["vector_backend_qdrant_sync_mode"] != "legacy_replace" && cfg["vector_backend_qdrant_sync_mode"] != "staged_alias" {
+		cfg["vector_backend_qdrant_sync_mode"] = "legacy_replace"
+	}
 
 	if cfg["api_auth_provider"] != "none" && cfg["api_auth_provider"] != "bearer" && cfg["api_auth_provider"] != "jwt_proxy" {
 		cfg["api_auth_provider"] = "bearer"
@@ -642,6 +651,7 @@ export validate_config := func(cfg) {
 	qdrant_collection := trim(str_or(dict_get_or(cfg, "vector_backend_qdrant_collection", ""), ""))
 	qdrant_sync_enabled := bool_or(dict_get_or(cfg, "vector_backend_qdrant_sync_enabled", false), false)
 	qdrant_fail_open := bool_or(dict_get_or(cfg, "vector_backend_qdrant_fail_open", true), true)
+	qdrant_sync_mode := to_lower(trim(str_or(dict_get_or(cfg, "vector_backend_qdrant_sync_mode", "legacy_replace"), "legacy_replace")))
 	qdrant_allowed_hosts := dict_get_or(cfg, "vector_backend_qdrant_allowed_hosts", [])
 	qdrant_host := url_host(qdrant_url)
 	encryption_enabled := bool_or(dict_get_or(cfg, "at_rest_encryption_enabled", false), false)
@@ -685,6 +695,13 @@ export validate_config := func(cfg) {
 	}
 
 	if vector_backend == "qdrant_http" {
+		if qdrant_sync_mode != "legacy_replace" && qdrant_sync_mode != "staged_alias" {
+			errors = push(errors, {
+				"code": "invalid_qdrant_sync_mode",
+				"field": "vector_backend_qdrant_sync_mode",
+				"message": "Qdrant sync mode must be legacy_replace or staged_alias"
+			})
+		}
 		if qdrant_collection == "" {
 			errors = push(errors, {
 				"code": "qdrant_collection_required",
@@ -841,6 +858,13 @@ export validate_config := func(cfg) {
 		}
 
 		if vector_backend == "qdrant_http" && qdrant_sync_enabled {
+			if qdrant_sync_mode != "staged_alias" {
+				errors = push(errors, {
+					"code": "strict_requires_qdrant_staged_alias",
+					"field": "vector_backend_qdrant_sync_mode",
+					"message": "Strict Qdrant synchronization requires staged_alias mode"
+				})
+			}
 			if starts_with(to_lower(qdrant_url), "https://") == false {
 				errors = push(errors, {
 					"code": "strict_requires_qdrant_https",

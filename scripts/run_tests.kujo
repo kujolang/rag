@@ -165,6 +165,7 @@ default_tests := [
 	"tests/test_probe_endpoints.kujo",
 	"tests/test_query_embedding_cache.kujo",
 	"tests/test_qdrant_security.kujo",
+	"tests/test_qdrant_staged_alias.kujo",
 	"tests/test_rate_limit_backend_shared.kujo",
 	"tests/test_rbac_authorization.kujo",
 	"tests/test_redaction_policy.kujo",

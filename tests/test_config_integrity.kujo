@@ -137,6 +137,7 @@ strict_qdrant_invalid_diag := validate_config(strict_qdrant_invalid)
 assert_true(to_bool(has_error_code(strict_qdrant_invalid_diag, "strict_requires_qdrant_https") == true))
 assert_true(to_bool(has_error_code(strict_qdrant_invalid_diag, "strict_disallows_qdrant_fail_open") == true))
 assert_true(to_bool(has_error_code(strict_qdrant_invalid_diag, "strict_requires_qdrant_host_allowlist") == true))
+assert_true(to_bool(has_error_code(strict_qdrant_invalid_diag, "strict_requires_qdrant_staged_alias") == true))
 
 strict_qdrant_valid := load_config({
 	"strict_config": true,
@@ -156,6 +157,7 @@ strict_qdrant_valid := load_config({
 	"vector_backend": "qdrant_http",
 	"vector_backend_qdrant_sync_enabled": true,
 	"vector_backend_qdrant_url": "https://qdrant.internal:6333",
+	"vector_backend_qdrant_sync_mode": "staged_alias",
 	"vector_backend_qdrant_fail_open": false,
 	"vector_backend_qdrant_allowed_hosts": ["qdrant.internal"]
 })

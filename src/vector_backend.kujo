@@ -1,4 +1,4 @@
-from src.common import dict_get_or, bool_or, num_or, write_json_file
+from src.common import dict_get_or, bool_or, num_or, read_json_file_or, write_json_file
 from src.vector_store import load_index_with_config, persist_index_with_config, save_index_with_config
 
 func normalize_backend_name(cfg) {
@@ -185,7 +185,7 @@ func qdrant_points_payload(index) {
 	return points
 }
 
-func qdrant_sync_index(cfg, index) {
+func qdrant_sync_index_legacy(cfg, index) {
 	if qdrant_sync_enabled(cfg) == false {
 		return {
 			"ok": true,
@@ -326,6 +326,300 @@ func qdrant_sync_index(cfg, index) {
 	}
 }
 
+func qdrant_sync_mode(cfg) {
+	mode := to_lower(trim(to_string(dict_get_or(cfg, "vector_backend_qdrant_sync_mode", "legacy_replace"))))
+	if mode == "staged_alias" {
+		return mode
+	}
+	return "legacy_replace"
+}
+
+func qdrant_alias_name(cfg) {
+	configured := to_lower(trim(to_string(dict_get_or(cfg, "vector_backend_qdrant_alias", ""))))
+	if configured == "" {
+		configured = qdrant_collection_name(cfg) + "__active"
+	}
+	invalid := regex_replace(configured, "[a-z0-9_-]", "")
+	if invalid != "" {
+		configured = "alias_" + substring(sha256(configured), 0, 10)
+	}
+	return configured
+}
+
+func qdrant_journal_path(cfg) {
+	configured := trim(to_string(dict_get_or(cfg, "vector_backend_qdrant_journal_path", "")))
+	if configured != "" {
+		return configured
+	}
+	return qdrant_mirror_path(cfg) + ".qdrant-journal.json"
+}
+
+func qdrant_write_journal(cfg, journal) {
+	journal_file_path := qdrant_journal_path(cfg)
+	dir := dirname(journal_file_path)
+	if dir != "" && dir != "." && path_exists(dir) == false {
+		create_dir(dir)
+	}
+	written := false
+	write_error := null
+	try {
+		written = write_file_atomic(journal_file_path, to_json(journal), true)
+	} except e {
+		write_error = e
+	}
+	if type(write_error) != "null" || written != true {
+		return {
+			"ok": false,
+			"error": {
+				"code": "qdrant_journal_write_failed",
+				"message": "Failed to persist the Qdrant recovery journal before remote mutation",
+				"details": {"path": journal_file_path, "runtime_error": substring(to_string(write_error), 0, 512)}
+			}
+		}
+	}
+	return {"ok": true, "path": journal_file_path}
+}
+
+func qdrant_request(cfg, header_path, method, url, payload_path) {
+	timeout_ms := qdrant_timeout_ms(cfg)
+	timeout_sec := timeout_ms / 1000
+	if timeout_sec < 1 {
+		timeout_sec = 1
+	}
+	response_path := qdrant_tmp_file_path("qdrant_response", qdrant_collection_name(cfg), ".json")
+	cmd := "curl --silent --show-error --max-time " + to_string(timeout_sec) + " --output " + shell_quote(response_path) + " --write-out '%{http_code}' -X " + method + " -H @" + shell_quote(header_path)
+	if payload_path != "" {
+		cmd = cmd + " --data-binary @" + shell_quote(payload_path)
+	}
+	cmd = cmd + " " + shell_quote(url)
+	result := execute_status(cmd, {"timeout_ms": timeout_ms + 2000})
+	status := trim(command_stdout(result))
+	body := ""
+	if file_exists(response_path) {
+		body = read_file(response_path)
+		remove_file_if_exists(response_path)
+	}
+	request_ok := command_success(result) && starts_with(status, "2")
+	return {
+		"ok": request_ok,
+		"status": status,
+		"body": body,
+		"stderr": command_stderr(result)
+	}
+}
+
+func qdrant_parse_response(response) {
+	body := dict_get_or(response, "body", "")
+	if type(body) != "string" || trim(body) == "" {
+		return {}
+	}
+	parsed := {}
+	parse_error := null
+	try {
+		parsed = parse_json(body)
+	} except e {
+		parse_error = e
+	}
+	if type(parse_error) != "null" || type(parsed) != "dict" {
+		return {}
+	}
+	return parsed
+}
+
+func qdrant_existing_alias_target(cfg, header_path, alias_name) {
+	response := qdrant_request(cfg, header_path, "GET", qdrant_base_url(cfg) + "/aliases/" + alias_name, "")
+	if dict_get_or(response, "status", "") == "404" {
+		return {"ok": true, "target": ""}
+	}
+	if dict_get_or(response, "ok", false) == false {
+		return {"ok": false, "response": response}
+	}
+	parsed := qdrant_parse_response(response)
+	aliases := dict_get_or(dict_get_or(parsed, "result", {}), "aliases", [])
+	for alias_record in aliases {
+		if to_string(dict_get_or(alias_record, "alias_name", "")) == alias_name {
+			return {"ok": true, "target": to_string(dict_get_or(alias_record, "collection_name", ""))}
+		}
+	}
+	return {"ok": true, "target": ""}
+}
+
+func qdrant_fail_staged(cfg, journal, code, message, details) {
+	journal["phase"] := "failed"
+	journal["error"] := {"code": code, "message": message, "details": details}
+	journal["updated_at_unix_ms"] := current_timestamp()
+	_ = qdrant_write_journal(cfg, journal)
+	return {"ok": false, "error": journal["error"]}
+}
+
+func qdrant_sync_index_staged(cfg, index) {
+	if qdrant_sync_enabled(cfg) == false {
+		return {"ok": true, "synced": false, "reason": "sync_disabled"}
+	}
+	base_url := qdrant_base_url(cfg)
+	if base_url == "" {
+		return {"ok": false, "error": {"code": "qdrant_url_missing", "message": "Qdrant sync requires non-empty vector_backend_qdrant_url"}}
+	}
+
+	collection := qdrant_collection_name(cfg)
+	alias_name := qdrant_alias_name(cfg)
+	points := qdrant_points_payload(index)
+	dims := num_or(dict_get_or(cfg, "embedding_dims", 0), 0)
+	if len(points) > 0 {
+		dims = len(dict_get_or(points[0], "vector", []))
+	}
+	if dims <= 0 {
+		return {"ok": false, "error": {"code": "qdrant_vector_dimensions_invalid", "message": "Staged Qdrant synchronization requires a positive vector dimension"}}
+	}
+
+	generation_id := substring(sha256(to_json(index)), 0, 12) + "_" + to_string(current_timestamp())
+	base_prefix := collection
+	if len(base_prefix) > 48 {
+		base_prefix = substring(base_prefix, 0, 48)
+	}
+	generation := base_prefix + "__gen_" + generation_id
+	journal := {
+		"schema_version": 1,
+		"mode": "staged_alias",
+		"phase": "prepared",
+		"logical_collection": collection,
+		"alias": alias_name,
+		"candidate_collection": generation,
+		"expected_points": len(points),
+		"vector_dimensions": dims,
+		"created_at_unix_ms": current_timestamp(),
+		"updated_at_unix_ms": current_timestamp()
+	}
+	journal_write := qdrant_write_journal(cfg, journal)
+	if dict_get_or(journal_write, "ok", false) == false {
+		return journal_write
+	}
+
+	header_path := qdrant_header_file(cfg, collection)
+	meta_payload_path := qdrant_tmp_file_path("qdrant_collection", generation, ".json")
+	points_payload_path := qdrant_tmp_file_path("qdrant_points", generation, ".json")
+	count_payload_path := qdrant_tmp_file_path("qdrant_count", generation, ".json")
+	alias_payload_path := qdrant_tmp_file_path("qdrant_alias", generation, ".json")
+	write_json_file(meta_payload_path, {"vectors": {"size": dims, "distance": "Cosine"}})
+	write_json_file(points_payload_path, {"points": points})
+	write_json_file(count_payload_path, {"exact": true})
+	_ = execute_status("chmod 600 " + shell_quote(meta_payload_path) + " " + shell_quote(points_payload_path) + " " + shell_quote(count_payload_path), {"timeout_ms": 5000})
+
+	create_response := qdrant_request(cfg, header_path, "PUT", base_url + "/collections/" + generation, meta_payload_path)
+	if dict_get_or(create_response, "ok", false) == false {
+		remove_file_if_exists(meta_payload_path)
+		remove_file_if_exists(points_payload_path)
+		remove_file_if_exists(count_payload_path)
+		remove_file_if_exists(header_path)
+		return qdrant_fail_staged(cfg, journal, "qdrant_candidate_create_failed", "Failed to create the staged Qdrant collection", create_response)
+	}
+	journal["phase"] := "candidate_created"
+	journal["updated_at_unix_ms"] := current_timestamp()
+	journal_write = qdrant_write_journal(cfg, journal)
+	if dict_get_or(journal_write, "ok", false) == false {
+		remove_file_if_exists(meta_payload_path)
+		remove_file_if_exists(points_payload_path)
+		remove_file_if_exists(count_payload_path)
+		remove_file_if_exists(header_path)
+		return journal_write
+	}
+
+	if len(points) > 0 {
+		upsert_response := qdrant_request(cfg, header_path, "PUT", base_url + "/collections/" + generation + "/points?wait=true", points_payload_path)
+		if dict_get_or(upsert_response, "ok", false) == false {
+			remove_file_if_exists(meta_payload_path)
+			remove_file_if_exists(points_payload_path)
+			remove_file_if_exists(count_payload_path)
+			remove_file_if_exists(header_path)
+			return qdrant_fail_staged(cfg, journal, "qdrant_candidate_upsert_failed", "Failed to populate the staged Qdrant collection", upsert_response)
+		}
+	}
+	journal["phase"] := "candidate_uploaded"
+	journal["updated_at_unix_ms"] := current_timestamp()
+	journal_write = qdrant_write_journal(cfg, journal)
+	if dict_get_or(journal_write, "ok", false) == false {
+		remove_file_if_exists(meta_payload_path)
+		remove_file_if_exists(points_payload_path)
+		remove_file_if_exists(count_payload_path)
+		remove_file_if_exists(header_path)
+		return journal_write
+	}
+
+	count_response := qdrant_request(cfg, header_path, "POST", base_url + "/collections/" + generation + "/points/count", count_payload_path)
+	count_parsed := qdrant_parse_response(count_response)
+	actual_points := num_or(dict_get_or(dict_get_or(count_parsed, "result", {}), "count", -1), -1)
+	if dict_get_or(count_response, "ok", false) == false || actual_points != len(points) {
+		remove_file_if_exists(meta_payload_path)
+		remove_file_if_exists(points_payload_path)
+		remove_file_if_exists(count_payload_path)
+		remove_file_if_exists(header_path)
+		return qdrant_fail_staged(cfg, journal, "qdrant_candidate_verification_failed", "Staged Qdrant collection did not match the expected point count", {"expected": len(points), "actual": actual_points, "response": count_response})
+	}
+	journal["phase"] := "candidate_verified"
+	journal["updated_at_unix_ms"] := current_timestamp()
+	journal_write = qdrant_write_journal(cfg, journal)
+	if dict_get_or(journal_write, "ok", false) == false {
+		remove_file_if_exists(meta_payload_path)
+		remove_file_if_exists(points_payload_path)
+		remove_file_if_exists(count_payload_path)
+		remove_file_if_exists(header_path)
+		return journal_write
+	}
+
+	previous_result := qdrant_existing_alias_target(cfg, header_path, alias_name)
+	if dict_get_or(previous_result, "ok", false) == false {
+		remove_file_if_exists(meta_payload_path)
+		remove_file_if_exists(points_payload_path)
+		remove_file_if_exists(count_payload_path)
+		remove_file_if_exists(header_path)
+		return qdrant_fail_staged(cfg, journal, "qdrant_alias_lookup_failed", "Failed to resolve the active Qdrant alias before commit", previous_result)
+	}
+	previous_target := to_string(dict_get_or(previous_result, "target", ""))
+	actions := []
+	if previous_target != "" {
+		actions = push(actions, {"delete_alias": {"alias_name": alias_name}})
+	}
+	actions = push(actions, {"create_alias": {"collection_name": generation, "alias_name": alias_name}})
+	write_json_file(alias_payload_path, {"actions": actions})
+	_ = execute_status("chmod 600 " + shell_quote(alias_payload_path), {"timeout_ms": 5000})
+	alias_response := qdrant_request(cfg, header_path, "POST", base_url + "/collections/aliases", alias_payload_path)
+
+	remove_file_if_exists(meta_payload_path)
+	remove_file_if_exists(points_payload_path)
+	remove_file_if_exists(count_payload_path)
+	remove_file_if_exists(alias_payload_path)
+	remove_file_if_exists(header_path)
+	if dict_get_or(alias_response, "ok", false) == false {
+		return qdrant_fail_staged(cfg, journal, "qdrant_alias_commit_failed", "Failed to atomically switch the active Qdrant alias", alias_response)
+	}
+
+	journal["phase"] := "alias_committed"
+	journal["previous_collection"] := previous_target
+	journal["committed_at_unix_ms"] := current_timestamp()
+	journal["updated_at_unix_ms"] := current_timestamp()
+	journal_write = qdrant_write_journal(cfg, journal)
+	if dict_get_or(journal_write, "ok", false) == false {
+		return journal_write
+	}
+	return {
+		"ok": true,
+		"synced": true,
+		"collection": collection,
+		"alias": alias_name,
+		"generation": generation,
+		"previous_collection": previous_target,
+		"points_synced": len(points),
+		"reason": "staged_alias_committed"
+	}
+}
+
+func qdrant_sync_index(cfg, index) {
+	if qdrant_sync_mode(cfg) == "staged_alias" {
+		return qdrant_sync_index_staged(cfg, index)
+	}
+	return qdrant_sync_index_legacy(cfg, index)
+}
+
 func qdrant_load(cfg) {
 	collection := qdrant_collection_name(cfg)
 	path := qdrant_mirror_path(cfg)
@@ -334,6 +628,22 @@ func qdrant_load(cfg) {
 	meta["backend"] := "qdrant_http"
 	meta["qdrant_collection"] := collection
 	meta["qdrant_sync_enabled"] := qdrant_sync_enabled(cfg)
+	if qdrant_sync_mode(cfg) == "staged_alias" {
+		meta["qdrant_alias"] := qdrant_alias_name(cfg)
+		journal := read_json_file_or(qdrant_journal_path(cfg), {})
+		phase := to_string(dict_get_or(journal, "phase", ""))
+		if phase != "" {
+			meta["qdrant_journal_phase"] := phase
+			meta["qdrant_generation"] := dict_get_or(journal, "candidate_collection", "")
+		}
+		if phase == "alias_committed" {
+			meta["load_error"] := {
+				"code": "qdrant_recovery_required",
+				"message": "The remote alias committed but the local mirror did not; retry the interrupted save or perform operator recovery",
+				"details": {"journal_path": qdrant_journal_path(cfg), "candidate_collection": dict_get_or(journal, "candidate_collection", "")}
+			}
+		}
+	}
 	loaded["meta"] := meta
 	return loaded
 }
@@ -357,6 +667,11 @@ func qdrant_save(cfg, index) {
 		meta["qdrant_last_sync_ok"] := true
 		meta["qdrant_last_sync_reason"] := dict_get_or(sync_result, "reason", "synced")
 		meta["qdrant_points_synced"] := dict_get_or(sync_result, "points_synced", 0)
+		if qdrant_sync_mode(cfg) == "staged_alias" {
+			meta["qdrant_alias"] := dict_get_or(sync_result, "alias", qdrant_alias_name(cfg))
+			meta["qdrant_generation"] := dict_get_or(sync_result, "generation", "")
+			meta["qdrant_previous_generation"] := dict_get_or(sync_result, "previous_collection", "")
+		}
 	} else {
 		meta["qdrant_last_sync_ok"] := false
 		error_payload := dict_get_or(sync_result, "error", {})
@@ -370,6 +685,19 @@ func qdrant_save(cfg, index) {
 	saved := save_index_with_config(path, index, cfg)
 	if saved == false {
 		return false
+	}
+	if qdrant_sync_mode(cfg) == "staged_alias" && dict_get_or(sync_result, "ok", false) == true {
+		journal := read_json_file_or(qdrant_journal_path(cfg), {})
+		if type(journal) == "dict" && dict_get_or(journal, "candidate_collection", "") == dict_get_or(sync_result, "generation", "") {
+			journal["phase"] := "mirror_committed"
+			journal["mirror_path"] := path
+			journal["mirror_committed_at_unix_ms"] := current_timestamp()
+			journal["updated_at_unix_ms"] := current_timestamp()
+			journal_write := qdrant_write_journal(cfg, journal)
+			if dict_get_or(journal_write, "ok", false) == false {
+				return false
+			}
+		}
 	}
 
 	return true

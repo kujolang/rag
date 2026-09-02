@@ -1,0 +1,63 @@
+from src.tests_helpers import assert_true
+
+func expect(condition, label) {
+	if to_bool(condition) == false {
+		print("test_qdrant_staged_alias failed: " + label)
+		exit(1)
+	}
+}
+
+kujo_bin := env_or("KUJO_BIN", "kujo")
+suffix := to_string(current_timestamp())
+fake_bin_dir := "/tmp/kujo-rag-staged-fake-curl-" + suffix
+fake_curl := fake_bin_dir + "/curl"
+args_log := "/tmp/kujo-rag-staged-curl-args-" + suffix + ".log"
+state_file := "/tmp/kujo-rag-staged-count-" + suffix
+
+create_dir(fake_bin_dir)
+script := "#!/bin/sh\nout=''\nmethod=''\nurl=''\npayload=''\nwhile [ $# -gt 0 ]; do\n  case \"$1\" in\n    --output) out=$2; shift 2 ;;\n    -X) method=$2; shift 2 ;;\n    --data-binary) payload=$2; shift 2 ;;\n    http://*|https://*) url=$1; shift ;;\n    *) shift ;;\n  esac\ndone\nprintf '%s %s\\n' \"$method\" \"$url\" >> \"$FAKE_CURL_LOG\"\ncase \"$payload\" in\n  @*) payload_path=$(printf '%s' \"$payload\" | cut -c2-); if [ -f \"$payload_path\" ]; then printf 'PAYLOAD %s\\n' \"$(cat \"$payload_path\")\" >> \"$FAKE_CURL_LOG\"; fi ;;\nesac\nif [ -n \"$FAKE_QDRANT_FAIL_MATCH\" ] && printf '%s %s' \"$method\" \"$url\" | grep -q \"$FAKE_QDRANT_FAIL_MATCH\"; then\n  printf '{\"status\":\"error\"}' > \"$out\"\n  printf '500'\n  exit 22\nfi\ncase \"$url\" in\n  */aliases/*) printf '{\"result\":{\"aliases\":[{\"alias_name\":\"staged_security_probe_active\",\"collection_name\":\"prior_generation\"}]}}' > \"$out\" ;;\n  */points/count) count=0; [ -f \"$FAKE_QDRANT_STATE_FILE\" ] && count=$(cat \"$FAKE_QDRANT_STATE_FILE\"); printf '{\"result\":{\"count\":%s}}' \"$count\" > \"$out\" ;;\n  */points?wait=true) printf '1' > \"$FAKE_QDRANT_STATE_FILE\"; printf '{\"status\":\"ok\"}' > \"$out\" ;;\n  */collections/*) printf '0' > \"$FAKE_QDRANT_STATE_FILE\"; printf '{\"status\":\"ok\"}' > \"$out\" ;;\n  */collections/aliases) printf '{\"status\":\"ok\"}' > \"$out\" ;;\n  *) printf '{\"status\":\"ok\"}' > \"$out\" ;;\nesac\nprintf '200'\nexit 0\n"
+write_file(fake_curl, script)
+chmod_result := execute_status("chmod 700 " + fake_curl, {"timeout_ms": 5000})
+expect(chmod_result.success == true, "fake curl should be executable")
+
+func run_case(case_name, fail_match) {
+	cmd := "PATH=" + fake_bin_dir + ":$PATH FAKE_CURL_LOG=" + args_log + " FAKE_QDRANT_STATE_FILE=" + state_file
+	if fail_match != "" {
+		cmd = cmd + " FAKE_QDRANT_FAIL_MATCH=" + fail_match
+	}
+	cmd = cmd + " QDRANT_STAGED_CASE=" + case_name + " KUJO_BIN=" + kujo_bin + " " + kujo_bin + " run tests/fixtures/qdrant_staged_alias_probe.kujo --interpreter"
+	result := execute_status(cmd, {"timeout_ms": 120000})
+	if result.success == false {
+		print(to_string(result.stdout))
+		print(to_string(result.stderr))
+	}
+	expect(result.success == true, case_name + " staged-alias probe should pass")
+}
+
+run_case("success", "")
+run_case("empty", "")
+run_case("failure", "points?wait=true")
+
+args_text := read_file(args_log)
+expect(to_bool(contains(args_text, "staged-process-secret-marker")) == false, "API key must not appear in process arguments")
+expect(to_bool(contains(args_text, "-X DELETE")) == false, "staged mode must not delete the active collection")
+expect(to_bool(contains(args_text, "/points/count")) == true, "candidate point count must be verified")
+expect(to_bool(contains(args_text, "/collections/aliases")) == true, "visibility must change through the alias API")
+expect(to_bool(contains(args_text, "delete_alias")) == true, "existing alias replacement must be part of the atomic action payload")
+expect(to_bool(contains(args_text, "create_alias")) == true, "candidate alias creation must be part of the atomic action payload")
+
+for case_name in ["success", "empty", "failure"] {
+	for path in ["./results/test_qdrant_staged_alias_" + case_name + ".json", "./results/test_qdrant_staged_alias_" + case_name + ".json.journal.json"] {
+		if file_exists(path) {
+			delete_file(path)
+		}
+	}
+}
+for path in [args_log, state_file] {
+	if file_exists(path) {
+		delete_file(path)
+	}
+}
+_ = execute_status("rm -f " + fake_curl + " && rmdir " + fake_bin_dir, {"timeout_ms": 5000})
+
+print("test_qdrant_staged_alias: ok")
