@@ -328,10 +328,10 @@ func qdrant_sync_index_legacy(cfg, index) {
 
 func qdrant_sync_mode(cfg) {
 	mode := to_lower(trim(to_string(dict_get_or(cfg, "vector_backend_qdrant_sync_mode", "legacy_replace"))))
-	if mode == "staged_alias" {
+	if mode == "staged_alias" || mode == "legacy_replace" {
 		return mode
 	}
-	return "legacy_replace"
+	return "invalid"
 }
 
 func qdrant_alias_name(cfg) {
@@ -646,6 +646,9 @@ func qdrant_sync_index_staged(cfg, index) {
 func qdrant_sync_index(cfg, index) {
 	if qdrant_sync_mode(cfg) == "staged_alias" {
 		return qdrant_sync_index_staged(cfg, index)
+	}
+	if qdrant_sync_mode(cfg) != "legacy_replace" {
+		return {"ok": false, "error": {"code": "invalid_qdrant_sync_mode", "message": "Qdrant synchronization refused an unknown sync mode"}}
 	}
 	return qdrant_sync_index_legacy(cfg, index)
 }

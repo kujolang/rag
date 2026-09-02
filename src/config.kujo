@@ -547,10 +547,6 @@ export load_config := func(overrides) {
 	if cfg["vector_backend"] != "local_json" && cfg["vector_backend"] != "memory" && cfg["vector_backend"] != "qdrant_http" {
 		cfg["vector_backend"] = "local_json"
 	}
-	if cfg["vector_backend_qdrant_sync_mode"] != "legacy_replace" && cfg["vector_backend_qdrant_sync_mode"] != "staged_alias" {
-		cfg["vector_backend_qdrant_sync_mode"] = "legacy_replace"
-	}
-
 	if cfg["api_auth_provider"] != "none" && cfg["api_auth_provider"] != "bearer" && cfg["api_auth_provider"] != "jwt_proxy" {
 		cfg["api_auth_provider"] = "bearer"
 	}

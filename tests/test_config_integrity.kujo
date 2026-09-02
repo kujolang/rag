@@ -164,4 +164,12 @@ strict_qdrant_valid := load_config({
 strict_qdrant_valid_diag := validate_config(strict_qdrant_valid)
 assert_true(to_bool(dict_get_or(strict_qdrant_valid_diag, "ok", false) == true))
 
+invalid_qdrant_mode_cfg := load_config({
+	"vector_backend": "qdrant_http",
+	"vector_backend_qdrant_sync_mode": "staged_alis"
+})
+invalid_qdrant_mode_diag := validate_config(invalid_qdrant_mode_cfg)
+assert_true(to_bool(dict_get_or(invalid_qdrant_mode_diag, "ok", true) == false))
+assert_true(to_bool(has_error_code(invalid_qdrant_mode_diag, "invalid_qdrant_sync_mode") == true))
+
 print("test_config_integrity: ok")
