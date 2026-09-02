@@ -1,0 +1,9 @@
+flowchart LR
+  I[Candidate local index] --> D[Delete active collection]
+  D --> C[Create collection]
+  C --> U[Upsert points]
+  U --> L[Persist local mirror]
+  X[Network or process failure] --> D
+  X --> C
+  X --> U
+

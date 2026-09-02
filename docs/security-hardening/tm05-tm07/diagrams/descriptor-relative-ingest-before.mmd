@@ -1,0 +1,7 @@
+flowchart LR
+  U[Untrusted ingest path] --> R[RAG lexical and canonical checks]
+  R --> P[Path string]
+  P --> O[Kujo read_file opens by path]
+  A[Local attacker can rename or replace components] --> P
+  O --> F[Filesystem object]
+

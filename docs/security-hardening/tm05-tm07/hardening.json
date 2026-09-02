@@ -1,0 +1,226 @@
+{
+  "documentType": "codex-security.hardening-analysis",
+  "schemaVersion": "1.0",
+  "analysisId": "hardening_20260902_rag_tm05_tm07",
+  "sourceEvidence": {
+    "kind": "document_collection",
+    "label": "RAG TM-05/TM-07 threat-model and source evidence",
+    "collectionSha256": "1ac17b7674f2a42a0da9ae654838ec8503543eaf8f9630f7e1348c1ba3ad0032",
+    "artifactCount": 7,
+    "targetRevisions": {
+      "rag": "77e6174",
+      "kujo": "2a5612c"
+    },
+    "sourceDrift": "none"
+  },
+  "assessment": {
+    "outcome": "opportunities_identified",
+    "summary": "Two owned-boundary changes can remove the remaining filesystem check/open race and destructive Qdrant synchronization window."
+  },
+  "constraints": {
+    "profile": "balanced",
+    "changeHorizons": ["incremental", "medium_term"],
+    "nonNegotiables": [
+      "No platform-specific weak fallback",
+      "Preserve existing public RAG HTTP contracts",
+      "Keep file and journal I/O bounded",
+      "Preserve current tactical protections during migration"
+    ],
+    "assumptions": ["No measured latency, memory, or Qdrant storage budget was supplied."]
+  },
+  "opportunities": [
+    {
+      "opportunityId": "descriptor-relative-ingest",
+      "title": "Own ingest containment at the file-open boundary",
+      "summary": "Add a Kujo descriptor-relative no-follow read and migrate RAG ingest callers.",
+      "diagnosis": "RAG containment checks and Kujo file opening are separate operations over a mutable pathname.",
+      "evidence": [
+        {
+          "claimType": "observed",
+          "sourceKind": "threat_model",
+          "evidenceId": "E-TM",
+          "path": "docs/security-reviews/TM-2026-08-RAG-draft.md",
+          "claim": "TM-05 records repeated path checks and a remaining check/open race."
+        },
+        {
+          "claimType": "observed",
+          "sourceKind": "source",
+          "evidenceId": "E-KUJO-FS",
+          "path": "src/interpreter/native_functions/filesystem.rs",
+          "claim": "Kujo bounds generic reads but does not expose a descriptor-relative no-follow read."
+        },
+        {
+          "claimType": "inferred",
+          "sourceKind": "source",
+          "evidenceId": "E-KUJO-FS",
+          "path": "src/interpreter/native_functions/filesystem.rs",
+          "claim": "A mutable component can be substituted between caller validation and generic path opening."
+        }
+      ],
+      "desiredInvariants": [
+        "The root and every traversed component are pinned by handles before the final object is read.",
+        "Symlink, reparse, absolute, parent, special-file, and oversized targets fail closed.",
+        "Unsupported platforms never fall back to check-then-open semantics."
+      ],
+      "proposalPath": "proposals/descriptor-relative-ingest.md",
+      "options": [
+        {
+          "optionId": "local-guards",
+          "title": "Repeated local guards",
+          "kind": "baseline",
+          "summary": "Retain generic reads and repeat containment checks immediately before opening.",
+          "diagramPaths": {
+            "before": "diagrams/descriptor-relative-ingest-before.mmd",
+            "after": "diagrams/descriptor-relative-ingest-local-guards-after.mmd"
+          },
+          "evidenceCoverage": [
+            {
+              "evidenceId": "E-TM",
+              "effect": "mitigates",
+              "tacticalFixRequired": true,
+              "rationale": "Additional checks narrow timing but do not bind them to the open."
+            },
+            {
+              "evidenceId": "E-KUJO-FS",
+              "effect": "unaffected",
+              "tacticalFixRequired": true,
+              "rationale": "The generic runtime boundary remains unchanged."
+            }
+          ],
+          "tradeoffs": [
+            {"dimension":"security","direction":"improves","confidence":"medium","basis":"source-derived","assessment":"More checks reject more static substitutions, but the race remains.","validationPlan":"Run rename and symlink stress against every ingest read."},
+            {"dimension":"performance","direction":"regresses","confidence":"low","basis":"source-derived","assessment":"Each added metadata check adds filesystem calls.","validationPlan":"Benchmark shallow and deep ingest paths."},
+            {"dimension":"memory","direction":"neutral","confidence":"high","basis":"source-derived","assessment":"Only bounded path and metadata values are added.","validationPlan":"Compare peak RSS on a large file inventory."},
+            {"dimension":"reliability","direction":"neutral","confidence":"medium","basis":"source-derived","assessment":"Failure behavior stays familiar, while races remain nondeterministic.","validationPlan":"Repeat concurrent replacement tests and classify errors."},
+            {"dimension":"operability","direction":"neutral","confidence":"medium","basis":"hypothetical","assessment":"No new component is introduced.","validationPlan":"Confirm existing path rejection telemetry is sufficient."},
+            {"dimension":"migration","direction":"neutral","confidence":"high","basis":"source-derived","assessment":"No public API changes are needed.","validationPlan":"Run current ingest compatibility coverage."}
+          ],
+          "residualRisks": ["Check/open race remains."],
+          "implementationReadiness": {
+            "affectedComponents": ["RAG ingest callers"],
+            "workPackages": ["Repeat pre-open checks and retain regression coverage."],
+            "acceptanceCriteria": ["Static traversal and symlink inputs are rejected."],
+            "migrationNotes": [],
+            "rollback": "Revert the added pre-open checks."
+          }
+        },
+        {
+          "optionId": "capability-read",
+          "title": "Descriptor-relative capability read",
+          "kind": "structural",
+          "summary": "Move containment and opening into one Kujo-owned operation.",
+          "diagramPaths": {
+            "before": "diagrams/descriptor-relative-ingest-before.mmd",
+            "after": "diagrams/descriptor-relative-ingest-capability-read-after.mmd"
+          },
+          "evidenceCoverage": [
+            {"evidenceId":"E-TM","effect":"addresses","tacticalFixRequired":true,"rationale":"The owned operation removes the pathname check/open race after caller migration."},
+            {"evidenceId":"E-KUJO-FS","effect":"addresses","tacticalFixRequired":false,"rationale":"Kujo gains the missing safe boundary as an additive API."}
+          ],
+          "tradeoffs": [
+            {"dimension":"security","direction":"improves","confidence":"high","basis":"source-derived","assessment":"Handle-relative no-follow traversal binds proof to effect.","validationPlan":"Exercise component substitution and reparse/symlink PoCs on every supported OS."},
+            {"dimension":"performance","direction":"regresses","confidence":"low","basis":"hypothetical","assessment":"Traversal opens each component, adding system calls off the query path.","validationPlan":"Benchmark 1-, 5-, and 20-component paths at representative file sizes."},
+            {"dimension":"memory","direction":"neutral","confidence":"medium","basis":"source-derived","assessment":"Handles and read buffers remain bounded.","validationPlan":"Record peak handles and RSS during maximum-depth reads."},
+            {"dimension":"reliability","direction":"improves","confidence":"medium","basis":"source-derived","assessment":"Unsafe substitutions become deterministic errors.","validationPlan":"Run concurrent rename stress and descriptor-leak tests."},
+            {"dimension":"operability","direction":"regresses","confidence":"medium","basis":"hypothetical","assessment":"New rejection and unsupported-platform codes require telemetry.","validationPlan":"Verify logs and alerts distinguish policy rejection from I/O failure."},
+            {"dimension":"migration","direction":"regresses","confidence":"medium","basis":"source-derived","assessment":"Kujo platform work and caller migration are required, though the API is additive.","validationPlan":"Canary one parser and run full compatibility suites."}
+          ],
+          "residualRisks": ["In-place mutation of an already-open regular file is outside the contract."],
+          "implementationReadiness": {
+            "affectedComponents": ["Kujo filesystem runtime", "RAG ingest and parsers"],
+            "workPackages": ["Freeze API", "Implement platforms", "Add conformance", "Migrate RAG"],
+            "acceptanceCriteria": ["No untrusted component is pathname-resolved after containment proof.", "No weak platform fallback exists."],
+            "migrationNotes": ["Ship preview before stable promotion."],
+            "rollback": "Switch RAG back to tactical guards while retaining the additive API."
+          }
+        }
+      ],
+      "recommendedOptionId": "capability-read",
+      "recommendation": "Use the Kujo-owned capability API and retain local checks during migration."
+    },
+    {
+      "opportunityId": "qdrant-recoverable-commit",
+      "title": "Make Qdrant synchronization a recoverable commit",
+      "summary": "Stage a generation, verify it, atomically switch an alias, then reconcile the local mirror.",
+      "diagnosis": "The current remote collection is deleted before the replacement is verified and before local persistence commits.",
+      "evidence": [
+        {"claimType":"observed","sourceKind":"source","evidenceId":"E-QSRC","path":"src/vector_backend.kujo","claim":"Synchronization deletes the active collection before create and upsert, and local persistence follows remote sync."},
+        {"claimType":"observed","sourceKind":"poc","evidenceId":"E-QTEST","path":"tests/test_qdrant_security.kujo","claim":"Failure coverage verifies the local mirror is preserved but does not model remote preservation."},
+        {"claimType":"inferred","sourceKind":"threat_model","evidenceId":"E-TM","path":"docs/security-reviews/TM-2026-08-RAG-draft.md","claim":"A crash or remote failure can leave the queryable remote state empty or divergent despite a false save result."}
+      ],
+      "desiredInvariants": [
+        "The active remote generation remains readable until a complete candidate is verified.",
+        "One atomic alias operation selects the visible generation.",
+        "A durable bounded journal makes every phase idempotently recoverable.",
+        "Successful saves prove matching local and remote generation metadata."
+      ],
+      "proposalPath": "proposals/qdrant-recoverable-commit.md",
+      "options": [
+        {
+          "optionId": "destructive-with-alerts",
+          "title": "Destructive replacement with stronger alerts",
+          "kind": "incremental",
+          "summary": "Persist retry state and alert on divergence while retaining delete-first replacement.",
+          "diagramPaths": {"before":"diagrams/qdrant-recoverable-commit-before.mmd","after":"diagrams/qdrant-destructive-replacement-after.mmd"},
+          "evidenceCoverage": [
+            {"evidenceId":"E-QSRC","effect":"mitigates","tacticalFixRequired":true,"rationale":"Retries improve recovery but active state is still deleted first."},
+            {"evidenceId":"E-QTEST","effect":"mitigates","tacticalFixRequired":true,"rationale":"Coverage can assert alerts and retry state, not atomicity."},
+            {"evidenceId":"E-TM","effect":"mitigates","tacticalFixRequired":true,"rationale":"Operational recovery improves while transaction residual remains."}
+          ],
+          "tradeoffs": [
+            {"dimension":"security","direction":"improves","confidence":"medium","basis":"source-derived","assessment":"Durable retry reduces silent divergence but does not protect active data.","validationPlan":"Inject failures after delete, create, and upsert."},
+            {"dimension":"performance","direction":"regresses","confidence":"low","basis":"hypothetical","assessment":"Candidate persistence adds one bounded local write.","validationPlan":"Measure ingest time and disk bytes."},
+            {"dimension":"memory","direction":"neutral","confidence":"medium","basis":"source-derived","assessment":"Retry state can remain on disk and bounded.","validationPlan":"Measure peak RSS during maximum index retry."},
+            {"dimension":"reliability","direction":"improves","confidence":"medium","basis":"source-derived","assessment":"Restart can retry, but remote availability still has a destructive window.","validationPlan":"Crash after each phase and measure recovery."},
+            {"dimension":"operability","direction":"regresses","confidence":"medium","basis":"hypothetical","assessment":"Alerts and retry ownership are required.","validationPlan":"Exercise alert and runbook paths."},
+            {"dimension":"migration","direction":"neutral","confidence":"high","basis":"source-derived","assessment":"Collection naming and query behavior stay compatible.","validationPlan":"Run existing backend and privacy tests."}
+          ],
+          "residualRisks": ["Active remote collection can be absent or incomplete until retry succeeds."],
+          "implementationReadiness": {
+            "affectedComponents": ["RAG Qdrant save path", "operations"],
+            "workPackages": ["Persist candidate", "Add retry and divergence alerts"],
+            "acceptanceCriteria": ["Failed sync produces durable retry state and an actionable alert."],
+            "migrationNotes": [],
+            "rollback": "Disable retry worker and retain the candidate for manual recovery."
+          }
+        },
+        {
+          "optionId": "staged-alias",
+          "title": "Staged generation and atomic alias commit",
+          "kind": "structural",
+          "summary": "Verify an isolated generation before atomically making it visible.",
+          "diagramPaths": {"before":"diagrams/qdrant-recoverable-commit-before.mmd","after":"diagrams/qdrant-staged-alias-after.mmd"},
+          "evidenceCoverage": [
+            {"evidenceId":"E-QSRC","effect":"addresses","tacticalFixRequired":true,"rationale":"The active collection is no longer destructively replaced before verification."},
+            {"evidenceId":"E-QTEST","effect":"addresses","tacticalFixRequired":true,"rationale":"New remote-state and recovery assertions close the current test gap."},
+            {"evidenceId":"E-TM","effect":"addresses","tacticalFixRequired":true,"rationale":"The protocol defines a commit point and restart recovery for strict Qdrant mode."}
+          ],
+          "tradeoffs": [
+            {"dimension":"security","direction":"improves","confidence":"high","basis":"source-derived","assessment":"Candidate failure cannot destroy the active generation before commit.","validationPlan":"Fault-inject every state edge and verify the active alias target."},
+            {"dimension":"performance","direction":"regresses","confidence":"low","basis":"hypothetical","assessment":"Ingest adds verification; steady query alias routing should be neutral.","validationPlan":"Benchmark ingest and query latency against a pinned live Qdrant."},
+            {"dimension":"memory","direction":"neutral","confidence":"medium","basis":"source-derived","assessment":"Local buffers remain bounded, while remote temporary storage increases.","validationPlan":"Measure RSS and staged-generation storage."},
+            {"dimension":"reliability","direction":"improves","confidence":"high","basis":"source-derived","assessment":"A durable state machine supports idempotent recovery and alias rollback.","validationPlan":"Restart after every phase and repeat recovery twice."},
+            {"dimension":"operability","direction":"regresses","confidence":"medium","basis":"hypothetical","assessment":"Generation inventory, journals, GC, and alias telemetry are required.","validationPlan":"Run operator recovery and GC drills."},
+            {"dimension":"migration","direction":"regresses","confidence":"medium","basis":"source-derived","assessment":"Existing collections require alias bootstrap and new configuration.","validationPlan":"Rehearse bootstrap and rollback on a production-shaped staging copy."}
+          ],
+          "residualRisks": ["Qdrant control-plane compromise and operator deletion remain outside the application transaction."],
+          "implementationReadiness": {
+            "affectedComponents": ["RAG Qdrant adapter", "configuration", "startup recovery", "privacy and retention", "operations"],
+            "workPackages": ["Freeze journal", "Stage and verify", "Alias commit", "Reconcile local", "Recover and GC"],
+            "acceptanceCriteria": ["No pre-commit failure changes the active alias target.", "Restart recovery is idempotent.", "Successful commits match local and remote metadata."],
+            "migrationNotes": ["Bootstrap an alias to the existing collection and retain legacy mode outside strict configuration for one release."],
+            "rollback": "Atomically switch the alias to the prior retained generation and reconcile the local mirror."
+          }
+        }
+      ],
+      "recommendedOptionId": "staged-alias",
+      "recommendation": "Require staged alias commits in strict mode after a compatibility release and live-Qdrant validation."
+    }
+  ],
+  "openQuestions": [
+    "Which Windows handle-relative primitive and minimum version will Kujo support?",
+    "Which Qdrant versions and alias operations form the supported contract?",
+    "How is vector dimension supplied for a first empty generation?",
+    "What retention and storage ceilings govern old-generation garbage collection?"
+  ]
+}

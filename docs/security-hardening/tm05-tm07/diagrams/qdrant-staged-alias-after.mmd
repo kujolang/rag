@@ -1,0 +1,12 @@
+flowchart LR
+  I[Candidate local index] --> J[Durable prepare journal]
+  J --> S[Create staged generation]
+  S --> U[Upsert and verify digest or count]
+  U --> A[Atomic alias switch]
+  A --> L[Atomic local mirror commit]
+  L --> G[Garbage-collect old generation]
+  X[Failure or restart] --> REC[Idempotent journal recovery]
+  REC --> J
+  REC --> A
+  REC --> L
+

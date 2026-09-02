@@ -1,0 +1,8 @@
+flowchart LR
+  U[Untrusted relative path] --> K[Kujo read_file_beneath]
+  ROOT[Trusted root handle] --> K
+  K --> V[Descriptor-relative no-follow traversal]
+  A[Local attacker renames or replaces components] --> V
+  V -->|reject symlink, reparse, escape, or non-regular target| E[Deterministic error]
+  V -->|bounded regular file| F[Opened filesystem object]
+
