@@ -115,13 +115,16 @@ jobs:
           set -euo pipefail
           kujo run main.kujo --interpreter serve \
             > ./results/cloudflare-staging/rag.log 2>&1 &
-          echo "RAG_PID=$!" >> "$GITHUB_ENV"
+          RAG_PID=$!
+          echo "RAG_PID=$RAG_PID" >> "$GITHUB_ENV"
           node deploy/cloudflare/access_proxy.mjs \
             > ./results/cloudflare-staging/access-proxy.log 2>&1 &
-          echo "ACCESS_PROXY_PID=$!" >> "$GITHUB_ENV"
+          ACCESS_PROXY_PID=$!
+          echo "ACCESS_PROXY_PID=$ACCESS_PROXY_PID" >> "$GITHUB_ENV"
           cloudflared tunnel --no-autoupdate run --token "$CLOUDFLARE_TUNNEL_TOKEN" \
             > ./results/cloudflare-staging/cloudflared.log 2>&1 &
-          echo "CLOUDFLARED_PID=$!" >> "$GITHUB_ENV"
+          CLOUDFLARED_PID=$!
+          echo "CLOUDFLARED_PID=$CLOUDFLARED_PID" >> "$GITHUB_ENV"
 
           for attempt in $(seq 1 40); do
             if curl --fail --silent --show-error http://127.0.0.1:8787/health > ./results/cloudflare-staging/origin-health.json; then
