@@ -227,10 +227,17 @@ export function createAccessProxyServer(config) {
         redirect: "manual",
         signal: AbortSignal.timeout(config.upstreamTimeoutMs),
       });
-      // Buffer and enforce the response limit before committing headers. If
-      // the upstream stream fails or exceeds the bound, sendError can still
-      // return a deterministic JSON error instead of resetting the client.
-      const responseBody = await readBoundedResponse(upstream, config.maxResponseBytes);
+      // Kujo error responses are authoritative through their status code. Do
+      // not wait on an error body whose connection may remain open on older
+      // runtimes, and do not expose internal diagnostics at the public edge.
+      // Successful response bodies remain bounded and fully validated.
+      let responseBody;
+      if (upstream.status >= 400) {
+        upstream.body?.cancel().catch(() => {});
+        responseBody = Buffer.from(JSON.stringify({ ok: false, error: "upstream_rejected" }));
+      } else {
+        responseBody = await readBoundedResponse(upstream, config.maxResponseBytes);
+      }
       const responseHeaders = {
         "content-type": upstream.headers.get("content-type") || "application/octet-stream",
         "cache-control": "no-store",
