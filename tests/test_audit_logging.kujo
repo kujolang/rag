@@ -43,6 +43,16 @@ assert_true(to_bool(dict_get_or(verified, "events", 0) == 2))
 startup_verified := validate_audit_startup(cfg)
 assert_true(to_bool(dict_get_or(startup_verified, "ok", false) == true))
 
+unsupported_cfg := load_config({
+	"api_audit_enabled": true,
+	"api_audit_path": audit_path,
+	"api_audit_external_sink_mode": "unsupported_sink",
+	"api_audit_integrity_key": "test-only-audit-integrity-key"
+})
+unsupported_append := append_audit_event(unsupported_cfg, "auth_decision", "allow", {})
+assert_true(to_bool(dict_get_or(unsupported_append, "ok", true) == false))
+assert_true(to_bool(dict_get_or(dict_get_or(unsupported_append, "error", {}), "code", "") == "invalid_audit_sink_mode"))
+
 raw := read_file(audit_path)
 lines := split(raw, "\n")
 if len(lines) >= 1 && trim(lines[0]) != "" {

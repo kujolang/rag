@@ -24,9 +24,6 @@ func sink_mode(cfg) {
 	if mode == "" {
 		return "append_file"
 	}
-	if mode != "append_file" {
-		return "append_file"
-	}
 	return mode
 }
 
