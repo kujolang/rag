@@ -142,6 +142,22 @@ export function resolveIdentity(claims, identityMap) {
   return { role: entry.role, namespace: entry.namespace };
 }
 
+export function authorizeIdentityRoute(method, pathname, role) {
+  const publicPaths = new Set(["/", "/health", "/live", "/ready", "/startup"]);
+  let action = "admin";
+  if (publicPaths.has(pathname) && method === "GET") action = "query";
+  if (pathname === "/query" && method === "POST") action = "query";
+  if (pathname === "/ingest" || pathname.startsWith("/ingest/jobs")) action = "ingest";
+  const allowed = {
+    admin: new Set(["admin", "ingest", "query"]),
+    writer: new Set(["ingest", "query"]),
+    reader: new Set(["query"]),
+  };
+  if (!allowed[role]?.has(action)) {
+    throw new ProxyError(403, "proxy_rbac_forbidden", "Identity role is not authorized for this route.");
+  }
+}
+
 export function buildUpstreamHeaders(incomingHeaders, claims, identity, proxySecret) {
   const headers = new Headers();
   for (const [name, value] of Object.entries(incomingHeaders)) {
@@ -214,12 +230,13 @@ export function createAccessProxyServer(config) {
       const token = Array.isArray(tokenHeader) ? tokenHeader[0] : tokenHeader;
       const claims = await verifyAccessJwt(token, config);
       const identity = resolveIdentity(claims, config.identityMap);
-      const body = await readBoundedBody(request, config.maxBodyBytes);
-      const headers = buildUpstreamHeaders(request.headers, claims, identity, config.proxySecret);
       const target = new URL(request.url, config.upstreamUrl);
       if (target.origin !== new URL(config.upstreamUrl).origin) {
         throw new ProxyError(400, "invalid_target", "Proxy target is invalid.");
       }
+      authorizeIdentityRoute(request.method, target.pathname, identity.role);
+      const body = await readBoundedBody(request, config.maxBodyBytes);
+      const headers = buildUpstreamHeaders(request.headers, claims, identity, config.proxySecret);
       const upstream = await config.fetchImpl(target, {
         method: request.method,
         headers,

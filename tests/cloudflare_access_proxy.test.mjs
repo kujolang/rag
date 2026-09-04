@@ -4,6 +4,7 @@ import test from "node:test";
 
 import {
   ProxyError,
+  authorizeIdentityRoute,
   buildUpstreamHeaders,
   resolveIdentity,
   verifyAccessJwt,
@@ -72,6 +73,14 @@ test("uses only explicit identity mappings", () => {
   const mapping = { "tester@example.test": { role: "reader", namespace: "staging" } };
   assert.deepEqual(resolveIdentity(baseClaims, mapping), { role: "reader", namespace: "staging" });
   assert.throws(() => resolveIdentity({ ...baseClaims, email: "unknown@example.test" }, mapping), /no approved Kujo role/);
+});
+
+test("enforces mapped roles at the proxy boundary", () => {
+  assert.doesNotThrow(() => authorizeIdentityRoute("POST", "/query", "reader"));
+  assert.throws(() => authorizeIdentityRoute("GET", "/metrics", "reader"), /not authorized/);
+  assert.doesNotThrow(() => authorizeIdentityRoute("POST", "/ingest", "writer"));
+  assert.throws(() => authorizeIdentityRoute("POST", "/retention/purge", "writer"), /not authorized/);
+  assert.doesNotThrow(() => authorizeIdentityRoute("POST", "/retention/purge", "admin"));
 });
 
 test("strips spoofable identity headers and rebuilds verified values", () => {
