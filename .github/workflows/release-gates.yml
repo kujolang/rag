@@ -5,6 +5,16 @@ on:
   pull_request:
 
 jobs:
+  cloudflare-access-proxy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+
+      - name: Verify Cloudflare Access proxy boundary
+        run: node --test tests/cloudflare_access_proxy.test.mjs
+
   descriptor-relative-ingest:
     name: descriptor-relative-ingest-${{ matrix.os }}
     runs-on: ${{ matrix.os }}
