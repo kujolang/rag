@@ -24,6 +24,11 @@ This guide defines a production deployment path where Kujo RAG runs on a private
 
 ## Nginx Sample
 
+This is a header/TLS skeleton, not a complete authentication deployment. The
+referenced `$verified_jwt_*` variables do not exist in stock Nginx. They must be
+populated only by a module or upstream adapter that has already verified the
+JWT signature and claims. Deploying this block without that verifier is unsafe.
+
 ```nginx
 server {
 	listen 443 ssl http2;
@@ -98,6 +103,9 @@ proxy secret in the platform secret manager, not in the Caddyfile. The Nginx
 sample likewise assumes the `$verified_jwt_*` values and
 `$kujo_proxy_secret` come from trusted authentication/secret modules.
 
+For a production evidence checklist, including a Cloudflare Access + Tunnel
+topology, see `docs/production-security-attestation.md`.
+
 ## Secure Header Baseline
 
 At minimum, enforce these headers at the proxy layer:
@@ -120,6 +128,8 @@ Use this checklist before production promotion:
 - [ ] HSTS and secure headers are present on all API responses.
 - [ ] `curl -I https://<host>/health` shows secure header baseline.
 - [ ] Direct access to backend `:8787` is blocked from public networks.
+- [ ] `scripts/run_production_security_attestation_review.kujo` passes against
+  reviewed, digest-pinned deployment evidence.
 
 ## Operational Notes
 

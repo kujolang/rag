@@ -1,0 +1,19 @@
+from src.tests_helpers import assert_true
+
+threat_model := read_file("./docs/security-reviews/TM-2026-08-RAG-draft.md")
+assert_true(to_bool(contains(threat_model, "Approval Candidate")))
+assert_true(to_bool(contains(threat_model, "Attacker capabilities and goals")))
+assert_true(to_bool(contains(threat_model, "Assumptions, unknowns, and residual risk")))
+assert_true(to_bool(contains(threat_model, "TM-01")))
+assert_true(to_bool(contains(threat_model, "TM-11")))
+assert_true(to_bool(contains(threat_model, "awaiting accountable human review")))
+assert_true(to_bool(contains(threat_model, "run_production_security_attestation_review.kujo")))
+
+production_guide := read_file("./docs/production-security-attestation.md")
+assert_true(to_bool(contains(production_guide, "What can be completed before infrastructure exists")))
+assert_true(to_bool(contains(production_guide, "Required proxy evidence")))
+assert_true(to_bool(contains(production_guide, "Required immutable-audit evidence")))
+assert_true(to_bool(contains(production_guide, "Cloudflare Access -> Cloudflare")))
+assert_true(to_bool(contains(production_guide, "Do not store tokens")))
+
+print("test_security_review_packet: ok")

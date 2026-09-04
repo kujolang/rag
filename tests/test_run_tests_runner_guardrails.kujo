@@ -8,6 +8,8 @@ assert_true(to_bool(contains(runner_source, "\"tests/test_index_persistence.kujo
 assert_true(to_bool(contains(runner_source, "\"tests/test_qdrant_security.kujo\"")))
 assert_true(to_bool(contains(runner_source, "\"tests/test_qdrant_staged_alias.kujo\"")))
 assert_true(to_bool(contains(runner_source, "\"tests/test_runtime_http_security.kujo\"")))
+assert_true(to_bool(contains(runner_source, "\"tests/test_production_security_attestation_review.kujo\"")))
+assert_true(to_bool(contains(runner_source, "\"tests/test_security_review_packet.kujo\"")))
 
 # Ensure invalid runtimes fail fast with a clear, actionable error payload.
 invalid_runtime_cmd := "KUJO_BIN=/usr/bin/false " + project_kujo_bin + " run scripts/run_tests.kujo --interpreter"

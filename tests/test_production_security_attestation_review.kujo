@@ -1,0 +1,89 @@
+from src.common import dict_get_or, read_json_file_or
+from src.tests_helpers import assert_true
+
+kujo_bin := env_or("KUJO_BIN", "/path/to/kujo/target/debug/kujo")
+suffix := to_string(current_timestamp())
+root := "/tmp/kujo_rag_prod_attestation_" + suffix
+evidence_root := root + "/evidence"
+create_dir(root)
+create_dir(evidence_root)
+proxy_evidence_path := evidence_root + "/proxy-negative-tests.txt"
+audit_evidence_path := evidence_root + "/audit-readback.txt"
+write_file(proxy_evidence_path, "forged headers rejected; direct origin blocked\n")
+write_file(audit_evidence_path, "immutable object read back and digest verified\n")
+
+approved_path := root + "/approved.json"
+approved_output := root + "/approved-output.json"
+write_file(approved_path, to_json({
+	"version": "kujo-rag-production-security-attestation-v1",
+	"environment_id": "production-primary",
+	"release": {"repository": "kujolang/rag", "commit": "0123456789abcdef", "kujo_version": "v1.2.3"},
+	"proxy": {
+		"provider": "test-proxy", "public_hostname": "rag.example.test", "origin_private": true,
+		"jwt_signature_verified": true, "jwt_algorithm_allowlist": ["RS256"], "jwt_issuer": "https://issuer.example.test", "jwt_audience": "rag-audience", "jwt_expiry_enforced": true, "jwks_fail_closed": true,
+		"untrusted_identity_headers_stripped": true, "verified_claim_headers_rebuilt": true, "proxy_secret_from_secret_manager": true, "direct_origin_blocked": true, "backend_peer_allowlist_verified": true, "rbac_mapping_verified": true,
+		"evidence": [{"path": proxy_evidence_path, "sha256": sha256_file(proxy_evidence_path)}]
+	},
+	"audit_sink": {
+		"provider": "test-worm", "destination": "audit-prod", "separate_security_boundary": true, "append_only_writer_credentials": true, "delete_admin_separated": true, "immutable_retention_enabled": true, "retention_days": 90, "encryption_at_rest": true, "export_health_monitored": true, "readback_verified": true,
+		"evidence": [{"path": audit_evidence_path, "sha256": sha256_file(audit_evidence_path)}]
+	},
+	"approvals": {"security_reviewer": "Security Reviewer", "operations_reviewer": "Operations Reviewer", "approved_at_unix_ms": current_timestamp(), "status": "approved"}
+}))
+
+approved_cmd := "KUJO_RAG_PRODUCTION_ATTESTATION_PATH=" + approved_path + " KUJO_RAG_PRODUCTION_ATTESTATION_OUTPUT_PATH=" + approved_output + " KUJO_RAG_PRODUCTION_EVIDENCE_ROOT=" + evidence_root + " " + kujo_bin + " run scripts/run_production_security_attestation_review.kujo --interpreter"
+approved_res := execute_status(approved_cmd, {"timeout_ms": 240000})
+assert_true(to_bool(type(approved_res) == "struct"))
+assert_true(to_bool(approved_res.success == true))
+approved_payload := read_json_file_or(approved_output, {})
+assert_true(to_bool(dict_get_or(approved_payload, "ok", false) == true))
+
+tampered_path := root + "/tampered.json"
+tampered_output := root + "/tampered-output.json"
+tampered := read_json_file_or(approved_path, {})
+tampered_proxy := dict_get_or(tampered, "proxy", {})
+tampered_proxy["evidence"] := [{"path": proxy_evidence_path, "sha256": sha256("wrong") }]
+tampered["proxy"] := tampered_proxy
+write_file(tampered_path, to_json(tampered))
+tampered_cmd := "KUJO_RAG_PRODUCTION_ATTESTATION_PATH=" + tampered_path + " KUJO_RAG_PRODUCTION_ATTESTATION_OUTPUT_PATH=" + tampered_output + " KUJO_RAG_PRODUCTION_EVIDENCE_ROOT=" + evidence_root + " " + kujo_bin + " run scripts/run_production_security_attestation_review.kujo --interpreter"
+tampered_res := execute_status(tampered_cmd, {"timeout_ms": 240000})
+assert_true(to_bool(tampered_res.success == false))
+tampered_payload := read_json_file_or(tampered_output, {})
+assert_true(to_bool(dict_get_or(dict_get_or(tampered_payload, "gates", {}), "proxy_evidence", true) == false))
+
+outside_evidence_path := root + "/outside-evidence.txt"
+write_file(outside_evidence_path, "not within the configured evidence root\n")
+outside_path := root + "/outside.json"
+outside_output := root + "/outside-output.json"
+outside := read_json_file_or(approved_path, {})
+outside_proxy := dict_get_or(outside, "proxy", {})
+outside_proxy["evidence"] := [{"path": outside_evidence_path, "sha256": sha256_file(outside_evidence_path)}]
+outside["proxy"] := outside_proxy
+write_file(outside_path, to_json(outside))
+outside_cmd := "KUJO_RAG_PRODUCTION_ATTESTATION_PATH=" + outside_path + " KUJO_RAG_PRODUCTION_ATTESTATION_OUTPUT_PATH=" + outside_output + " KUJO_RAG_PRODUCTION_EVIDENCE_ROOT=" + evidence_root + " " + kujo_bin + " run scripts/run_production_security_attestation_review.kujo --interpreter"
+outside_res := execute_status(outside_cmd, {"timeout_ms": 240000})
+assert_true(to_bool(outside_res.success == false))
+outside_payload := read_json_file_or(outside_output, {})
+assert_true(to_bool(dict_get_or(dict_get_or(outside_payload, "gates", {}), "proxy_evidence", true) == false))
+
+secret_path := root + "/secret.json"
+secret_output := root + "/secret-output.json"
+secret_payload := read_json_file_or(approved_path, {})
+secret_payload["api_token"] := "must-not-be-stored"
+write_file(secret_path, to_json(secret_payload))
+secret_cmd := "KUJO_RAG_PRODUCTION_ATTESTATION_PATH=" + secret_path + " KUJO_RAG_PRODUCTION_ATTESTATION_OUTPUT_PATH=" + secret_output + " KUJO_RAG_PRODUCTION_EVIDENCE_ROOT=" + evidence_root + " " + kujo_bin + " run scripts/run_production_security_attestation_review.kujo --interpreter"
+secret_res := execute_status(secret_cmd, {"timeout_ms": 240000})
+assert_true(to_bool(secret_res.success == false))
+secret_result := read_json_file_or(secret_output, {})
+assert_true(to_bool(dict_get_or(secret_result, "ok", true) == false))
+assert_true(to_bool(dict_get_or(dict_get_or(secret_result, "gates", {}), "secret_material_absent", true) == false))
+
+pending_output := root + "/pending-output.json"
+pending_cmd := "KUJO_RAG_PRODUCTION_ATTESTATION_PATH=./config/production_security_attestation.template.json KUJO_RAG_PRODUCTION_ATTESTATION_OUTPUT_PATH=" + pending_output + " KUJO_RAG_PRODUCTION_EVIDENCE_ROOT=" + evidence_root + " " + kujo_bin + " run scripts/run_production_security_attestation_review.kujo --interpreter"
+pending_res := execute_status(pending_cmd, {"timeout_ms": 240000})
+assert_true(to_bool(pending_res.success == false))
+pending_payload := read_json_file_or(pending_output, {})
+assert_true(to_bool(dict_get_or(pending_payload, "ok", true) == false))
+assert_true(to_bool(len(dict_get_or(pending_payload, "blockers", [])) > 0))
+
+print("test_production_security_attestation_review: ok")

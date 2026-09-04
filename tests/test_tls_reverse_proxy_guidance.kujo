@@ -10,5 +10,7 @@ assert_true(to_bool(contains(content, "X-Forwarded-Proto")))
 assert_true(to_bool(contains(content, "X-Content-Type-Options")))
 assert_true(to_bool(contains(content, "Deployment Checklist (Validation)")))
 assert_true(to_bool(contains(content, "curl -I https://<host>/health")))
+assert_true(to_bool(contains(content, "not a complete authentication deployment")))
+assert_true(to_bool(contains(content, "production-security-attestation.md")))
 
 print("test_tls_reverse_proxy_guidance: ok")

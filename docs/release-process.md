@@ -72,6 +72,10 @@ Current repository version source of truth:
 20. Release readiness scorecard gate passes with weighted cross-domain criteria and explicit signoff:
    - `kujo run scripts/run_release_readiness_scorecard_review.kujo --interpreter`
    - docs: `docs/release-readiness-scorecard.md`
+21. Production security attestation passes for the deployed proxy, RBAC mapping,
+    and independently protected audit sink before production promotion:
+   - `kujo run scripts/run_production_security_attestation_review.kujo --interpreter`
+   - docs: `docs/production-security-attestation.md`
 
 ## Build Versioned Artifacts
 

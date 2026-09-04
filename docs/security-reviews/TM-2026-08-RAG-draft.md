@@ -1,4 +1,4 @@
-# Kujo RAG Threat-Model Review Packet (Draft)
+# Kujo RAG Threat Model and Review Packet (Approval Candidate)
 
 > Preparatory evidence only. This document is not a completed Security Team
 > review, approval, risk acceptance, or replacement for the cadence record in
@@ -6,11 +6,11 @@
 
 ## Review metadata
 
-- Review ID: `TM-2026-08-RAG-DRAFT`
-- Prepared: 2026-09-01
+- Review ID: `TM-2026-09-RAG-CANDIDATE`
+- Prepared: 2026-09-04
 - Repository: `kujolang/rag`
 - Branch: `main`
-- RAG source baseline: `eda2a9c7d1c5e95b7b5a4d6feda5bf054e2a7119`
+- RAG application-source baseline: `fe439f2` on `main`
 - Kujo runtime release: `v1.2.3` / `b1cec6b6c0f22e9015f5a8d3d1afc7e30b6964f7`
 - Required reviewer: Security Team
 - Approval status: awaiting accountable human review
@@ -46,16 +46,40 @@ namespace boundaries, bearer credentials, proxy-derived identity claims,
 encryption keys, Qdrant credentials, privacy exports, deletion receipts, audit
 logs, and the integrity of persisted indexes.
 
+The reviewed entry points are the `ingest`, `query`, `serve`, `demo`, and
+`qdrant-rollback` commands (`main.kujo:30-50`), with configuration validation at
+startup and after serve-time overrides (`main.kujo:146-170`,
+`main.kujo:196-208`). The HTTP API, local ingestion roots, Qdrant endpoint,
+filesystem persistence, command execution used by parsers, and deployment
+proxy are the principal externally influenced surfaces.
+
+## Attacker capabilities and goals
+
+The model assumes an unauthenticated network client can send arbitrary request
+bodies and headers, an authenticated reader may try to escalate role or
+namespace, and a user able to place files beneath an ingest root may race or
+replace path components. It also considers a compromised or misconfigured
+proxy, vector endpoint, CI artifact publisher, and local account with access to
+runtime files. Attackers seek unauthorized document ingestion or disclosure,
+cross-namespace retrieval, credential or key exposure, resource exhaustion,
+persistence corruption, stale remote vectors, and deletion or forgery of audit
+evidence.
+
+The model does not assume the RAG process can safely withstand full control of
+its host, secret manager, proxy administrator, or storage administrator. Those
+are deployment trust anchors that require separation of duties, monitoring,
+and independently retained evidence.
+
 ## Confirmed controls
 
-- `api_host` now controls the socket bind address through
+- `api_host` controls the socket bind address through
   `http_listen(host, port)`; loopback is the default. Coverage is in
   `tests/test_api_bind_contract.kujo` and `tests/test_api_contract.kujo`.
 - Production or strict configuration rejects no-auth operation, missing bearer
   credentials, missing JWT proxy issuer/audience and proxy attestation,
   disabled RBAC/audit/redaction/encryption, fail-open audit or Qdrant behavior,
   privileged fallback roles, default namespace use, and the default index path
-  (`src/config.kujo`).
+  (`src/config.kujo:641-699`, `src/config.kujo:778-861`).
 - The Kujo runtime enforces a bounded pre-buffer request size, request-body read
   deadline, 408/413 responses, and peer socket identity in interpreter and VM
   paths.
@@ -79,7 +103,25 @@ logs, and the integrity of persisted indexes.
   atomic encrypted envelopes with key-bound integrity tags. Strict mode rejects
   plaintext and unsigned downgrade attempts (`src/vector_store.kujo`).
 - Strict audit mode uses a secret-keyed chain, verifies the log/checkpoint at
-  startup and before append, and exits on append or checkpoint failure.
+  startup and before append, rejects unknown sink modes, and exits on append or
+  checkpoint failure (`src/audit_log.kujo:22-28`,
+  `src/audit_log.kujo:94-175`, `src/audit_log.kujo:177-322`).
+
+## Assumptions, unknowns, and residual risk
+
+- The deployed proxy product, JWT verifier, JWKS behavior, claim mapping,
+  backend reachability, and timeout policy are not present in this repository.
+- The deployed audit exporter, object-store policy, retention lock, monitoring,
+  and administrative separation are not present in this repository.
+- Provider attestations and screenshots can become stale; the production gate
+  therefore requires digest-pinned evidence tied to a release and environment.
+- Local keyed audit chaining detects modification or one-sided loss, but cannot
+  prove deletion when an attacker removes both the log and its checkpoint.
+- Cross-system local/Qdrant persistence is not transactional. Monitoring and
+  replay remain required after remote failures.
+- This review used sequential source inspection rather than a delegated second
+  architecture review. The accountable reviewer should challenge boundary and
+  deployment assumptions independently before approval.
 
 ## Threat scenarios requiring review
 
@@ -95,7 +137,7 @@ logs, and the integrity of persisted indexes.
 | TM-08 | Indexes, runtime state, backups, or side artifacts disclose source content or accept plaintext downgrade. | Source-remediated for repository-managed content: encrypted atomic envelopes cover index/privacy/runtime state, use keyed integrity tags, and reject plaintext/unsigned strict-mode downgrade. | Verify filesystem/backup permissions and migrate legacy unsigned envelopes before strict mode. Shared rate state and redacted audit metadata are non-content-bearing by contract. |
 | TM-09 | Oversized, slow, or complete HTTP bodies exhaust resources or wait for the read deadline. | Source-remediated in signed Kujo v1.2.3: interpreter/VM reject declared overflow before reading, stop at declared lengths, retain bounded unknown-length reads and deadlines, and expose peer identity. RAG pins the checksum-verified release and has live dual-mode regressions. | Verify deployed proxy timeouts are no weaker and prohibit pre-v1.2.2 artifacts in production. |
 | TM-10 | A failed/oversized write is reported successful and later reloads empty. | Source-remediated: atomic persistence, read-after-write validation, explicit errors, prior-index preservation, size-range tests, and aggregate-runner inclusion. | Confirm hosted gates run the newly published runtime artifact; an unreadable index must remain a startup/ingest failure. |
-| TM-11 | Audit logs are disabled, tampered with, truncated, or silently lose events. | Partially source-remediated: strict mode requires keyed fail-closed audit; startup and pre-append verification detect content, missing-log, missing-checkpoint, and checkpoint-write failures; trace appends use the checked path. | Assign ownership/rotation and deploy an independently protected immutable sink. An actor able to delete both local files remains outside the local-chain guarantee. |
+| TM-11 | Audit logs are disabled, tampered with, truncated, or silently lose events. | Partially source-remediated: strict mode requires keyed fail-closed audit; startup and pre-append verification detect content, missing-log, missing-checkpoint, and checkpoint-write failures; unknown sink modes fail closed; trace appends use the checked path. | Assign ownership/rotation and deploy an independently protected immutable sink. An actor able to delete both local files remains outside the local-chain guarantee. |
 
 ## Proposed reviewer disposition
 
@@ -131,6 +173,8 @@ KUJO_BIN=/absolute/path/to/kujo \
   /absolute/path/to/kujo run scripts/run_tests.kujo --interpreter
 KUJO_BIN=/absolute/path/to/kujo \
   /absolute/path/to/kujo run scripts/run_threat_model_review_cadence.kujo --interpreter
+KUJO_BIN=/absolute/path/to/kujo \
+  /absolute/path/to/kujo run scripts/run_production_security_attestation_review.kujo --interpreter
 ```
 
 Local evidence at preparation time:
@@ -146,6 +190,9 @@ Local evidence at preparation time:
   warning budget (release-gates run `33643187939`).
 - Cadence validation: all gates pass except `review_not_overdue`; this is the
   expected failure until the accountable review occurs.
+- Production attestation tooling and synthetic positive/negative fixtures pass
+  in interpreter and VM modes. The real attestation remains intentionally red
+  until deployment evidence and named approvals exist.
 
 ## Human review completion record
 
@@ -155,6 +202,8 @@ Complete this section only after the accountable review:
 - [ ] Reviewed commit and deployed runtime version recorded.
 - [ ] TM-01 through TM-11 dispositions recorded.
 - [ ] TM-02 and TM-03 trust decisions backed by deployment or code evidence.
+- [ ] Production attestation passes with digest-pinned proxy and immutable-sink
+  evidence; no secret material is embedded in the attestation.
 - [ ] High-severity gaps have owners and target dates.
 - [ ] Residual risks are explicitly accepted by the accountable owner.
 - [ ] `config/threat_model_review_plan.json` is updated with the real review

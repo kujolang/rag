@@ -1,0 +1,46 @@
+{
+  "version": "kujo-rag-production-security-attestation-v1",
+  "environment_id": "",
+  "release": {
+    "repository": "kujolang/rag",
+    "commit": "",
+    "kujo_version": "v1.2.3"
+  },
+  "proxy": {
+    "provider": "",
+    "public_hostname": "",
+    "origin_private": false,
+    "jwt_signature_verified": false,
+    "jwt_algorithm_allowlist": [],
+    "jwt_issuer": "",
+    "jwt_audience": "",
+    "jwt_expiry_enforced": false,
+    "jwks_fail_closed": false,
+    "untrusted_identity_headers_stripped": false,
+    "verified_claim_headers_rebuilt": false,
+    "proxy_secret_from_secret_manager": false,
+    "direct_origin_blocked": false,
+    "backend_peer_allowlist_verified": false,
+    "rbac_mapping_verified": false,
+    "evidence": []
+  },
+  "audit_sink": {
+    "provider": "",
+    "destination": "",
+    "separate_security_boundary": false,
+    "append_only_writer_credentials": false,
+    "delete_admin_separated": false,
+    "immutable_retention_enabled": false,
+    "retention_days": 0,
+    "encryption_at_rest": false,
+    "export_health_monitored": false,
+    "readback_verified": false,
+    "evidence": []
+  },
+  "approvals": {
+    "security_reviewer": "",
+    "operations_reviewer": "",
+    "approved_at_unix_ms": 0,
+    "status": "pending"
+  }
+}
