@@ -1,0 +1,11 @@
+from src.common import dict_get_or
+from src.config import load_config
+from src.audit_log import verify_audit_chain
+
+cfg := load_config({})
+result := verify_audit_chain(cfg)
+print(to_json(result))
+
+if dict_get_or(result, "ok", false) != true {
+	exit(1)
+}

@@ -230,6 +230,13 @@ jobs:
             '{ok:true,unauthenticated_status:$unauthenticated,authenticated_status:$authenticated,forged_admin_status:$forged_admin,query_status:$query}' \
             > ./results/cloudflare-staging/external-boundary.json
 
+      - name: Verify the audit hash chain
+        shell: bash
+        run: |
+          set -euo pipefail
+          kujo run scripts/verify_audit_evidence.kujo --interpreter \
+            > ./results/cloudflare-staging/audit-chain-verification.json
+
       - name: Keep protected staging available for manual verification
         if: ${{ inputs.manual_test_minutes != '0' }}
         shell: bash
@@ -257,6 +264,7 @@ jobs:
           evidence=()
           for path in \
             authenticated-health.json \
+            audit-chain-verification.json \
             external-boundary.json \
             forged-admin.json \
             ingest.json \
@@ -281,6 +289,7 @@ jobs:
             ./results/cloudflare-staging/ingest.json
             ./results/cloudflare-staging/origin-health.json
             ./results/cloudflare-staging/authenticated-health.json
+            ./results/cloudflare-staging/audit-chain-verification.json
             ./results/cloudflare-staging/forged-admin.json
             ./results/cloudflare-staging/query.json
             ./results/cloudflare-staging/external-boundary.json
