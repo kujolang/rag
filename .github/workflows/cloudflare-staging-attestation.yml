@@ -229,6 +229,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          mkdir -p ./results/cloudflare-staging
           find ./results/cloudflare-staging -maxdepth 1 -type f \
             ! -name '*.log' ! -name 'unauthenticated.body' \
             -print0 | sort -z | xargs -0 sha256sum \

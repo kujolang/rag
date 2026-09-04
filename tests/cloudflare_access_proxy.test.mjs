@@ -58,7 +58,9 @@ test("rejects unsupported algorithms, wrong audiences, expiry, and JWKS failure"
   await assert.rejects(() => verifyAccessJwt(token(baseClaims, { alg: "HS256", kid: "test-key" }), options), ProxyError);
   await assert.rejects(() => verifyAccessJwt(token({ ...baseClaims, aud: "wrong" }), options), ProxyError);
   await assert.rejects(() => verifyAccessJwt(token({ ...baseClaims, exp: 999 }), options), ProxyError);
-  const corrupted = `${token(baseClaims).slice(0, -1)}A`;
+  const [header, claims, signature] = token(baseClaims).split(".");
+  const corruptedSignature = `${signature[0] === "A" ? "B" : "A"}${signature.slice(1)}`;
+  const corrupted = `${header}.${claims}.${corruptedSignature}`;
   await assert.rejects(() => verifyAccessJwt(corrupted, options), ProxyError);
   await assert.rejects(
     () => verifyAccessJwt(token(baseClaims), { ...options, fetchImpl: async () => { throw new Error("offline"); } }),
