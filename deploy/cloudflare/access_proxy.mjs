@@ -150,6 +150,10 @@ export function buildUpstreamHeaders(incomingHeaders, claims, identity, proxySec
     headers.set(lower, Array.isArray(value) ? value.join(",") : String(value));
   }
   headers.set("x-request-id", headers.get("x-request-id") || randomUUID());
+  // The current Kujo HTTP runtime handles one request per origin connection.
+  // Close each verifier-to-origin hop so a pooled idle socket cannot block the
+  // next request until the upstream timeout expires.
+  headers.set("connection", "close");
   // Kujo's jwt_proxy contract requires a non-empty Bearer envelope before it
   // evaluates the trusted peer, proxy attestation, and verified claims. Never
   // forward the client's credential; synthesize a non-secret marker instead.
