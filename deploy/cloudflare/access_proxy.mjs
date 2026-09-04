@@ -223,6 +223,10 @@ export function createAccessProxyServer(config) {
         redirect: "manual",
         signal: AbortSignal.timeout(config.upstreamTimeoutMs),
       });
+      // Buffer and enforce the response limit before committing headers. If
+      // the upstream stream fails or exceeds the bound, sendError can still
+      // return a deterministic JSON error instead of resetting the client.
+      const responseBody = await readBoundedResponse(upstream, config.maxResponseBytes);
       const responseHeaders = {
         "content-type": upstream.headers.get("content-type") || "application/octet-stream",
         "cache-control": "no-store",
@@ -230,7 +234,7 @@ export function createAccessProxyServer(config) {
         "referrer-policy": "no-referrer",
       };
       response.writeHead(upstream.status, responseHeaders);
-      response.end(await readBoundedResponse(upstream, config.maxResponseBytes));
+      response.end(responseBody);
     } catch (error) {
       sendError(response, error);
     }

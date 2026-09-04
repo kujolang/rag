@@ -186,7 +186,11 @@ jobs:
             --header "CF-Access-Client-Id: $STAGING_SERVICE_TOKEN_ID" \
             --header "CF-Access-Client-Secret: $STAGING_SERVICE_TOKEN_SECRET" \
             "$STAGING_BASE_URL/health")
-          test "$authenticated_status" = "200"
+          if [[ "$authenticated_status" != "200" ]]; then
+            echo "Authenticated health check returned HTTP ${authenticated_status}." >&2
+            cat ./results/cloudflare-staging/authenticated-health.json >&2
+            exit 1
+          fi
 
           forged_status=$(curl --silent --output ./results/cloudflare-staging/forged-admin.json \
             --write-out '%{http_code}' \
@@ -199,7 +203,12 @@ jobs:
             --header 'x-kujo-namespace: forged' \
             --data '{"path":"./examples/kujo_docs","namespace":"cloudflare_staging"}' \
             "$STAGING_BASE_URL/ingest")
-          test "$forged_status" = "403"
+          if [[ "$forged_status" != "403" ]]; then
+            echo "Forged-admin check returned HTTP ${forged_status}; expected 403." >&2
+            cat ./results/cloudflare-staging/forged-admin.json >&2
+            tail -n 50 ./results/cloudflare-staging/access-proxy.log >&2
+            exit 1
+          fi
 
           query_status=$(curl --silent --output ./results/cloudflare-staging/query.json \
             --write-out '%{http_code}' \
@@ -209,7 +218,12 @@ jobs:
             --header 'content-type: application/json' \
             --data '{"query":"What is Kujo optimized for?","namespace":"cloudflare_staging"}' \
             "$STAGING_BASE_URL/query")
-          test "$query_status" = "200"
+          if [[ "$query_status" != "200" ]]; then
+            echo "Authorized query returned HTTP ${query_status}." >&2
+            cat ./results/cloudflare-staging/query.json >&2
+            tail -n 50 ./results/cloudflare-staging/access-proxy.log >&2
+            exit 1
+          fi
 
           jq -n \
             --arg unauthenticated "$unauthenticated_status" \
