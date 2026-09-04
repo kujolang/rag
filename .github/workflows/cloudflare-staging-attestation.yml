@@ -125,11 +125,37 @@ jobs:
 
           for attempt in $(seq 1 40); do
             if curl --fail --silent --show-error http://127.0.0.1:8787/health > ./results/cloudflare-staging/origin-health.json; then
+              break
+            fi
+            sleep 1
+          done
+          if ! curl --fail --silent --show-error http://127.0.0.1:8787/health > ./results/cloudflare-staging/origin-health.json; then
+            echo "Private RAG origin did not become healthy." >&2
+            exit 1
+          fi
+
+          # A healthy origin does not mean the remotely managed tunnel has
+          # registered at Cloudflare's edge yet. Wait for an authenticated
+          # request to traverse Access, the tunnel, and the verifier before
+          # running assertions so transient error 1033 cannot become a false
+          # attestation failure.
+          for attempt in $(seq 1 60); do
+            for pid in "$RAG_PID" "$ACCESS_PROXY_PID" "$CLOUDFLARED_PID"; do
+              if ! kill -0 "$pid" 2>/dev/null; then
+                echo "A staging process exited before the external route became ready." >&2
+                exit 1
+              fi
+            done
+            status=$(curl --silent --output /dev/null --write-out '%{http_code}' \
+              --header "CF-Access-Client-Id: $STAGING_SERVICE_TOKEN_ID" \
+              --header "CF-Access-Client-Secret: $STAGING_SERVICE_TOKEN_SECRET" \
+              "$STAGING_BASE_URL/health")
+            if [[ "$status" == "200" ]]; then
               exit 0
             fi
             sleep 1
           done
-          echo "Private RAG origin did not become healthy." >&2
+          echo "Cloudflare Access and tunnel route did not become healthy." >&2
           exit 1
 
       - name: Prove the external authorization boundary
