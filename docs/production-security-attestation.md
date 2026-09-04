@@ -54,6 +54,12 @@ against the team JWKS, issuer, and Access application audience in the adapter.
 Map only an explicit allowlist of identity attributes to Kujo roles and
 namespaces; never copy arbitrary JWT claims into header names.
 
+A temporary, protected implementation of this topology is provided in
+`deploy/cloudflare/` and `.github/workflows/cloudflare-staging-attestation.yml`.
+It exists to collect bounded external proxy evidence and must be torn down after
+the test. It is not a substitute for the immutable audit-sink attestation or a
+permanent production deployment.
+
 ## Required immutable-audit evidence
 
 The application writes a keyed, locally verifiable append log. Production must

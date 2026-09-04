@@ -1,0 +1,227 @@
+name: cloudflare-staging-attestation
+
+on:
+  workflow_dispatch:
+    inputs:
+      manual_test_minutes:
+        description: Minutes to keep the protected staging tunnel available after automated checks
+        required: true
+        default: "10"
+        type: choice
+        options:
+          - "0"
+          - "10"
+          - "20"
+          - "30"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cloudflare-staging-attestation
+  cancel-in-progress: false
+
+jobs:
+  external-boundary:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    environment: cloudflare-staging
+    env:
+      CLOUDFLARE_ACCESS_AUDIENCE: ${{ secrets.CLOUDFLARE_ACCESS_AUDIENCE }}
+      CLOUDFLARE_ACCESS_TEAM_DOMAIN: ${{ secrets.CLOUDFLARE_ACCESS_TEAM_DOMAIN }}
+      CLOUDFLARE_TUNNEL_TOKEN: ${{ secrets.CLOUDFLARE_TUNNEL_TOKEN }}
+      KUJO_RAG_API_AUDIT_ENABLED: "true"
+      KUJO_RAG_API_AUDIT_EXTERNAL_SINK_MODE: append_file
+      KUJO_RAG_API_AUDIT_FAIL_CLOSED: "true"
+      KUJO_RAG_API_AUDIT_INTEGRITY_KEY: ${{ secrets.KUJO_RAG_API_AUDIT_INTEGRITY_KEY }}
+      KUJO_RAG_API_AUDIT_PATH: ./results/cloudflare-staging/security_audit.log
+      KUJO_RAG_API_AUTH_PROVIDER: jwt_proxy
+      KUJO_RAG_API_HOST: 127.0.0.1
+      KUJO_RAG_API_JWT_AUDIENCE: ${{ secrets.CLOUDFLARE_ACCESS_AUDIENCE }}
+      KUJO_RAG_API_JWT_ISSUER: https://${{ secrets.CLOUDFLARE_ACCESS_TEAM_DOMAIN }}
+      KUJO_RAG_API_RBAC_DEFAULT_ROLE: reader
+      KUJO_RAG_API_RBAC_ENABLED: "true"
+      KUJO_RAG_API_REDACTION_ENABLED: "true"
+      KUJO_RAG_API_TRUSTED_PROXY_IPS: 127.0.0.1
+      KUJO_RAG_API_TRUSTED_PROXY_SECRET: ${{ secrets.KUJO_RAG_API_TRUSTED_PROXY_SECRET }}
+      KUJO_RAG_AT_REST_ENCRYPTION_ENABLED: "true"
+      KUJO_RAG_AT_REST_ENCRYPTION_KEY: ${{ secrets.KUJO_RAG_AT_REST_ENCRYPTION_KEY }}
+      KUJO_RAG_ENV: production
+      KUJO_RAG_INDEX_PATH: ./results/cloudflare-staging/rag_index.json
+      KUJO_RAG_NAMESPACE: cloudflare_staging
+      KUJO_RAG_PROXY_IDENTITY_MAP_JSON: ${{ secrets.KUJO_RAG_PROXY_IDENTITY_MAP_JSON }}
+      KUJO_RAG_STRICT_CONFIG: "true"
+      STAGING_BASE_URL: https://rag-staging.kujolang.ai
+      STAGING_SERVICE_TOKEN_ID: ${{ secrets.STAGING_SERVICE_TOKEN_ID }}
+      STAGING_SERVICE_TOKEN_SECRET: ${{ secrets.STAGING_SERVICE_TOKEN_SECRET }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+
+      - name: Install pinned Kujo runtime
+        uses: ./.github/actions/setup-kujo
+
+      - name: Validate required secrets without printing them
+        shell: bash
+        run: |
+          set -euo pipefail
+          required=(
+            CLOUDFLARE_ACCESS_AUDIENCE
+            CLOUDFLARE_ACCESS_TEAM_DOMAIN
+            CLOUDFLARE_TUNNEL_TOKEN
+            KUJO_RAG_API_AUDIT_INTEGRITY_KEY
+            KUJO_RAG_API_TRUSTED_PROXY_SECRET
+            KUJO_RAG_AT_REST_ENCRYPTION_KEY
+            KUJO_RAG_PROXY_IDENTITY_MAP_JSON
+            STAGING_SERVICE_TOKEN_ID
+            STAGING_SERVICE_TOKEN_SECRET
+          )
+          for name in "${required[@]}"; do
+            if [[ -z "${!name:-}" ]]; then
+              echo "Missing required GitHub environment secret: ${name}" >&2
+              exit 1
+            fi
+          done
+
+      - name: Verify the Access adapter
+        run: node --test tests/cloudflare_access_proxy.test.mjs
+
+      - name: Install checksum-pinned cloudflared
+        shell: bash
+        run: |
+          set -euo pipefail
+          install_dir="${RUNNER_TEMP}/cloudflared-bin"
+          mkdir -p "$install_dir"
+          curl --fail --silent --show-error --location \
+            https://github.com/cloudflare/cloudflared/releases/download/2026.8.3/cloudflared-linux-amd64 \
+            --output "$install_dir/cloudflared"
+          echo "f29324fe934d1e100617484c78deef803c4dc2cd351d645bbde42e96b4fccc5e  $install_dir/cloudflared" | sha256sum --check --strict
+          chmod 0755 "$install_dir/cloudflared"
+          echo "$install_dir" >> "$GITHUB_PATH"
+
+      - name: Build an encrypted staging index
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p ./results/cloudflare-staging
+          kujo run main.kujo --interpreter ingest \
+            --path ./examples/kujo_docs \
+            --namespace cloudflare_staging \
+            > ./results/cloudflare-staging/ingest.json
+
+      - name: Start the private RAG origin, verifier, and tunnel
+        shell: bash
+        run: |
+          set -euo pipefail
+          kujo run main.kujo --interpreter serve \
+            > ./results/cloudflare-staging/rag.log 2>&1 &
+          echo "RAG_PID=$!" >> "$GITHUB_ENV"
+          node deploy/cloudflare/access_proxy.mjs \
+            > ./results/cloudflare-staging/access-proxy.log 2>&1 &
+          echo "ACCESS_PROXY_PID=$!" >> "$GITHUB_ENV"
+          cloudflared tunnel --no-autoupdate run --token "$CLOUDFLARE_TUNNEL_TOKEN" \
+            > ./results/cloudflare-staging/cloudflared.log 2>&1 &
+          echo "CLOUDFLARED_PID=$!" >> "$GITHUB_ENV"
+
+          for attempt in $(seq 1 40); do
+            if curl --fail --silent --show-error http://127.0.0.1:8787/health > ./results/cloudflare-staging/origin-health.json; then
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "Private RAG origin did not become healthy." >&2
+          exit 1
+
+      - name: Prove the external authorization boundary
+        shell: bash
+        run: |
+          set -euo pipefail
+          unauthenticated_status=$(curl --silent --output ./results/cloudflare-staging/unauthenticated.body \
+            --write-out '%{http_code}' "$STAGING_BASE_URL/health")
+          if [[ "$unauthenticated_status" == "200" ]]; then
+            echo "Unauthenticated staging request unexpectedly succeeded." >&2
+            exit 1
+          fi
+
+          authenticated_status=$(curl --silent --output ./results/cloudflare-staging/authenticated-health.json \
+            --write-out '%{http_code}' \
+            --header "CF-Access-Client-Id: $STAGING_SERVICE_TOKEN_ID" \
+            --header "CF-Access-Client-Secret: $STAGING_SERVICE_TOKEN_SECRET" \
+            "$STAGING_BASE_URL/health")
+          test "$authenticated_status" = "200"
+
+          forged_status=$(curl --silent --output ./results/cloudflare-staging/forged-admin.json \
+            --write-out '%{http_code}' \
+            --request POST \
+            --header "CF-Access-Client-Id: $STAGING_SERVICE_TOKEN_ID" \
+            --header "CF-Access-Client-Secret: $STAGING_SERVICE_TOKEN_SECRET" \
+            --header 'content-type: application/json' \
+            --header 'x-kujo-claim-role: admin' \
+            --header 'x-kujo-role: admin' \
+            --header 'x-kujo-namespace: forged' \
+            --data '{"path":"./examples/kujo_docs","namespace":"cloudflare_staging"}' \
+            "$STAGING_BASE_URL/ingest")
+          test "$forged_status" = "403"
+
+          query_status=$(curl --silent --output ./results/cloudflare-staging/query.json \
+            --write-out '%{http_code}' \
+            --request POST \
+            --header "CF-Access-Client-Id: $STAGING_SERVICE_TOKEN_ID" \
+            --header "CF-Access-Client-Secret: $STAGING_SERVICE_TOKEN_SECRET" \
+            --header 'content-type: application/json' \
+            --data '{"query":"What is Kujo optimized for?","namespace":"cloudflare_staging"}' \
+            "$STAGING_BASE_URL/query")
+          test "$query_status" = "200"
+
+          jq -n \
+            --arg unauthenticated "$unauthenticated_status" \
+            --arg authenticated "$authenticated_status" \
+            --arg forged_admin "$forged_status" \
+            --arg query "$query_status" \
+            '{ok:true,unauthenticated_status:$unauthenticated,authenticated_status:$authenticated,forged_admin_status:$forged_admin,query_status:$query}' \
+            > ./results/cloudflare-staging/external-boundary.json
+
+      - name: Keep protected staging available for manual verification
+        if: ${{ inputs.manual_test_minutes != '0' }}
+        shell: bash
+        env:
+          MANUAL_TEST_MINUTES: ${{ inputs.manual_test_minutes }}
+        run: sleep "$((MANUAL_TEST_MINUTES * 60))"
+
+      - name: Stop staging processes
+        if: always()
+        shell: bash
+        run: |
+          for pid in "${CLOUDFLARED_PID:-}" "${ACCESS_PROXY_PID:-}" "${RAG_PID:-}"; do
+            if [[ "$pid" =~ ^[0-9]+$ ]]; then
+              kill "$pid" 2>/dev/null || true
+            fi
+          done
+
+      - name: Create sanitized evidence manifest
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          find ./results/cloudflare-staging -maxdepth 1 -type f \
+            ! -name '*.log' ! -name 'unauthenticated.body' \
+            -print0 | sort -z | xargs -0 sha256sum \
+            > ./results/cloudflare-staging/sha256sums.txt
+
+      - name: Upload sanitized external-boundary evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: cloudflare-staging-attestation-${{ github.run_id }}
+          if-no-files-found: error
+          retention-days: 30
+          path: |
+            ./results/cloudflare-staging/ingest.json
+            ./results/cloudflare-staging/origin-health.json
+            ./results/cloudflare-staging/authenticated-health.json
+            ./results/cloudflare-staging/forged-admin.json
+            ./results/cloudflare-staging/query.json
+            ./results/cloudflare-staging/external-boundary.json
+            ./results/cloudflare-staging/security_audit.log
+            ./results/cloudflare-staging/security_audit.log.state.json
+            ./results/cloudflare-staging/sha256sums.txt
