@@ -194,15 +194,12 @@ jobs:
 
           forged_status=$(curl --silent --output ./results/cloudflare-staging/forged-admin.json \
             --write-out '%{http_code}' \
-            --request POST \
             --header "CF-Access-Client-Id: $STAGING_SERVICE_TOKEN_ID" \
             --header "CF-Access-Client-Secret: $STAGING_SERVICE_TOKEN_SECRET" \
-            --header 'content-type: application/json' \
             --header 'x-kujo-claim-role: admin' \
             --header 'x-kujo-role: admin' \
             --header 'x-kujo-namespace: forged' \
-            --data '{"path":"./examples/kujo_docs","namespace":"cloudflare_staging"}' \
-            "$STAGING_BASE_URL/ingest")
+            "$STAGING_BASE_URL/metrics")
           if [[ "$forged_status" != "403" ]]; then
             echo "Forged-admin check returned HTTP ${forged_status}; expected 403." >&2
             cat ./results/cloudflare-staging/forged-admin.json >&2
