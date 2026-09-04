@@ -253,10 +253,22 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p ./results/cloudflare-staging
-          find ./results/cloudflare-staging -maxdepth 1 -type f \
-            ! -name '*.log' ! -name 'unauthenticated.body' \
-            -print0 | sort -z | xargs -0 sha256sum \
-            > ./results/cloudflare-staging/sha256sums.txt
+          cd ./results/cloudflare-staging
+          evidence=()
+          for path in \
+            authenticated-health.json \
+            external-boundary.json \
+            forged-admin.json \
+            ingest.json \
+            origin-health.json \
+            query.json \
+            security_audit.log \
+            security_audit.log.state.json; do
+            if [[ -f "$path" ]]; then
+              evidence+=("$path")
+            fi
+          done
+          sha256sum "${evidence[@]}" > sha256sums.txt
 
       - name: Upload sanitized external-boundary evidence
         if: always()
