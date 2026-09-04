@@ -143,12 +143,21 @@ jobs:
           # running assertions so transient error 1033 cannot become a false
           # attestation failure.
           for attempt in $(seq 1 60); do
-            for pid in "$RAG_PID" "$ACCESS_PROXY_PID" "$CLOUDFLARED_PID"; do
-              if ! kill -0 "$pid" 2>/dev/null; then
-                echo "A staging process exited before the external route became ready." >&2
-                exit 1
-              fi
-            done
+            if ! kill -0 "$RAG_PID" 2>/dev/null; then
+              echo "The RAG origin exited before the external route became ready." >&2
+              tail -n 50 ./results/cloudflare-staging/rag.log >&2
+              exit 1
+            fi
+            if ! kill -0 "$ACCESS_PROXY_PID" 2>/dev/null; then
+              echo "The Access verifier exited before the external route became ready." >&2
+              tail -n 50 ./results/cloudflare-staging/access-proxy.log >&2
+              exit 1
+            fi
+            if ! kill -0 "$CLOUDFLARED_PID" 2>/dev/null; then
+              echo "cloudflared exited before the external route became ready." >&2
+              tail -n 50 ./results/cloudflare-staging/cloudflared.log >&2
+              exit 1
+            fi
             status=$(curl --silent --output /dev/null --write-out '%{http_code}' \
               --header "CF-Access-Client-Id: $STAGING_SERVICE_TOKEN_ID" \
               --header "CF-Access-Client-Secret: $STAGING_SERVICE_TOKEN_SECRET" \
