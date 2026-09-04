@@ -76,6 +76,7 @@ test("uses only explicit identity mappings", () => {
 
 test("strips spoofable identity headers and rebuilds verified values", () => {
   const headers = buildUpstreamHeaders({
+    authorization: "Bearer attacker-controlled",
     "content-type": "application/json",
     "cf-access-jwt-assertion": "secret-token",
     "x-kujo-claim-role": "admin",
@@ -84,6 +85,7 @@ test("strips spoofable identity headers and rebuilds verified values", () => {
   }, baseClaims, { role: "reader", namespace: "staging" }, "proxy-secret");
   assert.equal(headers.get("content-type"), "application/json");
   assert.equal(headers.get("cf-access-jwt-assertion"), null);
+  assert.equal(headers.get("authorization"), "Bearer cloudflare-access-verified");
   assert.equal(headers.get("x-forwarded-for"), null);
   assert.match(headers.get("x-kujo-claim-sub"), /^sha256:[0-9a-f]{64}$/);
   assert.equal(headers.get("x-kujo-claim-sub").includes("subject-1"), false);

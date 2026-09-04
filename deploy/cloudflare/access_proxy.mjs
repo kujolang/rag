@@ -150,6 +150,10 @@ export function buildUpstreamHeaders(incomingHeaders, claims, identity, proxySec
     headers.set(lower, Array.isArray(value) ? value.join(",") : String(value));
   }
   headers.set("x-request-id", headers.get("x-request-id") || randomUUID());
+  // Kujo's jwt_proxy contract requires a non-empty Bearer envelope before it
+  // evaluates the trusted peer, proxy attestation, and verified claims. Never
+  // forward the client's credential; synthesize a non-secret marker instead.
+  headers.set("authorization", "Bearer cloudflare-access-verified");
   headers.set("x-kujo-proxy-secret", proxySecret);
   headers.set("x-kujo-claim-iss", claims.iss);
   headers.set("x-kujo-claim-aud", Array.isArray(claims.aud) ? claims.aud.join(",") : claims.aud);
