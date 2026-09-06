@@ -863,3 +863,5 @@ MIT
 ## Documentation example selection
 
 See [the preference contract and live pilot](docs/RETRIEVAL_PREFERENCES.md) for opt-in fenced-example indexing, upstream selection, cache variants, MIME-aware HTTP ingestion, and measurements.
+
+For the private local docs.kujolang.ai dogfood installation, see [Local Kujo documentation](docs/LOCAL_KUJO_DOCS.md).
