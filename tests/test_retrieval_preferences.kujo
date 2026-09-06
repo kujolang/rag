@@ -1,0 +1,34 @@
+from src.retrieval_preferences import normalize_retrieval_preferences, markdown_example_spans, select_chunk_examples
+from src.tests_helpers import assert_equal
+from src.chunking import chunk_document
+assert_equal(normalize_retrieval_preferences({"programming_language": " Rust "}), {"programming_language": "rust"})
+assert_equal(normalize_retrieval_preferences({"programming_language": "rust\r\nX-Test: yes"}), {})
+raw := "Shared warning\n```python retrieval-example=hello\nprint('hello')\n```\nShared guidance\n```rust retrieval-example=hello\nprintln!(\"hello\");\n```\nShared citation"
+meta := markdown_example_spans(raw)
+assert_equal(len(meta["example_spans"]), 2)
+chunk := {"text": raw, "line_start": 1, "meta": meta}
+selected := select_chunk_examples(chunk, {"programming_language": "python"})
+assert_equal(selected["text"], "Shared warning\n```python retrieval-example=hello\nprint('hello')\n```\nShared guidance\nShared citation")
+assert_equal(select_chunk_examples(chunk, {"programming_language": "go"})["text"], raw)
+assert_equal(select_chunk_examples(chunk, {})["text"], raw)
+# A language match in another group cannot remove a unique required example.
+unique := "```python retrieval-example=a\npython()\n```\n```rust retrieval-example=b\nrust_only()\n```\n```shell\nsetup\n```"
+assert_equal(select_chunk_examples({"text":unique,"line_start":1,"meta":markdown_example_spans(unique)}, {"programming_language":"python"})["text"], unique)
+assert_equal(len(markdown_example_spans("```python retrieval-example=x\nunterminated")["example_spans"]), 0)
+assert_equal(len(markdown_example_spans("```python\nstandalone\n```")["example_spans"]), 0)
+assert_equal(len(markdown_example_spans("~~~~python retrieval-example=x\n~~~\n~~~~")["example_spans"]), 1)
+
+# Small targets must not split tagged fences or lose shared source lines.
+chunks := chunk_document({"id":"doc", "path":"docs.md", "content":raw, "meta":meta}, {"chunk_size":10, "chunk_overlap":0})
+texts := []
+for part in chunks {
+ for span in part["meta"]["example_spans"] {
+  assert_equal(part["line_start"] <= span["line_start"], true)
+  assert_equal(part["line_end"] >= span["line_end"], true)
+ }
+ selected_part := select_chunk_examples(part, {"programming_language":"python"})
+ if selected_part["text"] != "" { texts = push(texts, selected_part["text"]) }
+}
+assert_equal(len(chunks) > 1, true)
+assert_equal(join(texts, "\n"), selected["text"])
+print("retrieval preferences tests passed")

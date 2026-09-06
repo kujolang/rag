@@ -1,3 +1,4 @@
+from src.retrieval_preferences import normalize_retrieval_preferences, select_chunk_examples
 from src.common import dict_get_or, tokenize, term_frequency, cosine_similarity, rank_desc, num_or
 from src.embeddings import embed_texts
 
@@ -706,11 +707,14 @@ func hybrid_search_pipeline(index, query, cfg) {
 	vector_lookup := build_vector_lookup(index)
 	lexical_lookup := build_lexical_lookup(index)
 
+	preferences := normalize_retrieval_preferences(dict_get_or(cfg, "retrieval_preferences", {}))
 	scored := []
 	for chunk_id in keys(chunk_lookup) {
 		if has_key(chunk_lookup, chunk_id) == 1 {
 			chunk := chunk_lookup[chunk_id]
-			if chunk_matches_filters(chunk, filters) {
+			chunk = select_chunk_examples(chunk, preferences)
+			chunk_lookup[chunk_id] := chunk
+			if trim(dict_get_or(chunk, "text", "")) != "" && chunk_matches_filters(chunk, filters) {
 				dense := 0.0
 				if has_key(vector_lookup, chunk_id) == 1 {
 					dense := cosine_similarity(query_vector, vector_lookup[chunk_id])

@@ -859,3 +859,7 @@ This starter kit uses Kujo module imports heavily. In the current Kujo toolchain
 ## License
 
 MIT
+
+## Documentation example selection
+
+See [the preference contract and live pilot](docs/RETRIEVAL_PREFERENCES.md) for opt-in fenced-example indexing, upstream selection, cache variants, MIME-aware HTTP ingestion, and measurements.

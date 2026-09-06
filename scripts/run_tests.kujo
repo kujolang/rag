@@ -180,6 +180,7 @@ default_tests := [
 	"tests/test_response_policy_controls.kujo",
 	"tests/test_retention_legal_hold_controls.kujo",
 	"tests/test_retrieval_explanation_metadata.kujo",
+	"tests/test_retrieval_preferences.kujo",
 	"tests/test_run_tests_runner_guardrails.kujo",
 	"tests/test_runtime_http_security.kujo",
 	"tests/test_security.kujo",

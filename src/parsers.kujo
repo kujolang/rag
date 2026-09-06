@@ -1,3 +1,4 @@
+from src.retrieval_preferences import markdown_example_spans
 from src.common import dict_get_or, filesystem_capability_scope, stable_chunk_id
 
 func build_document(path, kind, content, meta) {
@@ -826,6 +827,9 @@ func parse_file_beneath_impl(path, cfg, trusted_root, relative_path) {
 		return parse_structured_csv(path, raw)
 	}
 	if parser_key == "markdown" {
+		if dict_get_or(cfg, "markdown_examples_enabled", false) {
+			return build_document(path, "markdown", raw, markdown_example_spans(raw))
+		}
 		return parse_markdown(path, raw)
 	}
 

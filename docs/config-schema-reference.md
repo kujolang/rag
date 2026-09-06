@@ -94,6 +94,7 @@ Generated and validated by `scripts/run_config_schema_review.kujo`.
 | hybrid_beta | float | 0.35 | Use default unless workload or compliance requirements justify override. |
 | index_path | string | ./data/rag_index.json | Use deployment-stable paths with least-privilege file permissions. |
 | ingest_extensions | array | ["md","mdx","markdown","txt","pdf","kujo","py","json","csv","html","htm","xml","yaml","yml","log"] | Use explicit allowlists tailored to tenant and environment boundaries. |
+| markdown_examples_enabled | bool | false | Keep disabled until explicitly required, then enable with controls documented. |
 | max_file_bytes | int | 5000000 | Use deployment-stable paths with least-privilege file permissions. |
 | namespace | string | default | Use default unless workload or compliance requirements justify override. |
 | namespace_index_isolation | bool | true | Use default unless workload or compliance requirements justify override. |

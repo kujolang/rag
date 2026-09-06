@@ -307,6 +307,13 @@ func chunk_from_lines(doc, start_line, end_line, text, strategy) {
 			chunk_meta[key] := doc_meta[key]
 		}
 	}
+	if has_key(chunk_meta, "example_spans") {
+		relevant_spans := []
+		for span in chunk_meta["example_spans"] {
+			if span["line_end"] >= start_line && span["line_start"] <= end_line { relevant_spans = push(relevant_spans, span) }
+		}
+		chunk_meta["example_spans"] := relevant_spans
+	}
 	chunk_meta["strategy"] := strategy
 	chunk_meta["kind"] := dict_get_or(doc, "kind", "text")
 	return {
@@ -420,6 +427,40 @@ func fixed_char_chunk(doc, cfg) {
 	return chunks
 }
 
+# Keep complete example fences together and preserve original line positions.
+# This opt-in profile uses a target size; a single complete fence can exceed it,
+# bounded by the parser's document byte limit. It does not duplicate overlap.
+func example_line_chunks(doc, cfg) {
+ example_lines := split(dict_get_or(doc, "content", ""), "\n")
+ example_meta := dict_get_or(doc, "meta", {})
+ example_spans := dict_get_or(example_meta, "example_spans", [])
+ example_chunks := []
+ example_buffer := []
+ example_start := 1
+ example_size := 0
+ example_idx := 0
+ while example_idx < len(example_lines) {
+  example_buffer = push(example_buffer, example_lines[example_idx])
+  example_size = example_size + len(example_lines[example_idx]) + 1
+  example_line := example_idx + 1
+  inside_example := false
+  for example_span in example_spans {
+   if example_line >= example_span["line_start"] && example_line < example_span["line_end"] { inside_example = true }
+  }
+  if example_size >= dict_get_or(cfg, "chunk_size", 900) && inside_example == false {
+   example_chunks = push(example_chunks, chunk_from_lines(doc, example_start, example_line, join(example_buffer, "\n"), "markdown_examples"))
+   example_buffer = []
+   example_size = 0
+   example_start = example_line + 1
+  }
+  example_idx = example_idx + 1
+ }
+ if len(example_buffer) > 0 && trim(join(example_buffer, "\n")) != "" {
+  example_chunks = push(example_chunks, chunk_from_lines(doc, example_start, len(example_lines), join(example_buffer, "\n"), "markdown_examples"))
+ }
+ return example_chunks
+}
+
 export chunk_document := func(doc, cfg) {
 	profile := resolve_chunking_profile(doc, cfg)
 	resolved_cfg := {
@@ -430,7 +471,9 @@ export chunk_document := func(doc, cfg) {
 
 	strategy := to_lower(dict_get_or(resolved_cfg, "chunk_strategy", "line"))
 	doc_chunks := []
-	if strategy == "fixed" {
+	if dict_get_or(dict_get_or(doc, "meta", {}), "example_contract", "") == "kujo.fenced-examples/v1" {
+		doc_chunks = example_line_chunks(doc, resolved_cfg)
+	} else if strategy == "fixed" {
 		doc_chunks = fixed_char_chunk(doc, resolved_cfg)
 	} else {
 		doc_chunks = line_chunk(doc, resolved_cfg)

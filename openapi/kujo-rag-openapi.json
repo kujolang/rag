@@ -687,6 +687,7 @@
 							"filters": {"type": "object"},
 							"session_id": {"type": "string"},
 							"include_retrieval_explanation": {"type": "boolean"},
+							"retrieval_preferences": {"type": "object", "description": "Optional Kujo-specific example preference; invalid or unknown fields are ignored. No authorization effect or Accept-Language header.", "properties": {"programming_language": {"type": "string", "maxLength": 64}}, "additionalProperties": true},
 							"federation": {"$ref": "#/components/schemas/FederationRequest"},
 							"response_policy": {"$ref": "#/components/schemas/ResponsePolicyRequest"}
 						}

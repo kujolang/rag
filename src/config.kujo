@@ -31,6 +31,7 @@ export default_config := func() {
 		"chunk_size": 900,
 		"chunk_overlap": 150,
 		"chunk_presets_enabled": false,
+		"markdown_examples_enabled": false,
 		"chunk_presets": {},
 		"top_k": 6,
 		"hybrid_alpha": 0.65,
@@ -387,6 +388,7 @@ export load_config := func(overrides) {
 	cfg["chunk_strategy"] := env_or("KUJO_RAG_CHUNK_STRATEGY", cfg["chunk_strategy"])
 	cfg["chunk_size"] := parse_int_or(env_or("KUJO_RAG_CHUNK_SIZE", to_string(cfg["chunk_size"])), cfg["chunk_size"])
 	cfg["chunk_overlap"] := parse_int_or(env_or("KUJO_RAG_CHUNK_OVERLAP", to_string(cfg["chunk_overlap"])), cfg["chunk_overlap"])
+	cfg["markdown_examples_enabled"] := parse_bool_or(env_or("KUJO_RAG_MARKDOWN_EXAMPLES_ENABLED", "false"), false)
 	cfg["chunk_presets_enabled"] := parse_bool_or(env_or("KUJO_RAG_CHUNK_PRESETS_ENABLED", to_string(cfg["chunk_presets_enabled"])), cfg["chunk_presets_enabled"])
 	cfg["chunk_presets"] := parse_json_dict_or(env_or("KUJO_RAG_CHUNK_PRESETS_JSON", ""), cfg["chunk_presets"])
 	cfg["top_k"] := parse_int_or(env_or("KUJO_RAG_TOP_K", to_string(cfg["top_k"])), cfg["top_k"])

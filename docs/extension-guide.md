@@ -69,3 +69,7 @@ When adding a retrieval extension:
 2. Keep existing query payload backwards-compatible.
 3. Add focused unit tests for ordering and filter interactions.
 4. Add integration tests when query response shape or ranking contract changes.
+
+## Documentation example selection
+
+See [the preference contract and live pilot](RETRIEVAL_PREFERENCES.md) for opt-in fenced-example indexing, upstream selection, cache variants, MIME-aware HTTP ingestion, and measurements.

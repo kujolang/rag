@@ -1,3 +1,4 @@
+from src.retrieval_preferences import normalize_retrieval_preferences
 from src.common import dict_get_or, dict_without_key, num_or, read_json_file_or, write_json_file
 from src.audit_log import append_audit_event, verify_audit_chain
 from src.config import cfg_with_namespace, validate_config
@@ -1024,13 +1025,14 @@ func query_cache_generation(state, namespace) {
 	return dict_get_or(generation, namespace, 0)
 }
 
-func query_cache_key(namespace, generation, query, filters, session_history) {
+func query_cache_key(namespace, generation, query, filters, session_history, preferences) {
 	payload := {
 		"namespace": namespace,
 		"generation": generation,
 		"query": query,
 		"filters": filters,
-		"session_history": session_history
+		"session_history": session_history,
+		"retrieval_preferences": preferences
 	}
 	return sha256(to_json(payload))
 }
@@ -1074,7 +1076,7 @@ func query_cache_lookup(state, namespace, query, filters, session_history, cfg) 
 	}
 
 	generation := query_cache_generation(state, namespace)
-	cache_key := query_cache_key(namespace, generation, query, filters, session_history)
+	cache_key := query_cache_key(namespace, generation, query, filters, session_history, normalize_retrieval_preferences(dict_get_or(cfg, "retrieval_preferences", {})))
 	query_cache := dict_get_or(state, "query_cache", {})
 	entries := dict_get_or(query_cache, "entries", {})
 	entry := dict_get_or(entries, cache_key, null)
@@ -1122,7 +1124,7 @@ func query_cache_store(state, namespace, query, filters, session_history, result
 	}
 
 	generation := query_cache_generation(state, namespace)
-	cache_key := query_cache_key(namespace, generation, query, filters, session_history)
+	cache_key := query_cache_key(namespace, generation, query, filters, session_history, normalize_retrieval_preferences(dict_get_or(cfg, "retrieval_preferences", {})))
 	query_cache := dict_get_or(state, "query_cache", {})
 	entries := dict_get_or(query_cache, "entries", {})
 	order := dict_get_or(query_cache, "order", [])
@@ -4716,6 +4718,7 @@ export start_api_server := func(cfg) {
 		retrieval_explanation_explicit := dict_get_or(retrieval_explanation_plan, "explicit", false)
 		runtime_query_cfg := cfg_with_response_policy(namespace_cfg, dict_get_or(response_policy_plan, "policy", {}))
 		runtime_query_cfg = cfg_with_retrieval_explanation(runtime_query_cfg, dict_get_or(retrieval_explanation_plan, "enabled", false))
+		runtime_query_cfg["retrieval_preferences"] := normalize_retrieval_preferences(dict_get_or(data, "retrieval_preferences", {}))
 		cache_allowed := federated_mode == false && response_policy_explicit == false && retrieval_explanation_explicit == false
 
 		if cache_allowed {

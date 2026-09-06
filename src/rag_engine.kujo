@@ -24,7 +24,7 @@ func concat_arrays(left, right) {
 func document_content_hash(doc) {
 	path := dict_get_or(doc, "path", "")
 	content := dict_get_or(doc, "content", "")
-	return sha256(path + "\n" + content)
+	return sha256(path + "\n" + content + to_string(dict_get_or(dict_get_or(doc, "meta", {}), "example_contract", "")))
 }
 
 func existing_documents_index(index) {
