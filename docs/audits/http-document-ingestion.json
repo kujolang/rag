@@ -1,0 +1,44 @@
+{
+  "cases": [
+    {
+      "route": "/markdown.html",
+      "extension": ".md",
+      "requests": 1,
+      "passed": true
+    },
+    {
+      "route": "/html.md",
+      "extension": ".html",
+      "requests": 1,
+      "passed": true
+    },
+    {
+      "route": "/plain",
+      "extension": ".txt",
+      "requests": 1,
+      "passed": true
+    },
+    {
+      "route": "/redirect",
+      "extension": ".md",
+      "requests": 2,
+      "passed": true
+    },
+    {
+      "route": "/unsupported",
+      "extension": null,
+      "requests": 1,
+      "passed": true
+    }
+  ],
+  "verified_date": "2026-09-06",
+  "runtime": "Kujo 1.2.3; Node 22.17.0",
+  "implementation_commits": {
+    "rag_selection": "f00f68b",
+    "rag_ingestion": "9092ddd",
+    "agents_sdk_adapter": "e776000",
+    "agents_sdk_handoff": "4da0f6b",
+    "ai_chat": "407ed2e",
+    "dispatch": "83eea7d"
+  }
+}

@@ -1,0 +1,205 @@
+{
+  "ok": true,
+  "corpus": "examples/retrieval_preferences/query.md",
+  "tokenizer": "cl100k_base",
+  "tokenizer_package_version": "0.14.0",
+  "token_scope": "Exact retrieved text intended for model input; excludes message framing. No model inference billed.",
+  "requests": 10,
+  "receipts": [
+    {
+      "preferences": null,
+      "filters": null,
+      "requests": 1,
+      "response_bytes": 4729,
+      "model_content_bytes": 2078,
+      "model_content_tokens": 476,
+      "latency_ms": 726.431,
+      "cache_hit": false,
+      "citation_count": 1
+    },
+    {
+      "preferences": {
+        "programming_language": "python"
+      },
+      "filters": null,
+      "requests": 1,
+      "response_bytes": 4113,
+      "model_content_bytes": 1487,
+      "model_content_tokens": 332,
+      "latency_ms": 721.729,
+      "cache_hit": false,
+      "citation_count": 1
+    },
+    {
+      "preferences": {
+        "programming_language": "javascript"
+      },
+      "filters": null,
+      "requests": 1,
+      "response_bytes": 4074,
+      "model_content_bytes": 1466,
+      "model_content_tokens": 323,
+      "latency_ms": 778.132,
+      "cache_hit": false,
+      "citation_count": 1
+    },
+    {
+      "preferences": {
+        "programming_language": "python"
+      },
+      "filters": null,
+      "requests": 1,
+      "response_bytes": 3779,
+      "model_content_bytes": 1487,
+      "model_content_tokens": 332,
+      "latency_ms": 453.256,
+      "cache_hit": true,
+      "citation_count": 1
+    },
+    {
+      "preferences": {
+        "programming_language": "javascript"
+      },
+      "filters": null,
+      "requests": 1,
+      "response_bytes": 3740,
+      "model_content_bytes": 1466,
+      "model_content_tokens": 323,
+      "latency_ms": 531.74,
+      "cache_hit": true,
+      "citation_count": 1
+    },
+    {
+      "preferences": null,
+      "filters": null,
+      "requests": 1,
+      "response_bytes": 4395,
+      "model_content_bytes": 2078,
+      "model_content_tokens": 476,
+      "latency_ms": 529.096,
+      "cache_hit": true,
+      "citation_count": 1
+    },
+    {
+      "preferences": {
+        "programming_language": " Python "
+      },
+      "filters": null,
+      "requests": 1,
+      "response_bytes": 3779,
+      "model_content_bytes": 1487,
+      "model_content_tokens": 332,
+      "latency_ms": 465.626,
+      "cache_hit": true,
+      "citation_count": 1
+    },
+    {
+      "preferences": {
+        "programming_language": "go"
+      },
+      "filters": null,
+      "requests": 1,
+      "response_bytes": 4729,
+      "model_content_bytes": 2078,
+      "model_content_tokens": 476,
+      "latency_ms": 816.725,
+      "cache_hit": false,
+      "citation_count": 1
+    },
+    {
+      "preferences": {
+        "programming_language": "rust\r\nX-Test: yes"
+      },
+      "filters": null,
+      "requests": 1,
+      "response_bytes": 4395,
+      "model_content_bytes": 2078,
+      "model_content_tokens": 476,
+      "latency_ms": 458.969,
+      "cache_hit": true,
+      "citation_count": 1
+    },
+    {
+      "preferences": {
+        "programming_language": "python"
+      },
+      "filters": {
+        "include": {
+          "path": [
+            "missing-corpus"
+          ]
+        }
+      },
+      "requests": 1,
+      "response_bytes": 1418,
+      "model_content_bytes": 0,
+      "model_content_tokens": 0,
+      "latency_ms": 746.251,
+      "cache_hit": false,
+      "citation_count": 0
+    }
+  ],
+  "agent_receipts": [
+    {
+      "language": null,
+      "handoff": false,
+      "requests": 1,
+      "actual_model_content_bytes": 2170,
+      "actual_model_content_tokens": 509
+    },
+    {
+      "language": "python",
+      "handoff": false,
+      "requests": 1,
+      "actual_model_content_bytes": 1579,
+      "actual_model_content_tokens": 365
+    },
+    {
+      "language": "javascript",
+      "handoff": false,
+      "requests": 1,
+      "actual_model_content_bytes": 1558,
+      "actual_model_content_tokens": 356
+    },
+    {
+      "language": "python",
+      "handoff": true,
+      "requests": 1,
+      "actual_model_content_bytes": 1597,
+      "actual_model_content_tokens": 362
+    }
+  ],
+  "host_receipts": {
+    "ai_chat": {
+      "ok": true,
+      "requests": 3,
+      "saved_default": true,
+      "task_override": true,
+      "explicit_clear": true,
+      "actual_tool_message_tokens": [
+        413,
+        422,
+        589
+      ]
+    },
+    "dispatch": {
+      "ok": true,
+      "attempts": 1,
+      "persisted_task_override": true,
+      "content_tokens": 332
+    }
+  },
+  "retained_guidance": true,
+  "citation_provenance_preserved": true,
+  "cache_isolation": true,
+  "verified_date": "2026-09-06",
+  "runtime": "Kujo 1.2.3; Node 22.17.0",
+  "implementation_commits": {
+    "rag_selection": "f00f68b",
+    "rag_ingestion": "9092ddd",
+    "agents_sdk_adapter": "e776000",
+    "agents_sdk_handoff": "4da0f6b",
+    "ai_chat": "407ed2e",
+    "dispatch": "83eea7d"
+  }
+}
