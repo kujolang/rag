@@ -1,0 +1,3 @@
+from src.connectors import run_connector_pipeline
+config := parse_json(read_file(env_or("RAG_DOCUMENT_PROBE_CONFIG", "")))
+print(to_json(run_connector_pipeline(config["connectors"], config["staging_root"])))

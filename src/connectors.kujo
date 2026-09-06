@@ -245,27 +245,41 @@ func run_http_docs_connector(connector, staging_root) {
 		}
 	}
 
-	header_flags := connector_header_flags(dict_get_or(connector, "headers", {}))
+	headers := dict_get_or(connector, "headers", {})
+	if type(headers) != "dict" { headers = {} }
+	has_accept := false
+	for name in keys(headers) { if to_lower(name) == "accept" { has_accept = true } }
+	if has_accept == false { headers["Accept"] := "text/markdown, text/html;q=0.9, text/plain;q=0.8" }
 	i := 0
 	while i < len(urls) {
 		url_value := trim(str_or(urls[i], ""))
-		if url_value == "" {
-			i = i + 1
-			continue
-		}
-		output_name := url_output_name(url_value, i + 1)
-		output_file := target_dir + "/" + output_name
-		fetch_cmd := "curl --fail --silent --show-error --location" + header_flags + " " + shell_quote(url_value) + " -o " + shell_quote(output_file)
-		fetch_res := execute_status(fetch_cmd, {"timeout_ms": 120000})
-		if type(fetch_res) != "struct" || fetch_res.success == false {
-			return {
-				"ok": false,
-				"error": "http_docs_fetch_failed",
-				"message": "Failed to fetch connector URL",
-				"details": {
-					"url": url_value,
-					"stderr": to_string(dict_get_or(fetch_res, "stderr", ""))
+		if url_value == "" { i = i + 1; continue }
+		if starts_with(url_value, "file://") {
+			# Preserve the explicitly configured local-file fixture path.
+			output_file := target_dir + "/" + url_output_name(url_value, i + 1)
+			local_result := execute_status("curl --fail --silent --show-error --max-filesize 5000000 " + shell_quote(url_value) + " -o " + shell_quote(output_file), {"timeout_ms": 120000})
+			if type(local_result) != "struct" || local_result.success == false { return {"ok": false, "error": "http_docs_fetch_failed", "message": "Failed to read local connector document."} }
+		} else {
+			if starts_with(url_value, "http://") == false && starts_with(url_value, "https://") == false { return {"ok": false, "error": "http_docs_invalid_scheme", "message": "Documentation URLs must use HTTP(S) or an explicit local file URL."} }
+			fetch_result := null
+			try {
+				fetch_result = http_request(url_value, {"method": "GET", "headers": headers, "timeout": 30, "max_response_bytes": 5000000, "pin_dns": true, "redirects": "follow"})
+			} except error { return {"ok": false, "error": "http_docs_fetch_failed", "message": "Failed to fetch connector document."} }
+			match fetch_result {
+				case Ok(response): {
+					status := dict_get_or(response, "status", 0)
+					if status < 200 || status > 299 { return {"ok": false, "error": "http_docs_fetch_failed", "message": "Documentation server returned an unsuccessful status."} }
+					response_headers := dict_get_or(response, "headers", {})
+					media_type := to_lower(trim(split(dict_get_or(response_headers, "content-type", "text/plain"), ";")[0]))
+					extension := ""
+					if media_type == "text/markdown" { extension = ".md" }
+					if media_type == "text/html" { extension = ".html" }
+					if media_type == "text/plain" { extension = ".txt" }
+					if extension == "" { return {"ok": false, "error": "http_docs_unsupported_media_type", "message": "Documentation response must be Markdown, HTML, or plain text."} }
+					output_file := target_dir + "/" + substring(sha256(url_value), 0, 24) + extension
+					write_file(output_file, dict_get_or(response, "body", ""))
 				}
+				case Err(error): { return {"ok": false, "error": "http_docs_fetch_failed", "message": "Failed to fetch connector document within transport limits."} }
 			}
 		}
 		i = i + 1
