@@ -79,18 +79,31 @@ write_file_atomic(policy_fail_path, to_json({
 	}
 }), true)
 
+// Multiple profiles must terminate, including the first run with no history.
+benchmark_multi := read_json_file_or(benchmark_report_path, {})
+profiles_multi := dict_get_or(benchmark_multi, "profiles", [])
+profiles_multi = push(profiles_multi, {"name": "medium", "ingest": {"docs_per_sec": 10.0}, "query": {"avg_latency_ms": 200.0, "p95_latency_ms": 320.0}, "dataset": {"materialized_docs": 100}})
+benchmark_multi["profiles"] = profiles_multi
+write_file_atomic(benchmark_report_path, to_json(benchmark_multi), true)
+policy_multi := read_json_file_or(policy_path, {})
+budgets_multi := dict_get_or(policy_multi, "workload_classes", {})
+budgets_multi["medium"] = budgets_multi["small"]
+policy_multi["workload_classes"] = budgets_multi
+write_file_atomic(policy_path, to_json(policy_multi), true)
+
 write_file_atomic(doc_path, "# Performance and Cost Budget Gates\n\nRun kujo run scripts/run_performance_cost_budget_review.kujo --interpreter by workload class.\n", true)
 write_file_atomic(release_doc_path, "# Release Process\n\nrun_performance_cost_budget_review.kujo\ndocs/performance-cost-budget-gates.md\n", true)
 write_file_atomic(workflow_path, "name: performance-cost-budget-review\non:\n  schedule:\n    - cron: '0 14 * * 1'\njobs:\n  review:\n    steps:\n      - run: kujo run scripts/run_performance_cost_budget_review.kujo --interpreter\n", true)
 write_file_atomic(trend_path, to_json({"history": []}), true)
 
 cmd_valid := "KUJO_RAG_PERF_COST_POLICY_PATH=" + policy_path + " KUJO_RAG_PERF_COST_BENCHMARK_REPORT_PATH=" + benchmark_report_path + " KUJO_RAG_PERF_COST_DOC_PATH=" + doc_path + " KUJO_RAG_PERF_COST_RELEASE_PROCESS_DOC_PATH=" + release_doc_path + " KUJO_RAG_PERF_COST_WORKFLOW_PATH=" + workflow_path + " KUJO_RAG_PERF_COST_OUTPUT_PATH=" + output_valid_path + " KUJO_RAG_PERF_COST_TREND_PATH=" + trend_path + " " + kujo_bin + " run scripts/run_performance_cost_budget_review.kujo --interpreter"
-valid_res := execute_status(cmd_valid, {"timeout_ms": 240000})
+valid_res := execute_status(cmd_valid, {"timeout_ms": 10000})
 assert_true(to_bool(type(valid_res) == "struct"))
 assert_true(to_bool(valid_res.success == true))
 
 valid_payload := read_json_file_or(output_valid_path, {})
 assert_true(to_bool(dict_get_or(valid_payload, "ok", false) == true))
+assert_true(to_bool(dict_get_or(valid_payload, "profile_count", 0) == 2))
 valid_gates := dict_get_or(valid_payload, "gates", {})
 assert_true(to_bool(dict_get_or(valid_gates, "performance_budgets_enforced", false) == true))
 assert_true(to_bool(dict_get_or(valid_gates, "resource_cost_budgets_enforced", false) == true))

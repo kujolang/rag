@@ -1,6 +1,6 @@
 # RAG Starter Kit
 
-[![Version](https://img.shields.io/badge/version-1.0.0-black)](https://github.com/kujolang/rag)
+[![Version](https://img.shields.io/badge/version-1.1.0-black)](https://github.com/kujolang/rag)
 [![License](https://img.shields.io/badge/license-MIT-lightgrey)](LICENSE)
 [![built with Kujo](https://img.shields.io/badge/built%20with-Kujo-white.svg)](https://github.com/kujolang/kujo)
 
@@ -93,7 +93,7 @@ For deterministic, rollback-safe releases:
 2) Build artifacts + checksums:
 
 ```bash
-kujo run scripts/build_release_artifacts.kujo --interpreter --version vX.Y.Z --notes ./docs/releases/vX.Y.Z.md
+kujo run scripts/build_release_artifacts.kujo --interpreter -- --version vX.Y.Z --notes ./docs/releases/vX.Y.Z.md
 ```
 
 3) Confirm outputs:

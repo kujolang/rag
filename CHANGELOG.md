@@ -2,7 +2,13 @@
 
 All notable changes to Kujo RAG are documented here.
 
-## [Unreleased]
+## [1.1.0] - 2026-10-14
+
+- Add negotiated HTTP document ingestion, equivalent example selection, retrieval measurements, and local published documentation snapshots/service.
+- Harden atomic index persistence, parsing, quotas, privacy, descriptor-relative ingestion, staged Qdrant transactions, and Cloudflare proxy identity/RBAC.
+- Prevent nested profile lookup from resetting the outer performance-review loop counter; add a multi-profile termination regression.
+- Pass artifact-builder options after the runtime argument separator; make the canary negative control independent of machine speed.
+- Keep hosted production certification deployment-specific; see [release notes](docs/releases/v1.1.0.md).
 
 - Added launch-readiness Spec, Eval suite, Kujo/Kennel metadata, and README readiness/version wording alignment for prelaunch review gates.
 - Preserve actionable `meta.load_error` diagnostics when an index exists but its

@@ -49,5 +49,5 @@ kujo run scripts/run_supply_chain_scan.kujo --interpreter --root .env.example --
 Generate release artifacts (includes SBOM):
 
 ```bash
-kujo run scripts/build_release_artifacts.kujo --interpreter --version vX.Y.Z --notes ./docs/releases/vX.Y.Z.md --output-dir ./results/releases
+kujo run scripts/build_release_artifacts.kujo --interpreter -- --version vX.Y.Z --notes ./docs/releases/vX.Y.Z.md --output-dir ./results/releases
 ```

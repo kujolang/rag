@@ -1,6 +1,6 @@
 [package]
 name = "rag"
-version = "1.0.0"
+version = "1.1.0"
 description = "Local-first Kujo RAG starter kit with offline indexing, retrieval, and API proof gates."
 license = "MIT"
 authors = ["Kujolang <contact@kujolang.ai>"]
@@ -16,7 +16,7 @@ public_api = true
 notes = "Stable local/offline RAG surface with production-conscious controls; target-environment deployment proof remains required for hosted production claims."
 
 [kujo]
-minimum_version = "0.1.0"
+minimum_version = "1.2.3"
 entry = "main.kujo"
 sources = ["src", "scripts", "."]
 includes = ["README.md", "docs", "tests", "examples", "config", "openapi"]

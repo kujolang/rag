@@ -18,7 +18,7 @@ if file_exists(notes_path) {
 
 write_file(notes_path, "# Release v0.0.0\n\n## Summary\n- Artifact rehearsal for test.\n")
 
-cmd := kujo_bin + " run scripts/build_release_artifacts.kujo --interpreter --version 0.0.0 --notes " + notes_path + " --output-dir " + output_root
+cmd := kujo_bin + " run scripts/build_release_artifacts.kujo --interpreter -- --version 0.0.0 --notes " + notes_path + " --output-dir " + output_root
 res := execute_status(cmd, {"timeout_ms": 120000})
 
 assert_true(to_bool(res.success == true))
