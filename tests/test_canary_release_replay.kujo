@@ -53,8 +53,10 @@ write_file(accept_pass_path, to_json({
 	"max_p95_latency_ratio": 2.0
 }))
 
+// Use an impossible sample count for a deterministic negative control.
+// Latency ratios are clamped to 0.1, so a fast machine can satisfy that gate.
 write_file(accept_fail_path, to_json({
-	"min_sample_count": 6,
+	"min_sample_count": 999999,
 	"max_quality_pass_rate_drop": 0.0,
 	"max_avg_confidence_drop": 0.0,
 	"max_avg_grounding_drop": 0.0,
@@ -83,7 +85,7 @@ fail_parsed := parse_json_safe(to_string(fail_res.stdout))
 assert_true(to_bool(dict_get_or(fail_parsed, "ok", false) == true))
 fail_payload := dict_get_or(fail_parsed, "data", {})
 assert_true(to_bool(dict_get_or(fail_payload, "ok", true) == false))
-assert_true(to_bool(dict_get_or(dict_get_or(fail_payload, "gates", {}), "avg_latency_ratio", true) == false))
+assert_true(to_bool(dict_get_or(dict_get_or(fail_payload, "gates", {}), "minimum_sample_count", true) == false))
 
 if file_exists(baseline_path) {
 	delete_file(baseline_path)
