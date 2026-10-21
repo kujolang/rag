@@ -55,6 +55,10 @@ jobs:
       STAGING_SERVICE_TOKEN_ID: ${{ secrets.STAGING_SERVICE_TOKEN_ID }}
       STAGING_SERVICE_TOKEN_SECRET: ${{ secrets.STAGING_SERVICE_TOKEN_SECRET }}
     steps:
+      - name: Set up patched Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "24.22.1"
       - name: Checkout repository
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
 
