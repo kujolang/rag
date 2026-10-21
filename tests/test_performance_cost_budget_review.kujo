@@ -84,24 +84,44 @@ write_file_atomic(release_doc_path, "# Release Process\n\nrun_performance_cost_b
 write_file_atomic(workflow_path, "name: performance-cost-budget-review\non:\n  schedule:\n    - cron: '0 14 * * 1'\njobs:\n  review:\n    steps:\n      - run: kujo run scripts/run_performance_cost_budget_review.kujo --interpreter\n", true)
 write_file_atomic(trend_path, to_json({"history": []}), true)
 
+// Multiple workload profiles must terminate both without history and with history.
+benchmark_fixture := read_json_file_or(benchmark_report_path, {})
+benchmark_fixture["profiles"] = push(benchmark_fixture["profiles"], {
+	"name": "medium",
+	"ingest": {"docs_per_sec": 10.0},
+	"query": {"avg_latency_ms": 200.0, "p95_latency_ms": 320.0},
+	"dataset": {"materialized_docs": 200}
+})
+write_file_atomic(benchmark_report_path, to_json(benchmark_fixture), true)
+policy_fixture := read_json_file_or(policy_path, {})
+policy_fixture["workload_classes"]["medium"] = policy_fixture["workload_classes"]["small"]
+write_file_atomic(policy_path, to_json(policy_fixture), true)
+fail_policy_fixture := read_json_file_or(policy_fail_path, {})
+fail_policy_fixture["workload_classes"]["medium"] = fail_policy_fixture["workload_classes"]["small"]
+write_file_atomic(policy_fail_path, to_json(fail_policy_fixture), true)
+
 cmd_valid := "KUJO_RAG_PERF_COST_POLICY_PATH=" + policy_path + " KUJO_RAG_PERF_COST_BENCHMARK_REPORT_PATH=" + benchmark_report_path + " KUJO_RAG_PERF_COST_DOC_PATH=" + doc_path + " KUJO_RAG_PERF_COST_RELEASE_PROCESS_DOC_PATH=" + release_doc_path + " KUJO_RAG_PERF_COST_WORKFLOW_PATH=" + workflow_path + " KUJO_RAG_PERF_COST_OUTPUT_PATH=" + output_valid_path + " KUJO_RAG_PERF_COST_TREND_PATH=" + trend_path + " " + kujo_bin + " run scripts/run_performance_cost_budget_review.kujo --interpreter"
-valid_res := execute_status(cmd_valid, {"timeout_ms": 240000})
+valid_res := execute_status(cmd_valid, {"timeout_ms": 30000})
 assert_true(to_bool(type(valid_res) == "struct"))
 assert_true(to_bool(valid_res.success == true))
 
 valid_payload := read_json_file_or(output_valid_path, {})
 assert_true(to_bool(dict_get_or(valid_payload, "ok", false) == true))
+assert_true(to_bool(len(valid_payload["profiles"]) == 2))
+assert_true(to_bool(valid_payload["profiles"][0]["name"] == "small"))
+assert_true(to_bool(valid_payload["profiles"][1]["name"] == "medium"))
 valid_gates := dict_get_or(valid_payload, "gates", {})
 assert_true(to_bool(dict_get_or(valid_gates, "performance_budgets_enforced", false) == true))
 assert_true(to_bool(dict_get_or(valid_gates, "resource_cost_budgets_enforced", false) == true))
 
 cmd_fail := "KUJO_RAG_PERF_COST_POLICY_PATH=" + policy_fail_path + " KUJO_RAG_PERF_COST_BENCHMARK_REPORT_PATH=" + benchmark_report_path + " KUJO_RAG_PERF_COST_DOC_PATH=" + doc_path + " KUJO_RAG_PERF_COST_RELEASE_PROCESS_DOC_PATH=" + release_doc_path + " KUJO_RAG_PERF_COST_WORKFLOW_PATH=" + workflow_path + " KUJO_RAG_PERF_COST_OUTPUT_PATH=" + output_fail_path + " KUJO_RAG_PERF_COST_TREND_PATH=" + trend_path + " " + kujo_bin + " run scripts/run_performance_cost_budget_review.kujo --interpreter"
-fail_res := execute_status(cmd_fail, {"timeout_ms": 240000})
+fail_res := execute_status(cmd_fail, {"timeout_ms": 30000})
 assert_true(to_bool(type(fail_res) == "struct"))
 assert_true(to_bool(fail_res.success == false))
 
 fail_payload := read_json_file_or(output_fail_path, {})
 assert_true(to_bool(dict_get_or(fail_payload, "ok", true) == false))
+assert_true(to_bool(len(fail_payload["profiles"]) == 2))
 fail_gates := dict_get_or(fail_payload, "gates", {})
 assert_true(to_bool(dict_get_or(fail_gates, "performance_budgets_enforced", true) == false))
 
