@@ -54,7 +54,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          kujo run scripts/build_release_artifacts.kujo --interpreter \
+          kujo run scripts/build_release_artifacts.kujo --interpreter -- \
             --version "${{ steps.release_meta.outputs.version_input }}" \
             --notes "${{ steps.release_meta.outputs.notes_path }}" \
             --output-dir ./results/releases > release-artifacts.json

@@ -82,7 +82,7 @@ Current repository version source of truth:
 Generate deterministic release artifacts with checksums:
 
 ```bash
-kujo run scripts/build_release_artifacts.kujo --interpreter --version vX.Y.Z --notes ./docs/releases/vX.Y.Z.md
+kujo run scripts/build_release_artifacts.kujo --interpreter -- --version vX.Y.Z --notes ./docs/releases/vX.Y.Z.md
 ```
 
 This produces:
