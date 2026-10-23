@@ -1,0 +1,25 @@
+{
+  "local_full_suite": {
+    "passed": 72,
+    "total": 73,
+    "failed": [
+      "tests/test_release_evaluation.kujo"
+    ],
+    "warnings": 16,
+    "undefined_function_warnings": 0,
+    "isolated_evaluation_retry": "failed",
+    "interpretation": "All security tests passed; local evaluation remains failing. Recovery evaluation reports show latency failures with all quality gates passing. Hosted evaluation passed unchanged thresholds."
+  },
+  "hosted_full_suite": {
+    "run": 39882463502,
+    "commit": "79cacd2ccff2579b4dfec7961d321d64c85954b1",
+    "passed": 73,
+    "total": 73
+  },
+  "live_assertions": 44,
+  "proxy_tests": 6,
+  "nested_redaction_modes": [
+    "interpreter",
+    "bridge"
+  ]
+}

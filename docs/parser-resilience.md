@@ -33,4 +33,4 @@ Parser timeout guardrail:
 
 ## Validation
 
-- `kujo run tests/test_parser_matrix_resilience.kujo --interpreter`
+- `kujo run tests/test_parser_matrix_resilience.kujo`

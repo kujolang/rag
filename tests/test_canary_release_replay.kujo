@@ -61,8 +61,8 @@ write_file(accept_fail_path, to_json({
 	"max_avg_confidence_drop": 0.0,
 	"max_avg_grounding_drop": 0.0,
 	"max_error_rate_increase": 0.0,
-	"max_avg_latency_ratio": 0.01,
-	"max_p95_latency_ratio": 0.01
+	"max_avg_latency_ratio": 0.1,
+	"max_p95_latency_ratio": 0.1
 }))
 
 cmd_pass := "KUJO_RAG_CANARY_BASELINE_REPORT_PATH=" + baseline_path + " KUJO_RAG_CANARY_ACCEPTANCE_PATH=" + accept_pass_path + " KUJO_RAG_CANARY_OUTPUT_PATH=" + output_path + " KUJO_RAG_CANARY_INDEX_PATH=" + index_path + " " + kujo_bin + " run scripts/run_canary_release_replay.kujo --interpreter"
@@ -75,6 +75,20 @@ assert_true(to_bool(dict_get_or(pass_parsed, "ok", false) == true))
 pass_payload := dict_get_or(pass_parsed, "data", {})
 assert_true(to_bool(dict_get_or(pass_payload, "ok", false) == true))
 assert_true(to_bool(dict_get_or(dict_get_or(pass_payload, "gates", {}), "minimum_sample_count", false) == true))
+
+# The failure fixture needs a strict baseline, not an out-of-range threshold.
+# Ratios below 0.1 are normalized to 0.1; a fast replay can beat 1200ms / 10.
+delete_file(baseline_path)
+write_file(baseline_path, to_json({
+	"metrics": {
+		"quality_pass_rate": 1.0,
+		"avg_confidence": 0.45,
+		"avg_grounding": 1.0,
+		"error_rate": 0.0,
+		"avg_latency_ms": 1,
+		"p95_latency_ms": 1
+	}
+}))
 
 cmd_fail := "KUJO_RAG_CANARY_BASELINE_REPORT_PATH=" + baseline_path + " KUJO_RAG_CANARY_ACCEPTANCE_PATH=" + accept_fail_path + " KUJO_RAG_CANARY_OUTPUT_PATH=" + output_path + " KUJO_RAG_CANARY_INDEX_PATH=" + index_path + " " + kujo_bin + " run scripts/run_canary_release_replay.kujo --interpreter"
 fail_res := execute_status(cmd_fail, {"timeout_ms": 240000})

@@ -104,7 +104,7 @@ It is disabled by default. Operators can restore the immediately previous
 attested generation with an explicit confirmation:
 
 ```bash
-kujo run main.kujo --interpreter qdrant-rollback --confirm true
+kujo run main.kujo -- qdrant-rollback --confirm true
 ```
 
 Rollback re-verifies the previous generation's exact count and generation digest,
@@ -133,7 +133,7 @@ Run backend contract coverage:
 
 ```bash
 export KUJO_BIN=/path/to/kujo/target/debug/kujo
-$KUJO_BIN run tests/test_backend_contract.kujo --interpreter
+$KUJO_BIN run tests/test_backend_contract.kujo
 ```
 
 This test verifies backend swap behavior for `local_json`, `memory`, and `qdrant_http` modes.

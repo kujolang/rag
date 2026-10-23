@@ -101,7 +101,7 @@ KUJO_RAG_PRODUCTION_ATTESTATION_PATH=/private/deployment/production-attestation.
 KUJO_RAG_PRODUCTION_EVIDENCE_ROOT=/private/deployment/evidence/production-security \
 KUJO_RAG_PRODUCTION_ATTESTATION_OUTPUT_PATH=./results/security/production-security-status.json \
 KUJO_BIN=/absolute/path/to/kujo \
-  /absolute/path/to/kujo run scripts/run_production_security_attestation_review.kujo --interpreter
+  /absolute/path/to/kujo run scripts/run_production_security_attestation_review.kujo
 ```
 
 The gate fails closed when controls, evidence digests, or approvals are

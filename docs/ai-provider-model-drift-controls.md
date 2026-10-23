@@ -9,7 +9,7 @@ This gate detects unexpected runtime drift for AI-enabled paths by enforcing pin
 Run:
 
 ```bash
-kujo run scripts/run_ai_provider_model_drift_check.kujo --interpreter
+kujo run scripts/run_ai_provider_model_drift_check.kujo
 ```
 
 The script reads the latest release-evaluation report and produces a drift artifact.
@@ -60,6 +60,6 @@ On failure, the script exits non-zero and still writes `results/ai_provider_mode
 
 ## Validation
 
-- `kujo run tests/test_ai_provider_model_drift_check.kujo --interpreter`
-- `kujo run scripts/run_release_evaluation.kujo --interpreter`
-- `kujo run scripts/run_ai_provider_model_drift_check.kujo --interpreter`
+- `kujo run tests/test_ai_provider_model_drift_check.kujo`
+- `kujo run scripts/run_release_evaluation.kujo`
+- `kujo run scripts/run_ai_provider_model_drift_check.kujo`

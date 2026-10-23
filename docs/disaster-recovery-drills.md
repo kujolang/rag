@@ -23,7 +23,7 @@ Each tier maps to `docs/runbooks/disaster-recovery-drill-runbook.md` for remedia
 ```bash
 DR_TARGETS_PATH=config/dr_tiers.json \
 DR_DRILL_PATH=results/dr_drill_snapshot.json \
-kujo run scripts/simulate_dr_drill.kujo --interpreter
+kujo run scripts/simulate_dr_drill.kujo
 ```
 
 3. Review output:

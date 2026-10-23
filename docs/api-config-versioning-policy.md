@@ -68,7 +68,7 @@ A release is promotion-eligible only when all declared previous minor compatibil
 
 Run the deterministic policy gate:
 
-- `kujo run scripts/run_api_config_versioning_review.kujo --interpreter`
+- `kujo run scripts/run_api_config_versioning_review.kujo`
 
 CI workflow:
 

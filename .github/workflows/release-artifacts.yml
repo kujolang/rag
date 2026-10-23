@@ -50,6 +50,11 @@ jobs:
           echo "normalized_tag=${normalized}" >> "$GITHUB_OUTPUT"
           echo "notes_path=${notes_path}" >> "$GITHUB_OUTPUT"
 
+      - name: Enforce local-only release scope
+        run: |
+          python3 scripts/check_local_release_scope.py
+          python3 tests/test_local_docs_policy.py
+
       - name: Build release artifacts and checksums
         shell: bash
         run: |

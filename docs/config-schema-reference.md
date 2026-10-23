@@ -144,4 +144,4 @@ Invalid config cases and expected validation errors are defined in `./config/con
 
 Validate examples with:
 
-- `kujo run scripts/run_config_schema_review.kujo --interpreter`
+- `kujo run scripts/run_config_schema_review.kujo`

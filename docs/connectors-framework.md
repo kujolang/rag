@@ -50,7 +50,7 @@ Plugin JSON output contract:
 Run:
 
 ```bash
-kujo run scripts/run_connector_ingest.kujo --interpreter
+kujo run scripts/run_connector_ingest.kujo
 ```
 
 ## Environment Overrides
@@ -73,9 +73,9 @@ Connector stage failures return structured connector-level errors and fail the g
 
 ## Validation
 
-- `kujo run tests/test_connector_framework.kujo --interpreter`
-- `kujo run scripts/run_connector_ingest.kujo --interpreter`
-- `kujo run tests/test_connector_plugin_stub.kujo --interpreter`
+- `kujo run tests/test_connector_framework.kujo`
+- `kujo run scripts/run_connector_ingest.kujo`
+- `kujo run tests/test_connector_plugin_stub.kujo`
 
 ## Enterprise Connector Roadmap
 

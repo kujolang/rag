@@ -41,13 +41,13 @@ A non-zero exit is returned when any high severity findings are present.
 Run a local scan:
 
 ```bash
-kujo run scripts/run_supply_chain_scan.kujo --interpreter --root .github/workflows/release-gates.yml --output ./results/supply-chain-scan-release-gates.json
-kujo run scripts/run_supply_chain_scan.kujo --interpreter --root .github/workflows/release-artifacts.yml --output ./results/supply-chain-scan-release-artifacts.json
-kujo run scripts/run_supply_chain_scan.kujo --interpreter --root .env.example --output ./results/supply-chain-scan-env-surface.json
+kujo run scripts/run_supply_chain_scan.kujo -- --root .github/workflows/release-gates.yml --output ./results/supply-chain-scan-release-gates.json
+kujo run scripts/run_supply_chain_scan.kujo -- --root .github/workflows/release-artifacts.yml --output ./results/supply-chain-scan-release-artifacts.json
+kujo run scripts/run_supply_chain_scan.kujo -- --root .env.example --output ./results/supply-chain-scan-env-surface.json
 ```
 
 Generate release artifacts (includes SBOM):
 
 ```bash
-kujo run scripts/build_release_artifacts.kujo --interpreter -- --version vX.Y.Z --notes ./docs/releases/vX.Y.Z.md --output-dir ./results/releases
+kujo run scripts/build_release_artifacts.kujo -- --version vX.Y.Z --notes ./docs/releases/vX.Y.Z.md --output-dir ./results/releases
 ```

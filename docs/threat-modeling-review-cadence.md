@@ -50,7 +50,7 @@ Attach this checklist to release planning and promotion evidence:
 Run:
 
 ```bash
-kujo run scripts/run_threat_model_review_cadence.kujo --interpreter
+kujo run scripts/run_threat_model_review_cadence.kujo
 ```
 
 Primary artifact output:

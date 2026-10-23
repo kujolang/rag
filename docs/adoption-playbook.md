@@ -12,9 +12,9 @@ Verified baseline: offline hash embeddings are the default, external AI provider
 - `KUJO_RAG_INDEX_PATH`
 - `KUJO_RAG_API_INGEST_ALLOWED_ROOTS`
 4. Run a first ingest against your project content:
-- `kujo run main.kujo --interpreter ingest --path <your-content-path> --recursive true`
+- `kujo run main.kujo -- ingest --path <your-content-path> --recursive true`
 5. Run a first query:
-- `kujo run main.kujo --interpreter query --question "What does this project do?"`
+- `kujo run main.kujo -- query --question "What does this project do?"`
 
 ## Integration Recipes
 
@@ -27,7 +27,7 @@ Use when content is mostly markdown and text docs.
 - `KUJO_RAG_CHUNK_STRATEGY=line`
 - `KUJO_RAG_TOP_K=6`
 - Example command:
-- `kujo run main.kujo --interpreter ingest --path ./docs --recursive true`
+- `kujo run main.kujo -- ingest --path ./docs --recursive true`
 
 ### Recipe 2: Code Repository
 
@@ -39,7 +39,7 @@ Use when you need retrieval over source files and design docs.
 - `KUJO_RAG_CHUNK_SIZE=1100`
 - `KUJO_RAG_CHUNK_OVERLAP=180`
 - Example command:
-- `kujo run main.kujo --interpreter ingest --path ./src --recursive true`
+- `kujo run main.kujo -- ingest --path ./src --recursive true`
 
 ### Recipe 3: Mixed Content Workspace
 
@@ -50,7 +50,7 @@ Use when docs, notes, and source files are combined.
 - `KUJO_RAG_CHUNK_STRATEGY=line`
 - `KUJO_RAG_TOP_K=8`
 - Example command:
-- `kujo run main.kujo --interpreter ingest --path ./knowledge --recursive true`
+- `kujo run main.kujo -- ingest --path ./knowledge --recursive true`
 
 ## Deployment Patterns
 
@@ -63,7 +63,7 @@ Use when docs, notes, and source files are combined.
 ### Pattern B: Local API Service
 
 - Start server with:
-- `kujo run main.kujo --interpreter serve --host 127.0.0.1 --port 8787`
+- `kujo run main.kujo -- serve --host 127.0.0.1 --port 8787`
 - Integrate IDE tools, scripts, or local dashboards via `/query`.
 - The verified smoke path stays local on loopback and does not require hosted infrastructure.
 

@@ -8,8 +8,8 @@ RAG can select equivalent code examples before serializing the response or const
 export KUJO_RAG_MARKDOWN_EXAMPLES_ENABLED=true
 export KUJO_RAG_CHUNK_SIZE=4000
 export KUJO_RAG_INDEX_PATH=./data/documentation-pilot.json
-kujo run main.kujo --interpreter ingest --path ./examples/retrieval_preferences --recursive true
-kujo run main.kujo --interpreter serve --host 127.0.0.1 --port 8787
+kujo run main.kujo -- ingest --path ./examples/retrieval_preferences --recursive true
+kujo run main.kujo -- serve --host 127.0.0.1 --port 8787
 ```
 
 In another terminal:
@@ -68,7 +68,7 @@ KUJO_BIN=kujo /tmp/rag-measurement/bin/python scripts/verify_retrieval_preferenc
 KUJO_BIN=kujo python3 scripts/verify_http_document_ingestion.py
 ```
 
-When sibling rollout checkouts are present, the pilot also exercises Agents SDK, AI Chat, and Dispatch. Set `AGENTS_SDK_PATH`, `AI_CHAT_PATH`, `DISPATCH_PATH`, and `NODE_BIN` to explicit paths when needed. AI Chat needs its installed dependencies and Node 22.17.0.
+When sibling rollout checkouts are present, the pilot also exercises Agents SDK, AI Chat, and Dispatch. Set `AGENTS_SDK_PATH`, `AI_CHAT_PATH`, `DISPATCH_PATH`, and `NODE_BIN` to explicit paths when needed. AI Chat needs its installed dependencies and patched Node 22.23.4.
 
 Receipts in `results/retrieval-preferences/` record response bytes, exact named-tokenizer counts, latency, request counts, cache behavior, retained guidance, and original citation ranges. Captured agent/AI Chat messages measure actual model-input content, excluding provider-specific message framing. The model callbacks are local fixtures, so this measures context reduction rather than paid model quality or inference latency. Do not claim latency or quality improvements beyond these checks.
 

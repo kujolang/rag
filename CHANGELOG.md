@@ -2,13 +2,17 @@
 
 All notable changes to Kujo RAG are documented here.
 
-## [1.1.0] - 2026-10-14
+## [Unreleased]
 
-- Add negotiated HTTP document ingestion, equivalent example selection, retrieval measurements, and local published documentation snapshots/service.
-- Harden atomic index persistence, parsing, quotas, privacy, descriptor-relative ingestion, staged Qdrant transactions, and Cloudflare proxy identity/RBAC.
-- Prevent nested profile lookup from resetting the outer performance-review loop counter; add a multi-profile termination regression.
-- Pass artifact-builder options after the runtime argument separator; make the canary negative control independent of machine speed.
-- Keep hosted production certification deployment-specific; see [release notes](docs/releases/v1.1.0.md).
+- Make the canary negative control deterministic and align the Kujo manifest minimum with the supported 1.2.3 runtime.
+
+## [1.1.0] - 2026-10-21
+
+- Add HTTP documentation ingestion, equivalent-example retrieval preferences, and a local published-docs service workflow.
+- Harden ingestion, structured document parsing, index persistence, authentication and proxy boundaries.
+- Add staged Qdrant transaction recovery and rollback verification.
+- Require Kujo 1.2.3 or newer and patched Node.js versions for the associated tooling.
+- Preserve local/offline defaults and require target-environment evidence for hosted production promotion.
 
 - Added launch-readiness Spec, Eval suite, Kujo/Kennel metadata, and README readiness/version wording alignment for prelaunch review gates.
 - Preserve actionable `meta.load_error` diagnostics when an index exists but its

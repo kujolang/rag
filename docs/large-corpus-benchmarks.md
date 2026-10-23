@@ -23,7 +23,7 @@ The benchmark exits non-zero when any profile misses budget gates, so CI fails o
 ## Run Locally
 
 ```bash
-kujo run scripts/run_large_corpus_benchmarks.kujo --interpreter
+kujo run scripts/run_large_corpus_benchmarks.kujo
 ```
 
 Default outputs:

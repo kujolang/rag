@@ -50,12 +50,12 @@ When current UTC hour is outside the allowed window, script exits successfully w
 Dry-run/report mode:
 
 ```bash
-kujo run scripts/maintain_index.kujo --interpreter
+kujo run scripts/maintain_index.kujo
 ```
 
 Apply mode inside maintenance window:
 
 ```bash
 KUJO_RAG_INDEX_MAINTENANCE_MODE=apply \
-kujo run scripts/maintain_index.kujo --interpreter
+kujo run scripts/maintain_index.kujo
 ```

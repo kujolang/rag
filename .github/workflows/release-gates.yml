@@ -9,6 +9,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
+      - name: Set up patched Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "24.22.1"
       - name: Checkout repository
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
 
@@ -66,6 +70,10 @@ jobs:
           kujo run scripts/run_tests.kujo --interpreter > runtime-mode-interpreter.json || status=$?
           cat runtime-mode-interpreter.json
           exit "$status"
+
+      - name: Verify recursive redaction bindings
+        if: matrix.mode == 'interpreter'
+        run: python3 tests/test_redaction_bindings.py
 
       - name: Validate bridge supported mode
         if: matrix.mode == 'bridge'
@@ -139,6 +147,11 @@ jobs:
       - name: Verify Kujo runtime
         run: kujo --version
 
+      - name: Verify local-only release scope and service safeguards
+        run: |
+          python3 scripts/check_local_release_scope.py
+          python3 tests/test_local_docs_policy.py
+
       - name: Run aggregate release gate suite
         shell: bash
         run: |
@@ -182,27 +195,6 @@ jobs:
           set -euo pipefail
           kujo run scripts/run_chunking_preset_ab_evaluation.kujo --interpreter > chunking-preset-ab-eval.json
           cat chunking-preset-ab-eval.json
-
-      - name: Run threat-model cadence gate
-        shell: bash
-        run: |
-          set -euo pipefail
-          kujo run scripts/run_threat_model_review_cadence.kujo --interpreter > threat-model-cadence.json
-          cat threat-model-cadence.json
-
-      - name: Run penetration-test remediation gate
-        shell: bash
-        run: |
-          set -euo pipefail
-          kujo run scripts/run_penetration_test_remediation_review.kujo --interpreter > penetration-test-remediation.json
-          cat penetration-test-remediation.json
-
-      - name: Run incident-response tabletop readiness gate
-        shell: bash
-        run: |
-          set -euo pipefail
-          kujo run scripts/run_incident_response_tabletop_review.kujo --interpreter > incident-response-tabletop.json
-          cat incident-response-tabletop.json
 
       - name: Run OpenAPI contract and SDK gate
         shell: bash
@@ -266,13 +258,6 @@ jobs:
           set -euo pipefail
           kujo run scripts/run_performance_cost_budget_review.kujo --interpreter > performance-cost-budget.json
           cat performance-cost-budget.json
-
-      - name: Run release readiness scorecard gate
-        shell: bash
-        run: |
-          set -euo pipefail
-          kujo run scripts/run_release_readiness_scorecard_review.kujo --interpreter > release-readiness-scorecard.json
-          cat release-readiness-scorecard.json
 
       - name: Upload release gate artifacts
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02

@@ -21,13 +21,13 @@ This document defines the UPR-080 API productization workflow for Kujo RAG.
 Regenerate the JavaScript SDK from the OpenAPI contract:
 
 ```bash
-KUJO_RAG_OPENAPI_REGENERATE=true kujo run scripts/run_openapi_contract_review.kujo --interpreter
+KUJO_RAG_OPENAPI_REGENERATE=true kujo run scripts/run_openapi_contract_review.kujo
 ```
 
 Validate contract and SDK sync without mutating files:
 
 ```bash
-kujo run scripts/run_openapi_contract_review.kujo --interpreter
+kujo run scripts/run_openapi_contract_review.kujo
 ```
 
 The runner exits non-zero when:

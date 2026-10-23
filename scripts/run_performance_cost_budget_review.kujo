@@ -57,15 +57,15 @@ func find_profile_entry(entries, target_name) {
 	if type(entries) != "array" {
 		return {}
 	}
-	target := normalize_text(target_name)
-	entry_index := 0
-	while entry_index < len(entries) {
-		entry := entries[entry_index]
-		name := normalize_text(dict_get_or(entry, "name", ""))
+	let target := normalize_text(target_name)
+	mut i := 0
+	while i < len(entries) {
+		let entry := entries[i]
+		let name := normalize_text(dict_get_or(entry, "name", ""))
 		if name == target {
 			return entry
 		}
-		entry_index = entry_index + 1
+		i = i + 1
 	}
 	return {}
 }

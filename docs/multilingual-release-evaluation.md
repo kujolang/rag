@@ -9,7 +9,7 @@ This gate validates retrieval quality across language families so non-English be
 Run:
 
 ```bash
-kujo run scripts/run_multilingual_release_evaluation.kujo --interpreter
+kujo run scripts/run_multilingual_release_evaluation.kujo
 ```
 
 The script runs release evaluation against a multilingual corpus/query set and enforces per-language thresholds.
@@ -45,5 +45,5 @@ The report includes:
 
 ## Validation
 
-- `kujo run tests/test_multilingual_release_evaluation.kujo --interpreter`
-- `kujo run scripts/run_multilingual_release_evaluation.kujo --interpreter`
+- `kujo run tests/test_multilingual_release_evaluation.kujo`
+- `kujo run scripts/run_multilingual_release_evaluation.kujo`

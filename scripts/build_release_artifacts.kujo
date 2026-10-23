@@ -96,6 +96,10 @@ func should_exclude(path_value, excluded_prefixes) {
 	if starts_with(path, "./") {
 		path = substring(path, 2, len(path))
 	}
+	# Python bytecode caches are local build products, never release sources.
+	if contains("/" + path + "/", "/__pycache__/") {
+		return true
+	}
 	i := 0
 	while i < len(excluded_prefixes) {
 		prefix := excluded_prefixes[i]
@@ -196,7 +200,7 @@ func build_manifest(version, notes_path, files) {
 		contents := read_file(path_value)
 		entries = push(entries, {
 			"path": path_value,
-			"bytes": len(contents),
+			"bytes": file_size(path_value),
 			"sha256": sha256(contents)
 		})
 		i = i + 1

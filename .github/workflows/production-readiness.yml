@@ -1,0 +1,48 @@
+name: production-readiness
+
+on:
+  workflow_dispatch:
+
+jobs:
+  production-readiness:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+
+      - name: Install pinned Kujo runtime
+        uses: ./.github/actions/setup-kujo
+
+      - name: Run threat-model cadence gate
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          kujo run scripts/run_threat_model_review_cadence.kujo --interpreter > threat-model-cadence.json
+          cat threat-model-cadence.json
+
+      - name: Run penetration-test remediation gate
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          kujo run scripts/run_penetration_test_remediation_review.kujo --interpreter > penetration-test-remediation.json
+          cat penetration-test-remediation.json
+
+      - name: Run incident-response tabletop readiness gate
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          kujo run scripts/run_incident_response_tabletop_review.kujo --interpreter > incident-response-tabletop.json
+          cat incident-response-tabletop.json
+
+      - name: Run release readiness scorecard gate
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          kujo run scripts/run_release_readiness_scorecard_review.kujo --interpreter > release-readiness-scorecard.json
+          cat release-readiness-scorecard.json
+

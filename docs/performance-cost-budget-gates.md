@@ -25,13 +25,13 @@ The policy defines:
 Run budget evaluation:
 
 ```bash
-kujo run scripts/run_performance_cost_budget_review.kujo --interpreter
+kujo run scripts/run_performance_cost_budget_review.kujo
 ```
 
 Run pass/fail regression test:
 
 ```bash
-kujo run tests/test_performance_cost_budget_review.kujo --interpreter
+kujo run tests/test_performance_cost_budget_review.kujo
 ```
 
 Output artifact:
