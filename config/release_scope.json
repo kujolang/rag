@@ -1,0 +1,10 @@
+{
+  "scope": "local-only",
+  "candidate_version": "1.1.0",
+  "authorized_by": "Repository owner, conversation decision 2026-10-22",
+  "network_boundary": "loopback-only",
+  "data_scope": "local documentation corpus",
+  "hosted_production_supported": false,
+  "hosted_attestation": "not applicable to this release scope; required before any hosted promotion",
+  "review_document": "docs/security-reviews/local-only-release-2026-10-22.md"
+}

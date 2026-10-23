@@ -1,6 +1,14 @@
 # Release Process and Rollback Guide
 
-This document defines the UPR-004 release process for deterministic, rollback-safe production releases.
+This document defines technical release checks and additional hosted-production promotion requirements.
+
+## Current release scope: local-only
+
+Candidate1.1.0 is restricted to the owner-approved local-only profile in `config/release_scope.json` and `docs/security-reviews/local-only-release-2026-10-22.md`. The technical `release-gates` job and artifact workflow validate that profile. All applicable technical checks must pass on the final source commit.
+
+Hosted proxy/immutable-audit attestations, the human tabletop and historical enterprise governance scorecard are not certifications of this local tool release. Their four automated governance checks are retained in `.github/workflows/production-readiness.yml`; they remain required, together with real deployment attestation, before any hosted promotion. No historical dates, approvals or expired exceptions were renewed. Existing branch protections must remain intact.
+
+The numbered inputs below include both technical checks and hosted-promotion checks. Inputs named threat-model cadence, penetration-test remediation, incident-response tabletop, release readiness scorecard and production security attestation apply to hosted promotion; the local security review and executed exercises linked above supply the current local-scope evidence.
 
 ## Versioning Policy
 

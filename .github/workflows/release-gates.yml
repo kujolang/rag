@@ -147,6 +147,11 @@ jobs:
       - name: Verify Kujo runtime
         run: kujo --version
 
+      - name: Verify local-only release scope and service safeguards
+        run: |
+          python3 scripts/check_local_release_scope.py
+          python3 tests/test_local_docs_policy.py
+
       - name: Run aggregate release gate suite
         shell: bash
         run: |
@@ -190,27 +195,6 @@ jobs:
           set -euo pipefail
           kujo run scripts/run_chunking_preset_ab_evaluation.kujo --interpreter > chunking-preset-ab-eval.json
           cat chunking-preset-ab-eval.json
-
-      - name: Run threat-model cadence gate
-        shell: bash
-        run: |
-          set -euo pipefail
-          kujo run scripts/run_threat_model_review_cadence.kujo --interpreter > threat-model-cadence.json
-          cat threat-model-cadence.json
-
-      - name: Run penetration-test remediation gate
-        shell: bash
-        run: |
-          set -euo pipefail
-          kujo run scripts/run_penetration_test_remediation_review.kujo --interpreter > penetration-test-remediation.json
-          cat penetration-test-remediation.json
-
-      - name: Run incident-response tabletop readiness gate
-        shell: bash
-        run: |
-          set -euo pipefail
-          kujo run scripts/run_incident_response_tabletop_review.kujo --interpreter > incident-response-tabletop.json
-          cat incident-response-tabletop.json
 
       - name: Run OpenAPI contract and SDK gate
         shell: bash
@@ -274,13 +258,6 @@ jobs:
           set -euo pipefail
           kujo run scripts/run_performance_cost_budget_review.kujo --interpreter > performance-cost-budget.json
           cat performance-cost-budget.json
-
-      - name: Run release readiness scorecard gate
-        shell: bash
-        run: |
-          set -euo pipefail
-          kujo run scripts/run_release_readiness_scorecard_review.kujo --interpreter > release-readiness-scorecard.json
-          cat release-readiness-scorecard.json
 
       - name: Upload release gate artifacts
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02

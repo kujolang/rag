@@ -1,0 +1,48 @@
+{
+  "scope": "local-only existing documentation service",
+  "runtime": "kujo 1.5.0",
+  "checks": [
+    {
+      "check": "healthy after managed restart",
+      "status": 200,
+      "passed": true
+    },
+    {
+      "check": "ready",
+      "status": 200,
+      "passed": true
+    },
+    {
+      "check": "anonymous admin rejected",
+      "status": 401,
+      "passed": true
+    },
+    {
+      "check": "invalid credential rejected",
+      "status": 403,
+      "passed": true
+    },
+    {
+      "check": "reader cannot forge admin",
+      "status": 403,
+      "passed": true
+    },
+    {
+      "check": "authenticated documentation query",
+      "status": 200,
+      "passed": true
+    },
+    {
+      "check": "cross namespace rejected",
+      "status": 403,
+      "passed": true
+    },
+    {
+      "check": "still healthy after denial",
+      "status": 200,
+      "passed": true
+    }
+  ],
+  "private_config_mode": "0o600",
+  "data_directory_mode": "0o700"
+}
