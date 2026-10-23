@@ -1,6 +1,6 @@
 # RAG Starter Kit
 
-> Candidate1.1.0 is a local-only release. See [supported scope and release evidence](docs/security-reviews/local-only-release-2026-10-22.md); hosted production promotion is not certified.
+> RAG 1.1.0 adds documentation ingestion, example selection and hardened retrieval workflows. See the [release notes](docs/releases/v1.1.0.md).
 
 [![Version](https://img.shields.io/badge/version-1.1.0-black)](https://github.com/kujolang/rag)
 [![License](https://img.shields.io/badge/license-MIT-lightgrey)](LICENSE)
