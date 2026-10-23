@@ -200,7 +200,7 @@ func build_manifest(version, notes_path, files) {
 		contents := read_file(path_value)
 		entries = push(entries, {
 			"path": path_value,
-			"bytes": len(contents),
+			"bytes": file_size(path_value),
 			"sha256": sha256(contents)
 		})
 		i = i + 1

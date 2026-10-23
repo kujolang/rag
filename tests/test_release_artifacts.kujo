@@ -26,6 +26,8 @@ if ensure_cache_dir {
 }
 cache_fixture := cache_fixture_dir + "/release_artifact_" + to_string(current_timestamp()) + ".pyc"
 write_file(cache_fixture, "local cache fixture")
+unicode_fixture := "docs/release_unicode_" + to_string(current_timestamp()) + ".txt"
+write_file(unicode_fixture, "café — retrieval\n")
 res := execute_status(cmd, {"timeout_ms": 120000})
 delete_file(cache_fixture)
 
@@ -49,6 +51,16 @@ assert_true(to_bool(file_exists(checksums_path) == true))
 assert_true(to_bool(file_exists(notes_copy_path) == true))
 
 manifest := parse_json(read_file(manifest_path))
+unicode_found := false
+for entry in dict_get_or(manifest, "files", []) {
+	if dict_get_or(entry, "path", "") == unicode_fixture {
+		assert_true(to_bool(dict_get_or(entry, "bytes", 0) == file_size(unicode_fixture)))
+		assert_true(to_bool(dict_get_or(entry, "bytes", 0) > len(read_file(unicode_fixture))))
+		unicode_found = true
+	}
+}
+delete_file(unicode_fixture)
+assert_true(unicode_found)
 assert_true(to_bool(dict_get_or(manifest, "release_version", "") == "0.0.0"))
 assert_true(to_bool(dict_get_or(manifest, "release_tag", "") == "v0.0.0"))
 assert_true(to_bool(len(dict_get_or(manifest, "files", [])) > 0))
