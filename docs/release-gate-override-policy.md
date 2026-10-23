@@ -27,7 +27,7 @@ Active entries in `config/release_gate_overrides.json` must include:
 2. Two approvers review risk and remediation plan.
 3. Active override entry is recorded in `config/release_gate_overrides.json`.
 4. Validator is executed:
-   - `kujo run scripts/validate_release_gate_overrides.kujo --interpreter`
+   - `kujo run scripts/validate_release_gate_overrides.kujo`
 5. Validator artifact is archived:
    - `results/release_gate_override_review.json`
 6. Override is removed after remediation and before expiration.

@@ -50,7 +50,7 @@ Each cycle must include both:
 ## Automated Validation Command
 
 ```bash
-kujo run scripts/run_penetration_test_remediation_review.kujo --interpreter
+kujo run scripts/run_penetration_test_remediation_review.kujo
 ```
 
 Primary artifact output:

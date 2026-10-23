@@ -42,5 +42,5 @@ Structured snippets are row-shaped (`field: value`) so answers remain grounded t
 
 ## Validation
 
-- `kujo run tests/test_structured_ingestion_retrieval.kujo --interpreter`
-- `kujo run tests/test_unit.kujo --interpreter`
+- `kujo run tests/test_structured_ingestion_retrieval.kujo`
+- `kujo run tests/test_unit.kujo`

@@ -19,62 +19,62 @@ Current repository version source of truth:
 1. Release notes file exists at `docs/releases/vX.Y.Z.md`.
 2. CI required checks are green (`runtime-support-matrix`, `supply-chain-scan`, `release-gates`).
 3. Release artifact rehearsal passes:
-   - `kujo run tests/test_release_artifacts.kujo --interpreter`
+   - `kujo run tests/test_release_artifacts.kujo`
 4. Supply-chain scan gate passes with no high severity findings:
-   - `kujo run scripts/run_supply_chain_scan.kujo --interpreter --root .github/workflows/release-gates.yml --output ./results/supply-chain-scan-release-gates.json`
-   - `kujo run scripts/run_supply_chain_scan.kujo --interpreter --root .github/workflows/release-artifacts.yml --output ./results/supply-chain-scan-release-artifacts.json`
-   - `kujo run scripts/run_supply_chain_scan.kujo --interpreter --root .env.example --output ./results/supply-chain-scan-env-surface.json`
+   - `kujo run scripts/run_supply_chain_scan.kujo -- --root .github/workflows/release-gates.yml --output ./results/supply-chain-scan-release-gates.json`
+   - `kujo run scripts/run_supply_chain_scan.kujo -- --root .github/workflows/release-artifacts.yml --output ./results/supply-chain-scan-release-artifacts.json`
+   - `kujo run scripts/run_supply_chain_scan.kujo -- --root .env.example --output ./results/supply-chain-scan-env-surface.json`
 5. Release-gate override ledger is valid (if any active exceptions exist):
-   - `kujo run scripts/validate_release_gate_overrides.kujo --interpreter`
+   - `kujo run scripts/validate_release_gate_overrides.kujo`
    - policy: `docs/release-gate-override-policy.md`
 6. Canary release replay gate passes against production-like samples:
-   - `kujo run scripts/run_canary_release_replay.kujo --interpreter`
+   - `kujo run scripts/run_canary_release_replay.kujo`
    - docs: `docs/canary-release-replay.md`
 7. AI provider/model drift gate passes using pinned runtime controls and reference prompts:
-   - `kujo run scripts/run_ai_provider_model_drift_check.kujo --interpreter`
+   - `kujo run scripts/run_ai_provider_model_drift_check.kujo`
    - docs: `docs/ai-provider-model-drift-controls.md`
 8. Multilingual release evaluation gate passes with per-language-family quality checks:
-   - `kujo run scripts/run_multilingual_release_evaluation.kujo --interpreter`
+   - `kujo run scripts/run_multilingual_release_evaluation.kujo`
    - docs: `docs/multilingual-release-evaluation.md`
 9. Chunking preset A/B evaluation gate passes on targeted mixed-format corpus:
-   - `kujo run scripts/run_chunking_preset_ab_evaluation.kujo --interpreter`
+   - `kujo run scripts/run_chunking_preset_ab_evaluation.kujo`
    - docs: `docs/chunking-presets.md`
 10. Threat-model cadence validation passes and security review checklist linkage is current:
-   - `kujo run scripts/run_threat_model_review_cadence.kujo --interpreter`
+   - `kujo run scripts/run_threat_model_review_cadence.kujo`
    - docs: `docs/threat-modeling-review-cadence.md`
 11. Penetration-test remediation gate passes so high severity findings are resolved or approved exception before production promotion:
-   - `kujo run scripts/run_penetration_test_remediation_review.kujo --interpreter`
+   - `kujo run scripts/run_penetration_test_remediation_review.kujo`
    - docs: `docs/penetration-testing-remediation-workflow.md`
 12. Incident-response tabletop readiness gate passes with required scenario coverage and follow-up tracking:
-   - `kujo run scripts/run_incident_response_tabletop_review.kujo --interpreter`
+   - `kujo run scripts/run_incident_response_tabletop_review.kujo`
    - docs: `docs/incident-response-tabletop-workflow.md`
 13. OpenAPI contract and generated SDK gate passes with no contract drift:
-   - `kujo run scripts/run_openapi_contract_review.kujo --interpreter`
+   - `kujo run scripts/run_openapi_contract_review.kujo`
    - docs: `docs/openapi-contract-sdk.md`
 14. API/config versioning policy gate passes with declared previous-minor compatibility coverage and migration-note enforcement:
-   - `kujo run scripts/run_api_config_versioning_review.kujo --interpreter`
+   - `kujo run scripts/run_api_config_versioning_review.kujo`
    - docs: `docs/api-config-versioning-policy.md`
 15. Config schema review gate passes with full key coverage and invalid-config example validation:
-   - `kujo run scripts/run_config_schema_review.kujo --interpreter`
+   - `kujo run scripts/run_config_schema_review.kujo`
    - docs: `docs/config-schema-reference.md`
 16. Containerized/devcontainer environment gate passes with one-command onboarding path and native workflow compatibility documented:
-   - `kujo run scripts/run_containerized_dev_environment_review.kujo --interpreter`
+   - `kujo run scripts/run_containerized_dev_environment_review.kujo`
    - docs: `docs/containerized-dev-environment.md`
 17. Chaos and fault-injection gate passes with required timeout/storage/dependency scenario coverage and recovery assertions:
-   - `kujo run scripts/run_chaos_fault_injection_review.kujo --interpreter`
+   - `kujo run scripts/run_chaos_fault_injection_review.kujo`
    - docs: `docs/chaos-fault-injection-scenarios.md`
 18. Architecture fitness gate passes with forbidden dependency checks and extension-point contract enforcement:
-   - `kujo run scripts/run_architecture_fitness_review.kujo --interpreter`
+   - `kujo run scripts/run_architecture_fitness_review.kujo`
    - docs: `docs/architecture-fitness-functions.md`
 19. Performance and cost budget gate passes with workload-class latency/throughput/resource/cost budgets and trend-regression checks:
-   - `kujo run scripts/run_performance_cost_budget_review.kujo --interpreter`
+   - `kujo run scripts/run_performance_cost_budget_review.kujo`
    - docs: `docs/performance-cost-budget-gates.md`
 20. Release readiness scorecard gate passes with weighted cross-domain criteria and explicit signoff:
-   - `kujo run scripts/run_release_readiness_scorecard_review.kujo --interpreter`
+   - `kujo run scripts/run_release_readiness_scorecard_review.kujo`
    - docs: `docs/release-readiness-scorecard.md`
 21. Production security attestation passes for the deployed proxy, RBAC mapping,
     and independently protected audit sink before production promotion:
-   - `kujo run scripts/run_production_security_attestation_review.kujo --interpreter`
+   - `kujo run scripts/run_production_security_attestation_review.kujo`
    - docs: `docs/production-security-attestation.md`
 
 ## Build Versioned Artifacts
@@ -82,7 +82,7 @@ Current repository version source of truth:
 Generate deterministic release artifacts with checksums:
 
 ```bash
-kujo run scripts/build_release_artifacts.kujo --interpreter -- --version vX.Y.Z --notes ./docs/releases/vX.Y.Z.md
+kujo run scripts/build_release_artifacts.kujo -- --version vX.Y.Z --notes ./docs/releases/vX.Y.Z.md
 ```
 
 This produces:
@@ -132,8 +132,8 @@ Use rollback only when current release is unstable or violates release gates.
 2. Verify target artifact checksums in `results/releases/vA.B.C/SHA256SUMS.txt`.
 3. Restore target runtime/config bundle.
 4. Re-run gate verification on rollback target:
-   - `kujo run scripts/run_release_evaluation.kujo --interpreter`
-   - `kujo run scripts/run_tests.kujo --interpreter`
+   - `kujo run scripts/run_release_evaluation.kujo`
+   - `kujo run scripts/run_tests.kujo`
 5. Record incident and rollback rationale in the next release notes file.
 
 ## Config Compatibility Rules

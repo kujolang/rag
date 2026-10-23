@@ -33,13 +33,13 @@ Each scenario must define:
 Run deterministic validation:
 
 ```bash
-kujo run scripts/run_chaos_fault_injection_review.kujo --interpreter
+kujo run scripts/run_chaos_fault_injection_review.kujo
 ```
 
 Run pass/fail regression suite:
 
 ```bash
-kujo run tests/test_chaos_fault_injection_review.kujo --interpreter
+kujo run tests/test_chaos_fault_injection_review.kujo
 ```
 
 Gate output artifact:

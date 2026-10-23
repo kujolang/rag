@@ -93,7 +93,7 @@ For deterministic, rollback-safe releases:
 2) Build artifacts + checksums:
 
 ```bash
-kujo run scripts/build_release_artifacts.kujo --interpreter -- --version vX.Y.Z --notes ./docs/releases/vX.Y.Z.md
+kujo run scripts/build_release_artifacts.kujo -- --version vX.Y.Z --notes ./docs/releases/vX.Y.Z.md
 ```
 
 3) Confirm outputs:
@@ -224,26 +224,26 @@ Privacy export and deletion workflows:
 Compliance control mapping baseline:
 
 - canonical control mapping source: `config/compliance_control_matrix.json`
-- periodic review runner: `kujo run scripts/run_compliance_control_evidence_review.kujo --interpreter`
+- periodic review runner: `kujo run scripts/run_compliance_control_evidence_review.kujo`
 - review workflow and triage policy: `docs/compliance-evidence-review-workflow.md`
 
 Threat modeling and security review cadence:
 
 - machine-readable cadence state: `config/threat_model_review_plan.json`
-- periodic cadence runner: `kujo run scripts/run_threat_model_review_cadence.kujo --interpreter`
+- periodic cadence runner: `kujo run scripts/run_threat_model_review_cadence.kujo`
 - review template and release checklist policy: `docs/threat-modeling-review-cadence.md`
 
 Penetration testing and remediation workflow:
 
 - machine-readable cadence and finding state: `config/penetration_test_review_plan.json`
 - remediation backlog mapping: `config/penetration_test_remediation_backlog.json`
-- periodic remediation gate runner: `kujo run scripts/run_penetration_test_remediation_review.kujo --interpreter`
+- periodic remediation gate runner: `kujo run scripts/run_penetration_test_remediation_review.kujo`
 - workflow and release-blocking policy: `docs/penetration-testing-remediation-workflow.md`
 
 Incident response tabletop workflow:
 
 - machine-readable tabletop cadence and scenario state: `config/incident_response_tabletop_plan.json`
-- periodic tabletop gate runner: `kujo run scripts/run_incident_response_tabletop_review.kujo --interpreter`
+- periodic tabletop gate runner: `kujo run scripts/run_incident_response_tabletop_review.kujo`
 - workflow contract and release linkage policy: `docs/incident-response-tabletop-workflow.md`
 
 Ingest idempotency and duplicate suppression:
@@ -271,7 +271,7 @@ Language/format-aware chunking presets:
 - enable preset routing with `KUJO_RAG_CHUNK_PRESETS_ENABLED=true`
 - optionally override preset definitions with `KUJO_RAG_CHUNK_PRESETS_JSON`
 - resolved profile metadata is emitted on chunks as `chunk.meta.chunk_profile_*`
-- run preset-vs-baseline gate: `kujo run scripts/run_chunking_preset_ab_evaluation.kujo --interpreter`
+- run preset-vs-baseline gate: `kujo run scripts/run_chunking_preset_ab_evaluation.kujo`
 
 Distributed rate-limit backend options:
 
@@ -281,7 +281,7 @@ Distributed rate-limit backend options:
 
 Large-corpus benchmark suite and budgets:
 
-- run `kujo run scripts/run_large_corpus_benchmarks.kujo --interpreter` to execute small/medium/large corpus tier benchmarks
+- run `kujo run scripts/run_large_corpus_benchmarks.kujo` to execute small/medium/large corpus tier benchmarks
 - dataset profile definitions live in `config/large_corpus_benchmark_profiles.json`
 - throughput/latency budgets live in `config/large_corpus_benchmark_budgets.json`
 - outputs are written to `results/large_corpus_benchmark_report.json` and `results/large_corpus_benchmark_trend.json`
@@ -289,7 +289,7 @@ Large-corpus benchmark suite and budgets:
 
 Index compaction and maintenance windows:
 
-- run `kujo run scripts/maintain_index.kujo --interpreter` for report mode or set `KUJO_RAG_INDEX_MAINTENANCE_MODE=apply` to persist compaction output
+- run `kujo run scripts/maintain_index.kujo` for report mode or set `KUJO_RAG_INDEX_MAINTENANCE_MODE=apply` to persist compaction output
 - compaction removes duplicate/orphan index records and updates maintenance metadata counters
 - maintenance windows are controlled by `KUJO_RAG_INDEX_MAINTENANCE_ALLOWED_UTC_HOURS` and can be bypassed manually with `KUJO_RAG_INDEX_MAINTENANCE_IGNORE_WINDOW=true`
 - apply mode enforces before/after probe correctness and latency-regression safety checks before writing changes
@@ -309,7 +309,7 @@ For third-party adoption patterns (minimum setup, docs/code/mixed recipes, deplo
 1) Build index from local docs:
 
 ```bash
-kujo run main.kujo --interpreter ingest --path ./examples/kujo_docs --recursive true
+kujo run main.kujo -- ingest --path ./examples/kujo_docs --recursive true
 ```
 
 Expected output shape:
@@ -321,7 +321,7 @@ Expected output shape:
 2) Query the index:
 
 ```bash
-kujo run main.kujo --interpreter query --question "How does Kujo handle module imports?"
+kujo run main.kujo -- query --question "How does Kujo handle module imports?"
 ```
 
 Expected output shape:
@@ -333,14 +333,14 @@ Expected output shape:
 Optional namespace override for tenant/project isolation:
 
 ```bash
-kujo run main.kujo --interpreter ingest --path ./examples/kujo_docs --recursive true --namespace team_a
-kujo run main.kujo --interpreter query --question "How does Kujo handle module imports?" --namespace team_a
+kujo run main.kujo -- ingest --path ./examples/kujo_docs --recursive true --namespace team_a
+kujo run main.kujo -- query --question "How does Kujo handle module imports?" --namespace team_a
 ```
 
 3) Run API server:
 
 ```bash
-kujo run main.kujo --interpreter serve --host 127.0.0.1 --port 8787
+kujo run main.kujo -- serve --host 127.0.0.1 --port 8787
 ```
 
 `--host` is the socket bind address, not display-only metadata. Keep the default
@@ -350,19 +350,19 @@ interface; use `0.0.0.0` only when all-interface exposure is explicitly required
 4) Run demo assistant:
 
 ```bash
-kujo run main.kujo --interpreter demo
+kujo run main.kujo -- demo
 ```
 
 5) Generate a bootstrap template for external repository adoption:
 
 ```bash
-kujo run main.kujo --interpreter bootstrap --target ./results/bootstrap_repo
+kujo run main.kujo -- bootstrap --target ./results/bootstrap_repo
 ```
 
 6) Use execution bridge to prefer non-interpreter mode with automatic fallback:
 
 ```bash
-KUJO_BIN=/absolute/path/to/kujo kujo run scripts/run_main_auto.kujo --interpreter query --question "What is Kujo optimized for?"
+KUJO_BIN=/absolute/path/to/kujo kujo run scripts/run_main_auto.kujo -- query --question "What is Kujo optimized for?"
 ```
 
 ## Third-Party Adoption Quick Recipes
@@ -374,7 +374,7 @@ Documentation corpus:
 ```bash
 export KUJO_RAG_INGEST_EXTENSIONS=md,markdown,txt
 export KUJO_RAG_CHUNK_STRATEGY=line
-kujo run main.kujo --interpreter ingest --path ./docs --recursive true
+kujo run main.kujo -- ingest --path ./docs --recursive true
 ```
 
 Code repository:
@@ -384,7 +384,7 @@ export KUJO_RAG_INGEST_EXTENSIONS=kujo,md,txt
 export KUJO_RAG_CHUNK_STRATEGY=fixed
 export KUJO_RAG_CHUNK_SIZE=1100
 export KUJO_RAG_CHUNK_OVERLAP=180
-kujo run main.kujo --interpreter ingest --path ./src --recursive true
+kujo run main.kujo -- ingest --path ./src --recursive true
 ```
 
 Mixed content workspace:
@@ -393,7 +393,7 @@ Mixed content workspace:
 export KUJO_RAG_INGEST_EXTENSIONS=md,markdown,txt,kujo,pdf
 export KUJO_RAG_CHUNK_STRATEGY=line
 export KUJO_RAG_TOP_K=8
-kujo run main.kujo --interpreter ingest --path ./knowledge --recursive true
+kujo run main.kujo -- ingest --path ./knowledge --recursive true
 ```
 
 ## API
@@ -402,7 +402,7 @@ OpenAPI contract and generated JavaScript SDK:
 
 - OpenAPI: `openapi/kujo-rag-openapi.json`
 - JS SDK: `sdk/javascript/kujo-rag-client.generated.js`
-- regenerate + validate SDK parity: `KUJO_RAG_OPENAPI_REGENERATE=true kujo run scripts/run_openapi_contract_review.kujo --interpreter`
+- regenerate + validate SDK parity: `KUJO_RAG_OPENAPI_REGENERATE=true kujo run scripts/run_openapi_contract_review.kujo`
 
 ### Health
 
@@ -708,30 +708,30 @@ Test harness notes:
 Run directly:
 
 ```bash
-kujo run tests/test_unit.kujo --interpreter
-kujo run tests/test_integration.kujo --interpreter
-kujo run tests/test_release_evaluation.kujo --interpreter
-kujo run tests/test_backend_contract.kujo --interpreter
-kujo run tests/test_bootstrap.kujo --interpreter
-kujo run tests/test_non_interpreter_bridge.kujo --interpreter
-kujo run tests/test_api_contract.kujo --interpreter
-kujo run tests/test_security.kujo --interpreter
-kujo run tests/test_connector_framework.kujo --interpreter
-kujo run tests/test_connector_plugin_stub.kujo --interpreter
-kujo run tests/test_structured_ingestion_retrieval.kujo --interpreter
-kujo run tests/test_parser_matrix_resilience.kujo --interpreter
+kujo run tests/test_unit.kujo
+kujo run tests/test_integration.kujo
+kujo run tests/test_release_evaluation.kujo
+kujo run tests/test_backend_contract.kujo
+kujo run tests/test_bootstrap.kujo
+kujo run tests/test_non_interpreter_bridge.kujo
+kujo run tests/test_api_contract.kujo
+kujo run tests/test_security.kujo
+kujo run tests/test_connector_framework.kujo
+kujo run tests/test_connector_plugin_stub.kujo
+kujo run tests/test_structured_ingestion_retrieval.kujo
+kujo run tests/test_parser_matrix_resilience.kujo
 ```
 
 Or via wrapper (set `KUJO_BIN` if needed):
 
 ```bash
-KUJO_BIN=/absolute/path/to/kujo /absolute/path/to/kujo run scripts/run_tests.kujo --interpreter
+KUJO_BIN=/absolute/path/to/kujo /absolute/path/to/kujo run scripts/run_tests.kujo
 ```
 
 Focused subset wrapper run:
 
 ```bash
-KUJO_BIN=/absolute/path/to/kujo KUJO_RAG_TEST_FILES=tests/test_api_contract.kujo,tests/test_security.kujo /absolute/path/to/kujo run scripts/run_tests.kujo --interpreter
+KUJO_BIN=/absolute/path/to/kujo KUJO_RAG_TEST_FILES=tests/test_api_contract.kujo,tests/test_security.kujo /absolute/path/to/kujo run scripts/run_tests.kujo
 ```
 
 Warning budget baseline:
@@ -747,25 +747,25 @@ Release evaluation and thresholds:
 - standalone evaluation command:
 
 ```bash
-KUJO_BIN=/absolute/path/to/kujo kujo run scripts/run_release_evaluation.kujo --interpreter
+KUJO_BIN=/absolute/path/to/kujo kujo run scripts/run_release_evaluation.kujo
 ```
 
 AI provider/model drift gate command:
 
 ```bash
-KUJO_BIN=/absolute/path/to/kujo kujo run scripts/run_ai_provider_model_drift_check.kujo --interpreter
+KUJO_BIN=/absolute/path/to/kujo kujo run scripts/run_ai_provider_model_drift_check.kujo
 ```
 
 Multilingual release evaluation gate command:
 
 ```bash
-KUJO_BIN=/absolute/path/to/kujo kujo run scripts/run_multilingual_release_evaluation.kujo --interpreter
+KUJO_BIN=/absolute/path/to/kujo kujo run scripts/run_multilingual_release_evaluation.kujo
 ```
 
 Connector framework ingest command:
 
 ```bash
-KUJO_BIN=/absolute/path/to/kujo kujo run scripts/run_connector_ingest.kujo --interpreter
+KUJO_BIN=/absolute/path/to/kujo kujo run scripts/run_connector_ingest.kujo
 ```
 
 - release evaluation now writes a report artifact (`./results/release_eval_report.json` by default) and appends trend history (`./results/release_eval_trend.json`) with drift highlights against the prior run
@@ -847,14 +847,14 @@ Validated:
 
 Known constraints (Kujo runtime/toolchain related):
 
-- commands are documented with `--interpreter` because this is currently the most reliable mode for multi-module import workflows
+- commands use Kujo’s default VM; `--interpreter` remains available for explicit compatibility debugging
 - `scripts/run_main_auto.kujo` provides a native-first execution bridge that falls back to interpreter mode for key command paths
 - interpreter runs can emit undefined-function warnings from type-checking paths even when runtime execution succeeds
 - AI helpers (`ai_embedding`, `ai_chat`) are treated as optional: if unavailable or failing, this starter kit gracefully falls back to offline behavior
 
-## Why `--interpreter` in examples?
+## Runtime selection
 
-This starter kit uses Kujo module imports heavily. In the current Kujo toolchain state, interpreter mode is the most reliable execution path for multi-module import/call flows, so commands are documented with `--interpreter` for deterministic behavior.
+Use the default VM for normal commands. The unit, integration, and non-interpreter bridge checks pass on published Kujo 1.9.0. Use `--interpreter` only when investigating a runtime compatibility issue.
 
 ## License
 

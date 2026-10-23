@@ -33,13 +33,13 @@ The rule set defines:
 Run architecture fitness review gate:
 
 ```bash
-kujo run scripts/run_architecture_fitness_review.kujo --interpreter
+kujo run scripts/run_architecture_fitness_review.kujo
 ```
 
 Run pass/fail regression suite:
 
 ```bash
-kujo run tests/test_architecture_fitness_review.kujo --interpreter
+kujo run tests/test_architecture_fitness_review.kujo
 ```
 
 Gate output artifact:

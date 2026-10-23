@@ -14,7 +14,7 @@ Canary replay validates candidate builds against production-like sampled queries
 ## Command
 
 ```bash
-KUJO_BIN=/absolute/path/to/kujo kujo run scripts/run_canary_release_replay.kujo --interpreter
+KUJO_BIN=/absolute/path/to/kujo kujo run scripts/run_canary_release_replay.kujo
 ```
 
 ## Output

@@ -35,7 +35,7 @@ If either supported mode fails in CI, release promotion must be blocked until fi
 
 ## Operational Guidance
 
-- Use interpreter mode for deterministic automation and release gates.
+- The pinned release gates retain interpreter coverage; ordinary commands can use the default VM.
 - Use bridge mode for native-first local workflows with safe fallback behavior.
 - Use direct native mode for validated core ingest/query flows when pinned runtime parity is required.
 
@@ -46,3 +46,10 @@ A runtime mode can be promoted to supported only when:
 - parity behavior is documented
 - operational caveats are documented
 - at least one release cycle has passed with stable results
+
+## Current source command guidance
+
+The default VM on published Kujo 1.9.0 passes the unit, integration, and
+non-interpreter bridge checks. Current README commands omit `--interpreter`.
+This local verification does not change the pinned release-CI certification
+matrix above; keep explicit interpreter and VM parity coverage in that matrix.

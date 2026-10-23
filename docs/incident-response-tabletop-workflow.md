@@ -39,7 +39,7 @@ Cycle report artifact:
 ## Automated Validation Command
 
 ```bash
-kujo run scripts/run_incident_response_tabletop_review.kujo --interpreter
+kujo run scripts/run_incident_response_tabletop_review.kujo
 ```
 
 Primary artifact output:

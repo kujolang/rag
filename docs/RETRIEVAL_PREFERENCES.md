@@ -8,8 +8,8 @@ RAG can select equivalent code examples before serializing the response or const
 export KUJO_RAG_MARKDOWN_EXAMPLES_ENABLED=true
 export KUJO_RAG_CHUNK_SIZE=4000
 export KUJO_RAG_INDEX_PATH=./data/documentation-pilot.json
-kujo run main.kujo --interpreter ingest --path ./examples/retrieval_preferences --recursive true
-kujo run main.kujo --interpreter serve --host 127.0.0.1 --port 8787
+kujo run main.kujo -- ingest --path ./examples/retrieval_preferences --recursive true
+kujo run main.kujo -- serve --host 127.0.0.1 --port 8787
 ```
 
 In another terminal:

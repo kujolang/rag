@@ -62,7 +62,7 @@ This makes runtime behavior auditable in retrieval traces.
 Run preset-vs-baseline evaluation on the targeted corpus:
 
 ```bash
-kujo run scripts/run_chunking_preset_ab_evaluation.kujo --interpreter
+kujo run scripts/run_chunking_preset_ab_evaluation.kujo
 ```
 
 Default assets:

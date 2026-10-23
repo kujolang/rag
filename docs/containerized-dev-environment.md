@@ -42,7 +42,7 @@ Local native workflow remains fully supported:
 
 ```bash
 KUJO_BIN=/path/to/kujo/target/debug/kujo \
-/path/to/kujo/target/debug/kujo run main.kujo --interpreter query --question "What is Kujo optimized for?"
+/path/to/kujo/target/debug/kujo run main.kujo -- query --question "What is Kujo optimized for?"
 ```
 
 No container requirement is imposed for contributors who prefer native Kujo runtime execution.
@@ -52,7 +52,7 @@ No container requirement is imposed for contributors who prefer native Kujo runt
 Run deterministic environment checks:
 
 ```bash
-kujo run scripts/run_containerized_dev_environment_review.kujo --interpreter
+kujo run scripts/run_containerized_dev_environment_review.kujo
 ```
 
 CI workflow:

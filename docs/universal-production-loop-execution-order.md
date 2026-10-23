@@ -18,14 +18,14 @@ Use this order with one loop per PR/commit unless blocked by an explicit depende
 ## Standard Validation Gate Per Loop
 
 Run these unless the loop explicitly replaces or extends them:
-- kujo run tests/test_unit.kujo --interpreter
-- kujo run tests/test_integration.kujo --interpreter
-- kujo run tests/test_release_evaluation.kujo --interpreter
-- kujo run scripts/run_release_evaluation.kujo --interpreter
-- kujo run scripts/run_tests.kujo --interpreter
+- kujo run tests/test_unit.kujo
+- kujo run tests/test_integration.kujo
+- kujo run tests/test_release_evaluation.kujo
+- kujo run scripts/run_release_evaluation.kujo
+- kujo run scripts/run_tests.kujo
 
 When API changes are involved:
-- kujo run main.kujo --interpreter serve --host 127.0.0.1 --port 8787
+- kujo run main.kujo -- serve --host 127.0.0.1 --port 8787
 - curl -s http://127.0.0.1:8787/health
 - curl -s -X POST http://127.0.0.1:8787/ingest -H "Content-Type: application/json" -d '{"path":"./examples/kujo_docs","recursive":true}'
 - curl -s -X POST http://127.0.0.1:8787/query -H "Content-Type: application/json" -d '{"query":"What is Kujo optimized for?"}'
