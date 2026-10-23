@@ -4,6 +4,8 @@ All notable changes to Kujo RAG are documented here.
 
 ## [Unreleased]
 
+- Make the canary negative control deterministic and align the Kujo manifest minimum with the supported 1.2.3 runtime.
+
 ## [1.1.0] - 2026-10-21
 
 - Add HTTP documentation ingestion, equivalent-example retrieval preferences, and a local published-docs service workflow.
