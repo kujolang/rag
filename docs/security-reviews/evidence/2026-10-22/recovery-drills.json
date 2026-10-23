@@ -1,0 +1,55 @@
+{
+  "scope": "automated local synthetic-data exercises; no human coordination or production RTO attestation",
+  "ok": true,
+  "results": [
+    {
+      "case": "baseline query retrieves synthetic document",
+      "passed": true
+    },
+    {
+      "case": "corruption rollback restores bytes config and query",
+      "passed": true,
+      "recovery_seconds": 2.299
+    },
+    {
+      "case": "tampered backup rejected without changing target",
+      "passed": true
+    },
+    {
+      "case": "quality baseline passes unchanged quality thresholds",
+      "passed": true,
+      "release_gate_ok": false,
+      "gates": {
+        "avg_confidence": true,
+        "avg_grounding": true,
+        "avg_latency_ms": false,
+        "error_rate": true,
+        "minimum_case_count": true,
+        "p95_latency_ms": false,
+        "quality_pass_rate": true
+      }
+    },
+    {
+      "case": "quality gate detects corrupted corpus",
+      "passed": true,
+      "failed_gates": [
+        "avg_confidence",
+        "quality_pass_rate"
+      ]
+    },
+    {
+      "case": "quality rollback restores passing corpus",
+      "passed": true,
+      "release_gate_ok": false,
+      "gates": {
+        "avg_confidence": true,
+        "avg_grounding": true,
+        "avg_latency_ms": false,
+        "error_rate": true,
+        "minimum_case_count": true,
+        "p95_latency_ms": false,
+        "quality_pass_rate": true
+      }
+    }
+  ]
+}

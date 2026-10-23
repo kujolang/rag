@@ -104,5 +104,10 @@
         }
       ]
     }
+  ],
+  "historical_evidence_status": "Unverified: on 2026-10-22 the repository owner confirmed the referenced penetration tests and incident drills were not performed. Historical dates, reviewers and exception approvals are not evidence of completed work.",
+  "current_local_evidence_paths": [
+    "./docs/penetration-test-report.md",
+    "./docs/incident-local-exercises-2026-10-22.md"
   ]
 }

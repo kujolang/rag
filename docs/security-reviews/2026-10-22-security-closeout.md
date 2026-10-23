@@ -1,6 +1,6 @@
 # RAG security closeout — evidence pending
 
-Status: blocked; this record is not a penetration-test report or production approval.
+Status: superseded for local testing by `docs/penetration-test-report.md` and `docs/incident-local-exercises-2026-10-22.md`. Production approval remains pending. The owner subsequently confirmed the historical tests/drills were not performed; do not seek or rely on nonexistent May reports.
 
 ## Verified source behavior
 

@@ -1,0 +1,460 @@
+{
+  "run": 39882463502,
+  "head": "79cacd2ccff2579b4dfec7961d321d64c85954b1",
+  "jobs": [
+    {
+      "name": "supply-chain-scan",
+      "conclusion": "success",
+      "steps": [
+        {
+          "name": "Set up job",
+          "conclusion": "success"
+        },
+        {
+          "name": "Checkout repository",
+          "conclusion": "success"
+        },
+        {
+          "name": "Install pinned Kujo runtime",
+          "conclusion": "success"
+        },
+        {
+          "name": "Verify Kujo runtime",
+          "conclusion": "success"
+        },
+        {
+          "name": "Run supply-chain scan gate",
+          "conclusion": "success"
+        },
+        {
+          "name": "Upload supply-chain scan artifact",
+          "conclusion": "success"
+        },
+        {
+          "name": "Post Install pinned Kujo runtime",
+          "conclusion": "success"
+        },
+        {
+          "name": "Post Checkout repository",
+          "conclusion": "success"
+        },
+        {
+          "name": "Complete job",
+          "conclusion": "success"
+        }
+      ]
+    },
+    {
+      "name": "runtime-support-matrix (native)",
+      "conclusion": "success",
+      "steps": [
+        {
+          "name": "Set up job",
+          "conclusion": "success"
+        },
+        {
+          "name": "Checkout repository",
+          "conclusion": "success"
+        },
+        {
+          "name": "Install pinned Kujo runtime",
+          "conclusion": "success"
+        },
+        {
+          "name": "Verify Kujo runtime",
+          "conclusion": "success"
+        },
+        {
+          "name": "Validate interpreter supported mode",
+          "conclusion": "skipped"
+        },
+        {
+          "name": "Verify recursive redaction bindings",
+          "conclusion": "skipped"
+        },
+        {
+          "name": "Validate bridge supported mode",
+          "conclusion": "skipped"
+        },
+        {
+          "name": "Validate native supported mode",
+          "conclusion": "success"
+        },
+        {
+          "name": "Upload runtime-mode artifacts",
+          "conclusion": "success"
+        },
+        {
+          "name": "Post Install pinned Kujo runtime",
+          "conclusion": "success"
+        },
+        {
+          "name": "Post Checkout repository",
+          "conclusion": "success"
+        },
+        {
+          "name": "Complete job",
+          "conclusion": "success"
+        }
+      ]
+    },
+    {
+      "name": "release-gates",
+      "conclusion": "failure",
+      "steps": [
+        {
+          "name": "Set up job",
+          "conclusion": "success"
+        },
+        {
+          "name": "Checkout repository",
+          "conclusion": "success"
+        },
+        {
+          "name": "Install pinned Kujo runtime",
+          "conclusion": "success"
+        },
+        {
+          "name": "Verify Kujo runtime",
+          "conclusion": "success"
+        },
+        {
+          "name": "Run aggregate release gate suite",
+          "conclusion": "success"
+        },
+        {
+          "name": "Run standalone production evaluation gate",
+          "conclusion": "success"
+        },
+        {
+          "name": "Run canary release replay gate",
+          "conclusion": "success"
+        },
+        {
+          "name": "Run AI provider/model drift gate",
+          "conclusion": "success"
+        },
+        {
+          "name": "Run multilingual release evaluation gate",
+          "conclusion": "success"
+        },
+        {
+          "name": "Run chunking preset A/B evaluation gate",
+          "conclusion": "success"
+        },
+        {
+          "name": "Run threat-model cadence gate",
+          "conclusion": "failure"
+        },
+        {
+          "name": "Run penetration-test remediation gate",
+          "conclusion": "skipped"
+        },
+        {
+          "name": "Run incident-response tabletop readiness gate",
+          "conclusion": "skipped"
+        },
+        {
+          "name": "Run OpenAPI contract and SDK gate",
+          "conclusion": "skipped"
+        },
+        {
+          "name": "Run API/config versioning policy gate",
+          "conclusion": "skipped"
+        },
+        {
+          "name": "Run config schema review gate",
+          "conclusion": "skipped"
+        },
+        {
+          "name": "Run containerized dev environment gate",
+          "conclusion": "skipped"
+        },
+        {
+          "name": "Run chaos fault-injection gate",
+          "conclusion": "skipped"
+        },
+        {
+          "name": "Run architecture fitness gate",
+          "conclusion": "skipped"
+        },
+        {
+          "name": "Validate release-gate override ledger",
+          "conclusion": "skipped"
+        },
+        {
+          "name": "Run large-corpus benchmark budget gate",
+          "conclusion": "skipped"
+        },
+        {
+          "name": "Run performance and cost budget gate",
+          "conclusion": "skipped"
+        },
+        {
+          "name": "Run release readiness scorecard gate",
+          "conclusion": "skipped"
+        },
+        {
+          "name": "Upload release gate artifacts",
+          "conclusion": "skipped"
+        },
+        {
+          "name": "Post Install pinned Kujo runtime",
+          "conclusion": "success"
+        },
+        {
+          "name": "Post Checkout repository",
+          "conclusion": "success"
+        },
+        {
+          "name": "Complete job",
+          "conclusion": "success"
+        }
+      ]
+    },
+    {
+      "name": "runtime-support-matrix (bridge)",
+      "conclusion": "success",
+      "steps": [
+        {
+          "name": "Set up job",
+          "conclusion": "success"
+        },
+        {
+          "name": "Checkout repository",
+          "conclusion": "success"
+        },
+        {
+          "name": "Install pinned Kujo runtime",
+          "conclusion": "success"
+        },
+        {
+          "name": "Verify Kujo runtime",
+          "conclusion": "success"
+        },
+        {
+          "name": "Validate interpreter supported mode",
+          "conclusion": "skipped"
+        },
+        {
+          "name": "Verify recursive redaction bindings",
+          "conclusion": "skipped"
+        },
+        {
+          "name": "Validate bridge supported mode",
+          "conclusion": "success"
+        },
+        {
+          "name": "Validate native supported mode",
+          "conclusion": "skipped"
+        },
+        {
+          "name": "Upload runtime-mode artifacts",
+          "conclusion": "success"
+        },
+        {
+          "name": "Post Install pinned Kujo runtime",
+          "conclusion": "success"
+        },
+        {
+          "name": "Post Checkout repository",
+          "conclusion": "success"
+        },
+        {
+          "name": "Complete job",
+          "conclusion": "success"
+        }
+      ]
+    },
+    {
+      "name": "descriptor-relative-ingest-ubuntu-latest",
+      "conclusion": "success",
+      "steps": [
+        {
+          "name": "Set up job",
+          "conclusion": "success"
+        },
+        {
+          "name": "Checkout repository",
+          "conclusion": "success"
+        },
+        {
+          "name": "Install pinned Kujo runtime",
+          "conclusion": "success"
+        },
+        {
+          "name": "Verify descriptor-relative ingest",
+          "conclusion": "success"
+        },
+        {
+          "name": "Post Install pinned Kujo runtime",
+          "conclusion": "success"
+        },
+        {
+          "name": "Post Checkout repository",
+          "conclusion": "success"
+        },
+        {
+          "name": "Complete job",
+          "conclusion": "success"
+        }
+      ]
+    },
+    {
+      "name": "cloudflare-access-proxy",
+      "conclusion": "success",
+      "steps": [
+        {
+          "name": "Set up job",
+          "conclusion": "success"
+        },
+        {
+          "name": "Set up patched Node.js",
+          "conclusion": "success"
+        },
+        {
+          "name": "Checkout repository",
+          "conclusion": "success"
+        },
+        {
+          "name": "Verify Cloudflare Access proxy boundary",
+          "conclusion": "success"
+        },
+        {
+          "name": "Post Checkout repository",
+          "conclusion": "success"
+        },
+        {
+          "name": "Post Set up patched Node.js",
+          "conclusion": "success"
+        },
+        {
+          "name": "Complete job",
+          "conclusion": "success"
+        }
+      ]
+    },
+    {
+      "name": "runtime-support-matrix (interpreter)",
+      "conclusion": "success",
+      "steps": [
+        {
+          "name": "Set up job",
+          "conclusion": "success"
+        },
+        {
+          "name": "Checkout repository",
+          "conclusion": "success"
+        },
+        {
+          "name": "Install pinned Kujo runtime",
+          "conclusion": "success"
+        },
+        {
+          "name": "Verify Kujo runtime",
+          "conclusion": "success"
+        },
+        {
+          "name": "Validate interpreter supported mode",
+          "conclusion": "success"
+        },
+        {
+          "name": "Verify recursive redaction bindings",
+          "conclusion": "success"
+        },
+        {
+          "name": "Validate bridge supported mode",
+          "conclusion": "skipped"
+        },
+        {
+          "name": "Validate native supported mode",
+          "conclusion": "skipped"
+        },
+        {
+          "name": "Upload runtime-mode artifacts",
+          "conclusion": "success"
+        },
+        {
+          "name": "Post Install pinned Kujo runtime",
+          "conclusion": "success"
+        },
+        {
+          "name": "Post Checkout repository",
+          "conclusion": "success"
+        },
+        {
+          "name": "Complete job",
+          "conclusion": "success"
+        }
+      ]
+    },
+    {
+      "name": "descriptor-relative-ingest-macos-latest",
+      "conclusion": "success",
+      "steps": [
+        {
+          "name": "Set up job",
+          "conclusion": "success"
+        },
+        {
+          "name": "Checkout repository",
+          "conclusion": "success"
+        },
+        {
+          "name": "Install pinned Kujo runtime",
+          "conclusion": "success"
+        },
+        {
+          "name": "Verify descriptor-relative ingest",
+          "conclusion": "success"
+        },
+        {
+          "name": "Post Install pinned Kujo runtime",
+          "conclusion": "success"
+        },
+        {
+          "name": "Post Checkout repository",
+          "conclusion": "success"
+        },
+        {
+          "name": "Complete job",
+          "conclusion": "success"
+        }
+      ]
+    },
+    {
+      "name": "descriptor-relative-ingest-windows-latest",
+      "conclusion": "success",
+      "steps": [
+        {
+          "name": "Set up job",
+          "conclusion": "success"
+        },
+        {
+          "name": "Checkout repository",
+          "conclusion": "success"
+        },
+        {
+          "name": "Install pinned Kujo runtime",
+          "conclusion": "success"
+        },
+        {
+          "name": "Verify descriptor-relative ingest",
+          "conclusion": "success"
+        },
+        {
+          "name": "Post Install pinned Kujo runtime",
+          "conclusion": "success"
+        },
+        {
+          "name": "Post Checkout repository",
+          "conclusion": "success"
+        },
+        {
+          "name": "Complete job",
+          "conclusion": "success"
+        }
+      ]
+    }
+  ]
+}

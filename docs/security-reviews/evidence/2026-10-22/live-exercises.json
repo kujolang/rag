@@ -1,0 +1,232 @@
+{
+  "scope": "local loopback; automated operator; no external infrastructure or human tabletop",
+  "results": [
+    {
+      "case": "active reader can query",
+      "passed": true
+    },
+    {
+      "case": "reader cannot forge admin /metrics",
+      "passed": true,
+      "status": 403
+    },
+    {
+      "case": "reader cannot forge admin /retention",
+      "passed": true,
+      "status": 403
+    },
+    {
+      "case": "reader cannot forge admin /drain",
+      "passed": true,
+      "status": 403
+    },
+    {
+      "case": "reader cannot forge admin /retention/policy",
+      "passed": true,
+      "status": 403
+    },
+    {
+      "case": "reader cannot forge admin /retention/purge",
+      "passed": true,
+      "status": 403
+    },
+    {
+      "case": "reader cannot forge admin /privacy/export",
+      "passed": true,
+      "status": 403
+    },
+    {
+      "case": "reader cannot forge admin /privacy/delete",
+      "passed": true,
+      "status": 403
+    },
+    {
+      "case": "reader cannot forge admin /drain/start",
+      "passed": true,
+      "status": 403
+    },
+    {
+      "case": "reader cannot forge admin /drain/stop",
+      "passed": true,
+      "status": 403
+    },
+    {
+      "case": "reader cannot forge admin /retention/legal-hold/start",
+      "passed": true,
+      "status": 403
+    },
+    {
+      "case": "reader cannot forge admin /retention/legal-hold/stop",
+      "passed": true,
+      "status": 403
+    },
+    {
+      "case": "reader cannot forge admin /ingest/jobs/worker/tick",
+      "passed": true,
+      "status": 403
+    },
+    {
+      "case": "anonymous query denied",
+      "passed": true
+    },
+    {
+      "case": "cross namespace denied",
+      "passed": true
+    },
+    {
+      "case": "revoked current replay /metrics",
+      "passed": true,
+      "status": 403
+    },
+    {
+      "case": "revoked current replay /retention",
+      "passed": true,
+      "status": 403
+    },
+    {
+      "case": "revoked current replay /drain",
+      "passed": true,
+      "status": 403
+    },
+    {
+      "case": "revoked current replay /retention/policy",
+      "passed": true,
+      "status": 403
+    },
+    {
+      "case": "revoked current replay /retention/purge",
+      "passed": true,
+      "status": 403
+    },
+    {
+      "case": "revoked current replay /privacy/export",
+      "passed": true,
+      "status": 403
+    },
+    {
+      "case": "revoked current replay /privacy/delete",
+      "passed": true,
+      "status": 403
+    },
+    {
+      "case": "revoked current replay /drain/start",
+      "passed": true,
+      "status": 403
+    },
+    {
+      "case": "revoked current replay /drain/stop",
+      "passed": true,
+      "status": 403
+    },
+    {
+      "case": "revoked current replay /retention/legal-hold/start",
+      "passed": true,
+      "status": 403
+    },
+    {
+      "case": "revoked current replay /retention/legal-hold/stop",
+      "passed": true,
+      "status": 403
+    },
+    {
+      "case": "revoked current replay /ingest/jobs/worker/tick",
+      "passed": true,
+      "status": 403
+    },
+    {
+      "case": "replacement credential works current",
+      "passed": true
+    },
+    {
+      "case": "revoked next replay /metrics",
+      "passed": true,
+      "status": 403
+    },
+    {
+      "case": "revoked next replay /retention",
+      "passed": true,
+      "status": 403
+    },
+    {
+      "case": "revoked next replay /drain",
+      "passed": true,
+      "status": 403
+    },
+    {
+      "case": "revoked next replay /retention/policy",
+      "passed": true,
+      "status": 403
+    },
+    {
+      "case": "revoked next replay /retention/purge",
+      "passed": true,
+      "status": 403
+    },
+    {
+      "case": "revoked next replay /privacy/export",
+      "passed": true,
+      "status": 403
+    },
+    {
+      "case": "revoked next replay /privacy/delete",
+      "passed": true,
+      "status": 403
+    },
+    {
+      "case": "revoked next replay /drain/start",
+      "passed": true,
+      "status": 403
+    },
+    {
+      "case": "revoked next replay /drain/stop",
+      "passed": true,
+      "status": 403
+    },
+    {
+      "case": "revoked next replay /retention/legal-hold/start",
+      "passed": true,
+      "status": 403
+    },
+    {
+      "case": "revoked next replay /retention/legal-hold/stop",
+      "passed": true,
+      "status": 403
+    },
+    {
+      "case": "revoked next replay /ingest/jobs/worker/tick",
+      "passed": true,
+      "status": 403
+    },
+    {
+      "case": "replacement credential works next",
+      "passed": true
+    },
+    {
+      "case": "namespace and forwarded-IP hopping remains rate limited",
+      "passed": true,
+      "statuses": [
+        403,
+        403,
+        429,
+        429,
+        429,
+        429,
+        429,
+        429
+      ]
+    },
+    {
+      "case": "outage readiness true",
+      "passed": true,
+      "live": 200,
+      "ready": 503
+    },
+    {
+      "case": "outage readiness false",
+      "passed": true,
+      "live": 200,
+      "ready": 200
+    }
+  ],
+  "ok": true
+}
