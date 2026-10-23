@@ -82,12 +82,13 @@ func with_request_ids(response, req) {
 	return response
 }
 
+# Explicit local bindings keep recursive redaction isolated on pinned Kujo 1.2.3.
 func redaction_enabled(cfg) {
 	return dict_get_or(cfg, "api_redaction_enabled", false)
 }
 
 func redaction_mask(cfg) {
-	mask := to_string(dict_get_or(cfg, "api_redaction_mask", "[REDACTED]"))
+	mut mask := to_string(dict_get_or(cfg, "api_redaction_mask", "[REDACTED]"))
 	if trim(mask) == "" {
 		return "[REDACTED]"
 	}
@@ -95,14 +96,14 @@ func redaction_mask(cfg) {
 }
 
 func redaction_keys(cfg) {
-	raw_keys := dict_get_or(cfg, "api_redaction_keys", [])
+	mut raw_keys := dict_get_or(cfg, "api_redaction_keys", [])
 	if type(raw_keys) != "array" {
 		raw_keys = [raw_keys]
 	}
-	out := []
-	i := 0
+	mut out := []
+	mut i := 0
 	while i < len(raw_keys) {
-		entry := to_lower(trim(to_string(raw_keys[i])))
+		mut entry := to_lower(trim(to_string(raw_keys[i])))
 		if entry != "" {
 			out = push(out, entry)
 		}
@@ -115,14 +116,14 @@ func redaction_keys(cfg) {
 }
 
 func redaction_values(cfg) {
-	raw_values := dict_get_or(cfg, "api_redaction_values", [])
+	mut raw_values := dict_get_or(cfg, "api_redaction_values", [])
 	if type(raw_values) != "array" {
 		raw_values = [raw_values]
 	}
-	out := []
-	i := 0
+	mut out := []
+	mut i := 0
 	while i < len(raw_values) {
-		entry := trim(to_string(raw_values[i]))
+		mut entry := trim(to_string(raw_values[i]))
 		if entry != "" {
 			out = push(out, entry)
 		}
@@ -132,13 +133,13 @@ func redaction_values(cfg) {
 }
 
 func key_needs_redaction(key_name, sensitive_keys) {
-	norm := to_lower(trim(to_string(key_name)))
+	mut norm := to_lower(trim(to_string(key_name)))
 	if norm == "" {
 		return false
 	}
-	i := 0
+	mut i := 0
 	while i < len(sensitive_keys) {
-		needle := sensitive_keys[i]
+		mut needle := sensitive_keys[i]
 		if needle != "" && index_of(norm, needle) >= 0 {
 			return true
 		}
@@ -148,16 +149,16 @@ func key_needs_redaction(key_name, sensitive_keys) {
 }
 
 func redact_text_value(raw_value, cfg, sensitive_values, mask) {
-	text := to_string(raw_value)
+	mut text := to_string(raw_value)
 	if redaction_enabled(cfg) == false {
 		return text
 	}
 	if index_of(to_lower(text), "bearer ") >= 0 {
 		return mask
 	}
-	i := 0
+	mut i := 0
 	while i < len(sensitive_values) {
-		needle := sensitive_values[i]
+		mut needle := sensitive_values[i]
 		if needle != "" && index_of(text, needle) >= 0 {
 			return mask
 		}
@@ -167,18 +168,18 @@ func redact_text_value(raw_value, cfg, sensitive_values, mask) {
 }
 
 func redact_any(value, cfg, sensitive_keys, sensitive_values, mask) {
-	vtype := type(value)
+	mut vtype := type(value)
 
 	if vtype == "string" {
 		return redact_text_value(value, cfg, sensitive_values, mask)
 	}
 
 	if vtype == "dict" {
-		out := {}
-		value_keys := keys(value)
-		i := 0
+		mut out := {}
+		mut value_keys := keys(value)
+		mut i := 0
 		while i < len(value_keys) {
-			key := value_keys[i]
+			mut key := value_keys[i]
 			if key_needs_redaction(key, sensitive_keys) {
 				out[key] := mask
 			} else {
@@ -190,8 +191,8 @@ func redact_any(value, cfg, sensitive_keys, sensitive_values, mask) {
 	}
 
 	if vtype == "array" {
-		out := []
-		i := 0
+		mut out := []
+		mut i := 0
 		while i < len(value) {
 			out = push(out, redact_any(value[i], cfg, sensitive_keys, sensitive_values, mask))
 			i = i + 1
@@ -207,10 +208,10 @@ func redact_any(value, cfg, sensitive_keys, sensitive_values, mask) {
 		return mask
 	}
 
-	text := to_string(value)
-	i := 0
+	mut text := to_string(value)
+	mut i := 0
 	while i < len(sensitive_values) {
-		needle := sensitive_values[i]
+		mut needle := sensitive_values[i]
 		if needle != "" && index_of(text, needle) >= 0 {
 			return mask
 		}
@@ -227,10 +228,10 @@ func redact_map(raw, cfg) {
 		return raw
 	}
 
-	sensitive_keys := redaction_keys(cfg)
-	sensitive_values := redaction_values(cfg)
-	mask := redaction_mask(cfg)
-	redacted := redact_any(raw, cfg, sensitive_keys, sensitive_values, mask)
+	mut sensitive_keys := redaction_keys(cfg)
+	mut sensitive_values := redaction_values(cfg)
+	mut mask := redaction_mask(cfg)
+	mut redacted := redact_any(raw, cfg, sensitive_keys, sensitive_values, mask)
 	if type(redacted) == "dict" {
 		return redacted
 	}

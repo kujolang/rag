@@ -78,7 +78,7 @@ func wait_for_health(port) {
 }
 
 port := 28000 + (current_timestamp() % 10000)
-env_prefix := "KUJO_RAG_ENV=development KUJO_RAG_API_AUTH_PROVIDER=bearer KUJO_RAG_API_BEARER_TOKEN=safe-token KUJO_RAG_API_REDACTION_ENABLED=true KUJO_RAG_API_REDACTION_MASK=REDACTED KUJO_RAG_API_REDACTION_KEYS=authorization,token,secret,password,x-api-key KUJO_RAG_API_REDACTION_VALUES=top-secret-value"
+env_prefix := "KUJO_RAG_ENV=development KUJO_RAG_API_AUTH_PROVIDER=bearer KUJO_RAG_API_BEARER_TOKEN=safe-token KUJO_RAG_API_RBAC_ENABLED=true KUJO_RAG_API_RBAC_DEFAULT_ROLE=reader KUJO_RAG_API_REDACTION_ENABLED=true KUJO_RAG_API_REDACTION_MASK=REDACTED KUJO_RAG_API_REDACTION_KEYS=authorization,token,secret,password,x-api-key KUJO_RAG_API_REDACTION_VALUES=top-secret-value"
 pid := start_server(port, env_prefix, "/tmp/kujo_rag_redaction_policy.log")
 assert_true(to_bool(pid != ""))
 assert_true(to_bool(wait_for_health(port) == true))
@@ -101,6 +101,17 @@ invalid_namespace_err := dict_get_or(dict_get_or(invalid_namespace_parsed, "data
 assert_true(to_bool(dict_get_or(invalid_namespace_err, "code", "") == "invalid_namespace"))
 assert_true(to_bool(contains(invalid_namespace_raw, "top-secret-value") == 0))
 assert_true(to_bool(contains(invalid_namespace_raw, "REDACTED")))
+
+# Multi-field RBAC error details must return promptly with redaction enabled.
+# Bare assignments in recursive helpers used to overwrite caller loop counters.
+admin_denied := run_cmd("curl --max-time 10 -s http://127.0.0.1:" + to_string(port) + "/metrics -H \"Authorization: Bearer safe-token\" -H \"X-Kujo-Role: admin\"")
+assert_true(to_bool(dict_get_or(admin_denied, "ok", false)))
+admin_parsed := parse_json_safe(dict_get_or(admin_denied, "stdout", ""))
+admin_error := dict_get_or(dict_get_or(admin_parsed, "data", {}), "error", {})
+assert_true(to_bool(dict_get_or(admin_error, "code", "") == "rbac_forbidden"))
+admin_details := dict_get_or(admin_error, "details", {})
+assert_true(to_bool(dict_get_or(admin_details, "role", "") == "reader"))
+assert_true(to_bool(dict_get_or(admin_details, "action", "") == "admin"))
 
 _ := stop_server(pid)
 

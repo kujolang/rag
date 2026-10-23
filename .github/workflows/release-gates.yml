@@ -71,6 +71,10 @@ jobs:
           cat runtime-mode-interpreter.json
           exit "$status"
 
+      - name: Verify recursive redaction bindings
+        if: matrix.mode == 'interpreter'
+        run: python3 tests/test_redaction_bindings.py
+
       - name: Validate bridge supported mode
         if: matrix.mode == 'bridge'
         shell: bash
