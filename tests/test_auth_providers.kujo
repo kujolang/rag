@@ -43,6 +43,35 @@ bearer_revoked := validate_api_auth({
 assert_true(to_bool(dict_get_or(bearer_revoked, "ok", true) == false))
 assert_true(to_bool(dict_get_or(bearer_revoked, "error", "") == "revoked_token"))
 
+# Revocation must win over either rotation slot, including a degraded
+# configuration where both slots accidentally contain the revoked credential.
+for slots in [["retired-admin", "replacement"], ["replacement", "retired-admin"], ["retired-admin", "retired-admin"], ["", "retired-admin"]] {
+	rotation_replay := validate_api_auth({
+		"headers": {"authorization": "Bearer retired-admin"}
+	}, {
+		"api_auth_provider": "bearer",
+		"api_bearer_token": slots[0],
+		"api_bearer_token_next": slots[1],
+		"api_bearer_revoked_tokens": ["retired-admin"]
+	})
+	assert_true(to_bool(dict_get_or(rotation_replay, "ok", true) == false))
+	assert_true(to_bool(dict_get_or(rotation_replay, "error", "") == "revoked_token"))
+	assert_true(to_bool(dict_get_or(rotation_replay, "status", 0) == 403))
+}
+
+# Finishing rotation also invalidates the old credential when no explicit
+# revocation entry is retained.
+retired_slot := validate_api_auth({
+	"headers": {"authorization": "Bearer retired-admin"}
+}, {
+	"api_auth_provider": "bearer",
+	"api_bearer_token": "replacement",
+	"api_bearer_token_next": "",
+	"api_bearer_revoked_tokens": []
+})
+assert_true(to_bool(dict_get_or(retired_slot, "ok", true) == false))
+assert_true(to_bool(dict_get_or(retired_slot, "error", "") == "forbidden"))
+
 jwt_cfg := {
 	"api_auth_provider": "jwt_proxy",
 	"api_jwt_issuer": "https://issuer.example",
