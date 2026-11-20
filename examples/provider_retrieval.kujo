@@ -1,0 +1,40 @@
+from src.config import load_config
+from src.rag_engine import build_rag_index, query_rag
+from provider_registry import configure_provider
+from ai_sdk import create_client, embeddings
+from provider_operations import rerank
+
+arguments := args()
+if len(arguments) != 3 {
+    print("Usage: <trusted local corpus> <Voyage embedding model> <Jina reranking model>")
+    exit(2)
+}
+embedding_config := configure_provider("voyage", arguments[1], {})
+ranking_config := configure_provider("jina", arguments[2], {})
+if !embedding_config["ok"] || !ranking_config["ok"] { exit(2) }
+embedding_client := create_client(embedding_config["provider"], null)
+ranking_client := create_client(ranking_config["provider"], null)
+embedding_dims := 256
+cfg := load_config({
+    "index_path": "./results/sdk-provider-retrieval.json",
+    "namespace_index_isolation": false,
+    "embedding_dims": embedding_dims,
+    "embedding_adapter_id": "voyage/" + arguments[1] + "/document-query",
+    "embedding_adapter": func(texts, input_type) {
+        result := embeddings(embedding_client, texts, {"dimensions": embedding_dims, "input_type": input_type, "max_retries": 0})
+        if !result["ok"] { return {"ok": false} }
+        by_index := {}
+        for entry in result["embeddings"] { by_index[to_string(entry["index"])] = entry["vector"] }
+        vectors := []
+        for index in range(0, len(texts)) { vectors = push(vectors, by_index[to_string(index)]) }
+        return {"ok": true, "vectors": vectors}
+    },
+    "rerank_adapter": func(query, documents, top_n) {
+        return rerank(ranking_client, arguments[2], query, documents, {"top_n": top_n})
+    }
+})
+built := build_rag_index(arguments[0], cfg, true)
+if !built["ok"] { print(to_json(built["error"])); exit(1) }
+answer := query_rag(built["index"], "How are module imports resolved?", cfg, null, null)
+print(to_json(answer))
+if has_key(answer, "error") == 1 { exit(1) }

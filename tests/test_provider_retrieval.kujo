@@ -1,0 +1,61 @@
+from src.config import load_config
+from src.rag_engine import build_rag_index, load_or_initialize_index, query_rag
+from src.tests_helpers import assert_true
+
+path := "./results/provider-adapter-index.json"
+cfg := load_config({
+    "index_path": path, "namespace_index_isolation": false,
+    "embedding_adapter_id": "voyage/test-embed/v1",
+    "embedding_dims": 16,
+    "embedding_adapter": func(texts, kind) {
+        assert_true(kind == "document" || kind == "query")
+        vectors := []
+        vector := []
+        for index in range(0, 16) { vector = push(vector, index * 1.0) }
+        for value in texts { vectors = push(vectors, vector) }
+        return {"ok": true, "vectors": vectors}
+    },
+    "top_k": 1, "query_safe_response_enabled": false
+})
+built := build_rag_index("./examples/kujo_docs", cfg, true)
+assert_true(built["ok"])
+assert_true(built["index"]["meta"]["embedding_adapter_id"] == "voyage/test-embed/v1")
+loaded := load_or_initialize_index(cfg)
+base := query_rag(loaded, "module imports", cfg, null, null)
+assert_true(base["count"] == 1)
+ranking_cfg := cfg
+ranking_cfg["rerank_candidate_limit"] = 2
+ranking_cfg["rerank_adapter"] = func(query, docs, top_k) {
+    assert_true(len(docs) == 2 && top_k == 1)
+    return {"ok": true, "rankings": [{"index": 1, "score": 0.9}]}
+}
+reranked := query_rag(loaded, "module imports", ranking_cfg, null, null)
+assert_true(reranked["count"] == 1)
+assert_true(reranked["citations"][0]["chunk_id"] != base["citations"][0]["chunk_id"])
+
+failure_cfg := cfg
+failure_cfg["rerank_adapter"] = func(query, docs, top_k) {
+    return {"ok": true, "rankings": [{"index": 1000}]}
+}
+failed := query_rag(loaded, "module imports", failure_cfg, null, null)
+assert_true(failed["ok"] == false && failed["error"]["code"] == "rerank_adapter_failed")
+mismatch_cfg := cfg
+mismatch_cfg["embedding_dims"] = 17
+mismatch := query_rag(loaded, "module imports", mismatch_cfg, null, null)
+assert_true(mismatch["ok"] == false && mismatch["error"]["code"] == "embedding_adapter_mismatch")
+bad := cfg
+bad["embedding_adapter_id"] = "jina/new-model/v1"
+bad["embedding_adapter"] = func(texts, kind) {
+    return {"ok": true, "vectors": []}
+}
+rebuild := build_rag_index("./examples/kujo_docs", bad, true)
+assert_true(rebuild["ok"] == false && rebuild["error"]["code"] == "embedding_adapter_failed")
+assert_true(load_or_initialize_index(cfg)["meta"]["embedding_adapter_id"] == "voyage/test-embed/v1")
+
+changed_cfg := cfg
+changed_cfg["embedding_adapter_id"] = "jina/another-model/v1"
+changed := build_rag_index("./examples/kujo_docs", changed_cfg, true)
+assert_true(changed["ok"] == true)
+assert_true(changed["summary"]["incremental"]["reindexed_docs"] > 0)
+assert_true(changed["index"]["meta"]["embedding_adapter_id"] == "jina/another-model/v1")
+print("test_provider_retrieval: ok")

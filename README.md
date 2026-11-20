@@ -15,6 +15,7 @@ This project implements an end-to-end local RAG pipeline in Kujo:
 - markdown / text / PDF / JSON / CSV / HTML / XML / YAML / log parsing
 - chunking strategies (line and fixed) with optional language/format-aware presets
 - embedding provider abstraction (offline hash by default + optional AI embedding)
+- trusted [programmatic embedding and reranking adapters](docs/extension-guide.md#programmatic-retrieval-adapters)
 - persistent vector + lexical index
 - hybrid retrieval (dense + lexical weighted scoring)
 - source citations with file + line ranges

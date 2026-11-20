@@ -120,6 +120,7 @@ func command_query(parsed, cfg) {
 	index := load_or_initialize_index(active_cfg)
 	result := query_rag(index, question, active_cfg, null, null)
 	result["namespace"] := active_namespace
+    if dict_get_or(result, "ok", true) == false { exit_with_json(result, 1) }
 	print(to_json(result))
 }
 

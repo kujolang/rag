@@ -1,6 +1,6 @@
 from src.retrieval_preferences import normalize_retrieval_preferences, select_chunk_examples
 from src.common import dict_get_or, tokenize, term_frequency, cosine_similarity, rank_desc, num_or
-from src.embeddings import embed_texts
+from src.embeddings import embed_query, embedding_adapter_id
 
 func build_chunk_lookup(index) {
 	lookup := {}
@@ -665,6 +665,38 @@ func default_stage_timings() {
 	}
 }
 
+func rerank_with_adapter(scored, chunks, query, top_k, cfg) {
+    failure := {"ok": false, "error": {"code": "rerank_adapter_failed", "message": "Rerank adapter failed or returned invalid rankings", "details": {}}}
+    callback := dict_get_or(cfg, "rerank_adapter", null)
+    if type(callback) != "function" || type(top_k) != "int" || top_k < 1 || top_k > 1000 { return failure }
+    candidate_limit := dict_get_or(cfg, "rerank_candidate_limit", 24)
+    if type(candidate_limit) != "int" || candidate_limit < 1 || candidate_limit > 1000 { return failure }
+    if candidate_limit < top_k { candidate_limit = top_k }
+    candidates := rank_desc(scored, "score", candidate_limit)
+    if len(candidates) == 0 { return {"ok": true, "ranked": []} }
+    documents := []
+    for item in candidates {
+        chunk := chunks[item["chunk_id"]]
+        documents = push(documents, chunk["text"])
+    }
+    count := min(top_k, len(documents))
+    response := null
+    try { response = callback(query, documents, count) } except provider_error { response = null }
+    ranks := dict_get_or(response, "rankings", null)
+    if !dict_get_or(response, "ok", false) || type(ranks) != "array" || len(ranks) != count { return failure }
+    seen := {}
+    ranked := []
+    for entry in ranks {
+        index := dict_get_or(entry, "index", null)
+        if type(index) != "int" || index < 0 || index >= len(candidates) || has_key(seen, to_string(index)) == 1 {
+            return failure
+        }
+        seen[to_string(index)] = true
+        ranked = push(ranked, candidates[index])
+    }
+    return {"ok": true, "ranked": ranked}
+}
+
 func hybrid_search_pipeline(index, query, cfg) {
 	stage_timings := default_stage_timings()
 	if type(index) != "dict" {
@@ -693,8 +725,18 @@ func hybrid_search_pipeline(index, query, cfg) {
 	filters := normalize_query_filters(dict_get_or(cfg, "query_filters", {}))
 	stage_timings["tokenize"] := current_timestamp() - tokenize_started
 
+    stored_adapter := dict_get_or(dict_get_or(index, "meta", {}), "embedding_adapter_id", "")
+    if stored_adapter != embedding_adapter_id(cfg) || (stored_adapter != "" && has_key(cfg, "embedding_adapter") == 0) || (stored_adapter != "" && dict_get_or(dict_get_or(index, "meta", {}), "embedding_dims", 0) != dict_get_or(cfg, "embedding_dims", 256)) {
+        return {"results": [], "stage_timings_ms": stage_timings, "error": {
+            "code": "embedding_adapter_mismatch", "message": "Index embedding adapter or dimensions differ from query configuration", "details": {}
+        }}
+    }
+
 	embed_started := current_timestamp()
-	embed_result := embed_texts([query], cfg)
+	embed_result := embed_query(query, cfg)
+    if has_key(cfg, "embedding_adapter") == 1 && dict_get_or(embed_result, "error", null) != null {
+        return {"results": [], "stage_timings_ms": stage_timings, "error": embed_result["error"]}
+    }
 	query_vector := []
 	vectors := dict_get_or(embed_result, "vectors", [])
 	if len(vectors) > 0 {
@@ -736,7 +778,14 @@ func hybrid_search_pipeline(index, query, cfg) {
 	stage_timings["retrieve"] := current_timestamp() - retrieve_started
 
 	rerank_started := current_timestamp()
-	ranked := rerank_results(scored, vector_lookup, cfg, top_k)
+    ranked := []
+    if has_key(cfg, "rerank_adapter") == 1 {
+        reranked := rerank_with_adapter(scored, chunk_lookup, query, top_k, cfg)
+        if !reranked["ok"] { return {"results": [], "stage_timings_ms": stage_timings, "error": reranked["error"]} }
+        ranked = reranked["ranked"]
+    } else {
+        ranked = rerank_results(scored, vector_lookup, cfg, top_k)
+    }
 	results := []
 	for item in ranked {
 		cid := dict_get_or(item, "chunk_id", "")

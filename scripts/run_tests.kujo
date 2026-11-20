@@ -151,6 +151,7 @@ default_tests := [
 	"tests/test_index_persistence.kujo",
 	"tests/test_ingest_idempotency.kujo",
 	"tests/test_integration.kujo",
+	"tests/test_provider_retrieval.kujo",
 	"tests/test_intent_rewrite_pipeline.kujo",
 	"tests/test_large_corpus_benchmark_suite.kujo",
 	"tests/test_metrics_expansion.kujo",

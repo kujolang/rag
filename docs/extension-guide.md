@@ -70,6 +70,42 @@ When adding a retrieval extension:
 3. Add focused unit tests for ordering and filter interactions.
 4. Add integration tests when query response shape or ranking contract changes.
 
+## Programmatic retrieval adapters
+
+Trusted Kujo code can pass independent functions through the config dictionary.
+The CLI environment and HTTP request JSON cannot create these callbacks.
+
+- Set `embedding_adapter` to a function of `(texts, input_type)` returning
+  `{"ok": true, "vectors": vectors}` in input order. Use `document` for
+  indexing and `query` for searches. Set `embedding_dims` and an
+  `embedding_adapter_id` identifying the provider, model and vector contract.
+  The identity is persisted. Changing it or the dimension re-embeds the corpus.
+  A failed batch leaves the prior index available. Supply the same adapter
+  identity and dimensions when opening an index for queries.
+- Set `rerank_adapter` to a function of `(query, documents, top_n)` returning
+  `{"ok": true, "rankings": [{"index": 0, "score": 0.9}]}`. Indices refer to
+  the provided candidate order. The adapter selects and orders citations.
+  Hybrid scores retain their original semantics. Federation merges shortlisted
+  citations using its existing cross-index ranking policy.
+- The reranker receives only filtered candidates, up to
+  `rerank_candidate_limit` (default 24, increased to cover `top_k`). The
+  embedding adapter bypasses the legacy shared embedding cache.
+- Callback errors or invalid outputs stop the operation and return a structured
+  error. Provider failure cannot cause vectors from different models or a
+  silent rank fallback. Existing built-in providers retain their documented
+  fallback behavior.
+
+The example composes Voyage embeddings and Jina reranking using the AI SDK
+source checkout and leaves answer generation on RAG's configured path. Set
+`VOYAGE_API_KEY` and `JINA_API_KEY` in a trusted environment and use only a
+corpus you are authorized to send to those providers. Choose a Voyage model
+that supports the example's 256 dimensions. Larger corpora should batch inside
+the embedding callback to honor the SDK and service limits.
+
+```sh
+KUJO_MODULE_PATH=/path/to/ai-sdk/src kujo run examples/provider_retrieval.kujo --   ./examples/kujo_docs YOUR_VOYAGE_MODEL YOUR_JINA_RERANK_MODEL
+```
+
 ## Documentation example selection
 
 See [the preference contract and live pilot](RETRIEVAL_PREFERENCES.md) for opt-in fenced-example indexing, upstream selection, cache variants, MIME-aware HTTP ingestion, and measurements.

@@ -2,6 +2,10 @@
 
 All notable changes to Kujo RAG are documented here.
 
+## Unreleased
+
+- Added trusted programmatic embedding and reranking adapters. Indexes record the embedding adapter identity and dimensions. RAG rejects incompatible queries and preserves the previous index when a rebuild's embedding requests fail.
+
 ## [Unreleased]
 
 - Make the canary negative control deterministic and align the Kujo manifest minimum with the supported 1.2.3 runtime.

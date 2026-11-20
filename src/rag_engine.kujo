@@ -1,7 +1,7 @@
 from src.common import dict_get_or, num_or, str_or, bool_or
 from src.ingestion import ingest_documents
 from src.chunking import chunk_documents
-from src.embeddings import embed_chunks
+from src.embeddings import embed_chunks, embedding_adapter_id
 from src.vector_store import build_index, index_summary
 from src.vector_backend import load_index_with_backend, persist_index_with_backend
 from src.retrieval import hybrid_search_with_stage_timings
@@ -567,6 +567,12 @@ func synthesize_answer(query, citations, cfg, response_policy) {
 export build_rag_index := func(root_path, cfg, recursive) {
 	existing_index := load_index_with_backend(cfg)
 	existing_doc_index := existing_documents_index(existing_index)
+    adapter := embedding_adapter_id(cfg)
+    stored_meta := dict_get_or(existing_index, "meta", {})
+    stored_adapter := dict_get_or(stored_meta, "embedding_adapter_id", "")
+    if adapter != stored_adapter || (adapter != "" && dict_get_or(stored_meta, "embedding_dims", 0) != dict_get_or(cfg, "embedding_dims", 256)) {
+        existing_doc_index = {}
+    }
 
 	ingest := ingest_documents(root_path, cfg, recursive)
 	if dict_get_or(ingest, "aborted", false) == true {
@@ -589,6 +595,12 @@ export build_rag_index := func(root_path, cfg, recursive) {
 	reused := reusable_vectors_for_unchanged_docs(existing_index, unchanged_docs)
 	changed_chunks := chunk_documents(changed_docs, cfg)
 	changed_vectors := embed_chunks(changed_chunks, cfg)
+    if has_key(cfg, "embedding_adapter") == 1 && dict_get_or(changed_vectors, "error", null) != null {
+        return {"ok": false, "error": changed_vectors["error"], "ingest": ingest, "chunks": 0}
+    }
+    if adapter != "" && has_key(cfg, "embedding_adapter") == 0 {
+        return {"ok": false, "error": {"code": "embedding_adapter_config_invalid", "message": "Provide the configured embedding adapter", "details": {}}, "ingest": ingest, "chunks": 0}
+    }
 
 	all_chunks := concat_arrays(dict_get_or(reused, "chunks", []), changed_chunks)
 	all_vectors := concat_arrays(dict_get_or(reused, "vectors", []), dict_get_or(changed_vectors, "vectors", []))
@@ -610,6 +622,7 @@ export build_rag_index := func(root_path, cfg, recursive) {
 	}
 
 	meta := dict_get_or(index, "meta", {})
+    if adapter != "" { meta["embedding_adapter_id"] = adapter }
 	meta["documents_index"] := build_documents_index(index, documents)
 	meta["incremental"] := incremental
 	index["meta"] := meta
@@ -959,6 +972,9 @@ export query_rag := func(index, query, cfg, filters, raw_session_history) {
 	session_history := normalize_session_history(raw_session_history, history_limit)
 	search_query := contextualize_query(dict_get_or(intent_payload, "rewritten_query", query), session_history)
 	retrieval_payload := hybrid_search_with_stage_timings(index, search_query, query_cfg)
+    if has_key(retrieval_payload, "error") == 1 {
+        return {"ok": false, "error": retrieval_payload["error"], "citations": [], "count": 0}
+    }
 	citations := dict_get_or(retrieval_payload, "results", [])
 	stage_timings := normalize_stage_timings(dict_get_or(retrieval_payload, "stage_timings_ms", {}))
 	policy := evaluate_safe_response_policy(query, citations, cfg, response_policy)
@@ -1030,6 +1046,9 @@ export query_rag_federated := func(targets, query, cfg, filters, raw_session_his
 		index_payload := dict_get_or(target, "index", {})
 
 		retrieval_payload := hybrid_search_with_stage_timings(index_payload, search_query, query_cfg)
+        if has_key(retrieval_payload, "error") == 1 {
+            return {"ok": false, "error": retrieval_payload["error"], "citations": [], "count": 0}
+        }
 		target_stage_timings := dict_get_or(retrieval_payload, "stage_timings_ms", {})
 		stage_timings = merge_stage_timings(stage_timings, target_stage_timings)
 

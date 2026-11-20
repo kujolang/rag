@@ -340,7 +340,40 @@ func ai_embed_many_or_fallback(texts, cfg) {
 	}
 }
 
+export embedding_adapter_id := func(cfg) {
+    value := dict_get_or(cfg, "embedding_adapter_id", "")
+    if type(value) != "string" || !regex_match(value, "^[A-Za-z0-9_.:/-]{1,160}$") { return "" }
+    return value
+}
+
+func embed_with_adapter(texts, cfg, input_type) {
+    identity := embedding_adapter_id(cfg)
+    callback := dict_get_or(cfg, "embedding_adapter", null)
+    dims := dict_get_or(cfg, "embedding_dims", 256)
+    err := {"provider": identity, "vectors": [], "error": embedding_error(
+        "embedding_adapter_failed", "Embedding adapter failed or returned incompatible vectors", {}
+    )}
+    if type(callback) != "function" || identity == "" || type(dims) != "int" || dims < 1 {
+        return {...err, "error": embedding_error("embedding_adapter_config_invalid", "Set a trusted embedding adapter, stable ID and positive dimension", {})}
+    }
+    if len(texts) == 0 { return {"provider": identity, "vectors": []} }
+    response := null
+    try { response = callback(texts, input_type) } except provider_error { response = null }
+    values := dict_get_or(response, "vectors", null)
+    if !dict_get_or(response, "ok", false) || type(values) != "array" || len(values) != len(texts) { return err }
+    vectors := []
+    for vector in values {
+        if type(vector) != "array" || len(vector) != dims { return err }
+        for number in vector {
+            if type(number) != "int" && type(number) != "float" { return err }
+        }
+        vectors = push(vectors, normalize(vector))
+    }
+    return {"provider": identity, "vectors": vectors}
+}
+
 export embed_texts := func(texts, cfg) {
+    if has_key(cfg, "embedding_adapter") == 1 { return embed_with_adapter(texts, cfg, "document") }
 	provider_info := resolve_provider_name(cfg)
 	requested_provider := dict_get_or(provider_info, "requested", "hash")
 	resolved_provider := dict_get_or(provider_info, "resolved", "hash")
@@ -422,6 +455,11 @@ export embed_texts := func(texts, cfg) {
 	}
 
 	return embeddings
+}
+
+export embed_query := func(query, cfg) {
+    if has_key(cfg, "embedding_adapter") == 1 { return embed_with_adapter([query], cfg, "query") }
+    return embed_texts([query], cfg)
 }
 
 export embed_chunks := func(chunks, cfg) {

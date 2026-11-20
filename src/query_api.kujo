@@ -4720,7 +4720,8 @@ export start_api_server := func(cfg) {
 		runtime_query_cfg := cfg_with_response_policy(namespace_cfg, dict_get_or(response_policy_plan, "policy", {}))
 		runtime_query_cfg = cfg_with_retrieval_explanation(runtime_query_cfg, dict_get_or(retrieval_explanation_plan, "enabled", false))
 		runtime_query_cfg["retrieval_preferences"] := normalize_retrieval_preferences(dict_get_or(data, "retrieval_preferences", {}))
-		cache_allowed := federated_mode == false && response_policy_explicit == false && retrieval_explanation_explicit == false
+		cache_allowed := federated_mode == false && response_policy_explicit == false && retrieval_explanation_explicit == false &&
+            has_key(runtime_query_cfg, "embedding_adapter") == 0 && has_key(runtime_query_cfg, "rerank_adapter") == 0
 
 		if cache_allowed {
 			cache_result := query_cache_lookup(state, namespace, query, filters, session_history, runtime_query_cfg)
@@ -4766,6 +4767,14 @@ export start_api_server := func(cfg) {
 			}
 			result = query_rag(active_index, query, runtime_query_cfg, filters, session_history)
 		}
+        failure := dict_get_or(result, "error", null)
+        if failure != null {
+            code := dict_get_or(failure, "code", "retrieval_failed")
+            trace_emit(cfg, req, "query.retrieval", "retrieval", "error", retrieval_started, {"namespace": namespace, "code": code})
+            audit_emit(cfg, "query_operation", "failure", {"namespace": namespace, "status": 503, "code": code})
+            log_access(access_log, req, 503, {"code": code})
+            return json_err(req, cfg, 503, code, dict_get_or(failure, "message", "Retrieval failed"), {})
+        }
 		stage_timings := dict_get_or(result, "stage_timings_ms", {})
 		state = record_query_stage_metrics(state, stage_timings)
 		if cache_allowed {
